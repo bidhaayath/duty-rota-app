@@ -453,7 +453,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                   {segs.map((seg, i) => {
                     if (seg.kind === "leave") {
                       const st = styleFor(seg.period);
-                      dayIdx += seg.span;
+                      // dayIdx += seg.span;
                       return (
                         <td key={`l${i}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: st.bg, color: st.fg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
                           {seg.span >= 3 ? st.label : st.abbrev}
@@ -465,7 +465,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                         </td>
                       );
                     }
-                    const date = seg.date; dayIdx++;
+                    const date = seg.date; //dayIdx++;
                     const codeId = (data.cells[date] || {})[s.id] || "";
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
