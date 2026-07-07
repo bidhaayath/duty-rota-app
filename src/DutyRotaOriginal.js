@@ -463,6 +463,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                         </td>
                       );
                     }
+                    const date = seg.date;
                                         const codeId = (data.cells[date] || {})[s.id] || "";
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
