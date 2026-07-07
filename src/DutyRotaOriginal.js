@@ -8,6 +8,12 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   PieChart, Pie, Cell, CartesianGrid, LineChart, Line
 } from "recharts";
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.REACT_APP_SUPABASE_URL,
+  process.env.REACT_APP_SUPABASE_ANON_KEY
+);
 
 /* ─────────────────── Design tokens ─────────────────── */
 const T = {
@@ -274,15 +280,37 @@ export default function DutyRota() {
   const [printView, setPrintView] = useState(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get("rota:v2");
-        setData(res ? migrate(JSON.parse(res.value)) : seed());
-      } catch { setData(seed()); }
-    })();
-  }, []);
+  const loadRota = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
-  useEffect(() => {
+    const { data: rotas } = await supabase
+      .from('rotas')
+      .select('*')
+      .eq('user_id', user.id)
+      .single();
+
+    if (rotas && rotas.rota_data) {
+      setData(rotas.rota_data);
+    }
+  };
+  loadRota();
+}, []);
+const saveRota = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const { error } = await supabase
+    .from('rotas')
+    .upsert({
+      user_id: user.id,
+      title: 'Duty Rota',
+      rota_data: data
+    }, { onConflict: 'user_id' });
+
+  if (!error) alert('Saved!');
+};
+    useEffect(() => {
     if (!data) return;
     (async () => { try { await window.storage.set("rota:v2", JSON.stringify(data)); } catch (e) { console.error(e); } })();
   }, [data]);
@@ -354,6 +382,25 @@ export default function DutyRota() {
               background: tab === id ? T.mist : "transparent", color: tab === id ? T.ink : "#B8D2CD",
             }}><Icon size={15} /> {label}</button>
           ))}
+          <button 
+  onClick={saveRota}
+  style={{
+    padding: '10px 16px',
+    background: '#0F8B7E',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    marginLeft: '10px',
+    fontSize: '13px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px'
+  }}
+>
+  💾 Save
+</button>
         </nav>
       </header>
 
