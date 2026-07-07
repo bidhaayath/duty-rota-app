@@ -446,8 +446,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
             {data.staff.map((s) => {
               const segs = weekSegments(s, days);
               const t = weekTotalsFor(data, s, days);
-              let dayIdx = 0;
-              return (
+                            return (
                 <tr key={s.id}>
                   <td style={{ ...td, position: "sticky", left: 0, background: "#fff", zIndex: 1, fontWeight: 600 }}>{s.name}</td>
                   {segs.map((seg, i) => {
