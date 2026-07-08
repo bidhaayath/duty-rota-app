@@ -8,12 +8,50 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   PieChart, Pie, Cell, CartesianGrid, LineChart, Line
 } from "recharts";
-import { createClient } from '@supabase/supabase-js';
+import supabase from "./supabaseClient";
 
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
+// Load this user's saved rota. Tries Supabase first, then a local backup,
+// and finally falls back to a fresh empty rota so the app ALWAYS loads.
+const loadUserRota = async () => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: row } = await supabase
+        .from("rotas")
+        .select("rota_data")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (row && row.rota_data) return row.rota_data;
+    }
+  } catch (e) {
+    console.error("Supabase load failed, using local backup:", e);
+  }
+  try {
+    const local = localStorage.getItem("rota:v2");
+    if (local) return JSON.parse(local);
+  } catch (e) { /* ignore */ }
+  return null;
+};
+
+// Save the rota to a local backup (instant) and Supabase (cross-device).
+// Both are wrapped so a failure never breaks the app.
+const saveUserRota = async (rotaData) => {
+  try {
+    localStorage.setItem("rota:v2", JSON.stringify(rotaData));
+  } catch (e) { /* ignore */ }
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase
+      .from("rotas")
+      .upsert(
+        { user_id: user.id, title: rotaData.title || "Duty Rota", rota_data: rotaData },
+        { onConflict: "user_id" }
+      );
+  } catch (e) {
+    console.error("Supabase save failed (local backup kept):", e);
+  }
+};
 
 /* ─────────────────── Design tokens ─────────────────── */
 const T = {
@@ -280,39 +318,15 @@ export default function DutyRota() {
   const [printView, setPrintView] = useState(null);
 
   useEffect(() => {
-  const loadRota = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    (async () => {
+      const saved = await loadUserRota();
+      setData(saved ? migrate(saved) : seed());
+    })();
+  }, []);
 
-    const { data: rotas } = await supabase
-      .from('rotas')
-      .select('*')
-      .eq('user_id', user.id)
-      .single();
-
-    if (rotas && rotas.rota_data) {
-      setData(rotas.rota_data);
-    }
-  };
-  loadRota();
-}, []);
-const saveRota = async () => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  const { error } = await supabase
-    .from('rotas')
-    .upsert({
-      user_id: user.id,
-      title: 'Duty Rota',
-      rota_data: data
-    }, { onConflict: 'user_id' });
-
-  if (!error) alert('Saved!');
-};
-    useEffect(() => {
+  useEffect(() => {
     if (!data) return;
-    (async () => { try { await window.storage.set("rota:v2", JSON.stringify(data)); } catch (e) { console.error(e); } })();
+    saveUserRota(data);
   }, [data]);
 
   useEffect(() => {
@@ -382,25 +396,6 @@ const saveRota = async () => {
               background: tab === id ? T.mist : "transparent", color: tab === id ? T.ink : "#B8D2CD",
             }}><Icon size={15} /> {label}</button>
           ))}
-          <button 
-  onClick={saveRota}
-  style={{
-    padding: '10px 16px',
-    background: '#0F8B7E',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    marginLeft: '10px',
-    fontSize: '13px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px'
-  }}
->
-  💾 Save
-</button>
         </nav>
       </header>
 
@@ -493,13 +488,13 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
             {data.staff.map((s) => {
               const segs = weekSegments(s, days);
               const t = weekTotalsFor(data, s, days);
-                            return (
+              return (
                 <tr key={s.id}>
                   <td style={{ ...td, position: "sticky", left: 0, background: "#fff", zIndex: 1, fontWeight: 600 }}>{s.name}</td>
                   {segs.map((seg, i) => {
                     if (seg.kind === "leave") {
                       const st = styleFor(seg.period);
-                                           return (
+                      return (
                         <td key={`l${i}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: st.bg, color: st.fg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
                           {seg.span >= 3 ? st.label : st.abbrev}
                           {seg.span >= 5 && (
@@ -511,7 +506,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                       );
                     }
                     const date = seg.date;
-                                        const codeId = (data.cells[date] || {})[s.id] || "";
+                    const codeId = (data.cells[date] || {})[s.id] || "";
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
                     return (

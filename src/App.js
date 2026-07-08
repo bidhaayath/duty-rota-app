@@ -1,12 +1,7 @@
 import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import supabase from './supabaseClient';
 import Auth from './Auth';
 import DutyRota from './DutyRotaOriginal';
-
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -17,6 +12,12 @@ export default function App() {
       setSession(session);
       setLoading(false);
     });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>Loading...</div>;
