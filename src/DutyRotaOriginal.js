@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
-  PieChart, Pie, Cell, CartesianGrid, LineChart, Line
+  Cell, CartesianGrid, LineChart, Line
 } from "recharts";
 import supabase from "./supabaseClient";
 
@@ -651,14 +651,30 @@ function Stats({ data, range, setRange, onExport }) {
     Morning: r.morning, Afternoon: r.afternoon, Night: r.night, "Other duty": r.other, Release: r.release,
   }));
   const nonOffByStaff = rows.map((r) => ({ name: shortName(r.staff.name), days: r.nonOfficialDuty }));
-  const leaveMix = [
-    { name: "Annual", value: rows.reduce((a, r) => a + r.annualDays, 0), color: "#0F8B7E" },
-    { name: "Maternity", value: rows.reduce((a, r) => a + r.maternityDays, 0), color: "#9AA5AB" },
-    { name: "Sick", value: rows.reduce((a, r) => a + r.sl, 0), color: "#F0A090" },
-    { name: "FRL", value: rows.reduce((a, r) => a + r.frl, 0), color: "#D98BD3" },
-    { name: "Medical", value: rows.reduce((a, r) => a + r.ml, 0), color: "#5E3A87" },
-    { name: "Other", value: rows.reduce((a, r) => a + r.otherLeave, 0), color: "#6C7BD9" },
-  ].filter((x) => x.value > 0);
+  // Chart 1: how many DISTINCT staff have each leave-period type overlapping the range
+  const overlaps = (p) => p.start <= range.to && p.end >= range.from;
+  const staffOnLeaveType = (type) =>
+    rows.filter((r) => (r.staff.leavePeriods || []).some((p) => p.type === type && overlaps(p))).length;
+  const leaveTypeData = [
+    { name: "Annual", value: staffOnLeaveType("annual"), color: "#0F8B7E" },
+    { name: "Maternity", value: staffOnLeaveType("maternity"), color: "#9AA5AB" },
+    { name: "Pre-maternity", value: staffOnLeaveType("prematernity"), color: "#9C3D6E" },
+    { name: "Emergency", value: staffOnLeaveType("emergency"), color: "#E4604E" },
+    { name: "Other", value: staffOnLeaveType("other"), color: "#6C7BD9" },
+  ];
+  const anyLeaveByType = leaveTypeData.some((x) => x.value > 0);
+
+  // Chart 2: total times each leave CODE (SL, FRL, ML, custom) was taken across the range
+  const codeTotals = {};
+  rows.forEach((r) => {
+    Object.entries(r.leaveByCode || {}).forEach(([code, n]) => {
+      codeTotals[code] = (codeTotals[code] || 0) + n;
+    });
+  });
+  const leaveCodesTaken = Object.entries(codeTotals)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+  const anyLeaveCodes = leaveCodesTaken.length > 0;
 
   const coverage = useMemo(() => {
     if (!valid) return [];
@@ -720,17 +736,39 @@ function Stats({ data, range, setRange, onExport }) {
           </Card>
 
           <Card style={{ flex: "1 1 280px", minWidth: 260 }}>
-            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave breakdown</h3>
-            {leaveMix.length === 0 ? (
-              <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave in this range.</div>
+            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Staff on leave (by type)</h3>
+            {!anyLeaveByType ? (
+              <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
             ) : (
               <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie data={leaveMix} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2} label={(e) => `${e.name} ${e.value}`}>
-                    {leaveMix.map((x) => <Cell key={x.name} fill={x.color} />)}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
+                <BarChart data={leaveTypeData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(v) => [`${v} staff`, "On leave"]} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    {leaveTypeData.map((x) => <Cell key={x.name} fill={x.color} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Card>
+        </div>
+
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <Card style={{ flex: "1 1 340px", minWidth: 300 }}>
+            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave codes taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(times taken)</span></h3>
+            {!anyLeaveCodes ? (
+              <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={230}>
+                <BarChart data={leaveCodesTaken}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(v) => [`${v}×`, "Taken"]} />
+                  <Bar dataKey="value" fill="#6C7BD9" radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             )}
           </Card>
@@ -937,14 +975,27 @@ function StatsPrint({ data, from, to }) {
     Morning: r.morning, Afternoon: r.afternoon, Night: r.night, "Other duty": r.other, Release: r.release,
   }));
   const nonOffByStaff = rows.map((r) => ({ name: shortName(r.staff.name), days: r.nonOfficialDuty }));
-  const leaveMix = [
-    { name: "Annual", value: rows.reduce((a, r) => a + r.annualDays, 0), color: "#0F8B7E" },
-    { name: "Maternity", value: rows.reduce((a, r) => a + r.maternityDays, 0), color: "#9AA5AB" },
-    { name: "Sick", value: rows.reduce((a, r) => a + r.sl, 0), color: "#F0A090" },
-    { name: "FRL", value: rows.reduce((a, r) => a + r.frl, 0), color: "#D98BD3" },
-    { name: "Medical", value: rows.reduce((a, r) => a + r.ml, 0), color: "#5E3A87" },
-    { name: "Other", value: rows.reduce((a, r) => a + r.otherLeave, 0), color: "#6C7BD9" },
-  ].filter((x) => x.value > 0);
+  const overlaps = (p) => p.start <= to && p.end >= from;
+  const staffOnLeaveType = (type) =>
+    rows.filter((r) => (r.staff.leavePeriods || []).some((p) => p.type === type && overlaps(p))).length;
+  const leaveTypeData = [
+    { name: "Annual", value: staffOnLeaveType("annual"), color: "#0F8B7E" },
+    { name: "Maternity", value: staffOnLeaveType("maternity"), color: "#9AA5AB" },
+    { name: "Pre-mat.", value: staffOnLeaveType("prematernity"), color: "#9C3D6E" },
+    { name: "Emergency", value: staffOnLeaveType("emergency"), color: "#E4604E" },
+    { name: "Other", value: staffOnLeaveType("other"), color: "#6C7BD9" },
+  ];
+  const anyLeaveByType = leaveTypeData.some((x) => x.value > 0);
+  const codeTotals = {};
+  rows.forEach((r) => {
+    Object.entries(r.leaveByCode || {}).forEach(([code, n]) => {
+      codeTotals[code] = (codeTotals[code] || 0) + n;
+    });
+  });
+  const leaveCodesTaken = Object.entries(codeTotals)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+  const anyLeaveCodes = leaveCodesTaken.length > 0;
   const dates = datesBetween(from, to);
   const coverage = dates.length > 92 ? null : dates.map((date) => ({
     date: shortDate(date),
@@ -993,16 +1044,34 @@ function StatsPrint({ data, from, to }) {
           </BarChart>
         </div>
         <div style={{ ...box, flex: 1 }}>
-          <h4 style={chartTitle}>Leave breakdown</h4>
-          {leaveMix.length === 0 ? (
-            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave in this range.</div>
+          <h4 style={chartTitle}>Staff on leave (by type)</h4>
+          {!anyLeaveByType ? (
+            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
           ) : (
-            <PieChart width={330} height={220}>
-              <Pie data={leaveMix} dataKey="value" nameKey="name" innerRadius={45} outerRadius={72}
-                paddingAngle={2} isAnimationActive={false} label={(e) => `${e.name} ${e.value}`}>
-                {leaveMix.map((x) => <Cell key={x.name} fill={x.color} />)}
-              </Pie>
-            </PieChart>
+            <BarChart width={330} height={220} data={leaveTypeData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
+              <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
+              <Bar dataKey="value" isAnimationActive={false}>
+                {leaveTypeData.map((x) => <Cell key={x.name} fill={x.color} />)}
+              </Bar>
+            </BarChart>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+        <div style={{ ...box, flex: 1 }}>
+          <h4 style={chartTitle}>Leave codes taken (times taken)</h4>
+          {!anyLeaveCodes ? (
+            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
+          ) : (
+            <BarChart width={620} height={200} data={leaveCodesTaken}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
+              <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
+              <Bar dataKey="value" fill="#6C7BD9" isAnimationActive={false} />
+            </BarChart>
           )}
         </div>
       </div>
