@@ -201,7 +201,7 @@ const seed = () => ({
   cells: {},
   nonOfficial: [],
   fridayRule: true,
-  title: "DUTY NURSE MANAGER",
+  title: "ENTER AREA NAME",
 });
 
 // The sample staff that earlier versions seeded — removed on load if untouched
@@ -1297,7 +1297,7 @@ function SettingsTab({ data, update }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Card>
-        <Field label="Rota title">
+        <Field label="Area / ward name (shown at the top)">
           <input style={{ ...inputStyle, maxWidth: 380 }} value={data.title}
             onChange={(e) => update((d) => { d.title = e.target.value; return d; })} />
         </Field>
