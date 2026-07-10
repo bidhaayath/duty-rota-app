@@ -119,10 +119,31 @@ const alWorkingDays = (data, period, from, to) => {
 const leaveOn = (staff, date) => (staff.leavePeriods || []).find((p) => date >= p.start && date <= p.end) || null;
 const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
 
+/* ── Employment window (start/end dates are INCLUSIVE) ────────────────
+   startDate empty = always employed from the beginning.
+   endDate   empty = still employed (active staff).                     */
+const isEmployedOn = (staff, date) => {
+  if (staff.startDate && date < staff.startDate) return false;
+  if (staff.endDate && date > staff.endDate) return false;
+  return true;
+};
+// Is this person employed at any point inside [from, to]?
+const employedInRange = (staff, from, to) => {
+  if (staff.startDate && staff.startDate > to) return false;
+  if (staff.endDate && staff.endDate < from) return false;
+  return true;
+};
+// "Former staff" = has an end date that has already passed
+const isFormer = (staff) => !!staff.endDate && staff.endDate < dstr(new Date());
+// Staff to show for a given week (any day of that week overlaps employment)
+const staffForDays = (data, days) =>
+  data.staff.filter((s) => days.some((d) => isEmployedOn(s, d)));
+
 const weekTotalsFor = (data, staff, days) => {
   const codeById = codeByIdOf(data);
   const t = { morning: 0, afternoon: 0, night: 0, other: 0, release: 0, off: 0, nonOfficialDuty: 0 };
   days.forEach((date) => {
+    if (!isEmployedOn(staff, date)) return;
     if (leaveOn(staff, date)) return;
     const code = codeById((data.cells[date] || {})[staff.id]);
     if (!code) return;
@@ -131,21 +152,26 @@ const weekTotalsFor = (data, staff, days) => {
   });
   return t;
 };
-// Unit coverage counts exclude release duty (staff is on duty elsewhere)
+// Unit coverage counts exclude release duty (staff is on duty elsewhere).
+// Historical accuracy: counts whoever was EMPLOYED on that date, so past
+// weeks keep the correct coverage even after someone leaves.
 const dayCountFor = (data, date, cat) => {
   const codeById = codeByIdOf(data);
   return data.staff.reduce((a, s) => {
+    if (!isEmployedOn(s, date)) return a;
     if (leaveOn(s, date)) return a;
     const code = codeById((data.cells[date] || {})[s.id]);
     return a + (code?.counts === cat ? 1 : 0);
   }, 0);
 };
+// Only staff employed at some point in [from, to] appear in records/stats
 const recordsFor = (data, from, to) => {
   const codeById = codeByIdOf(data);
   const dates = datesBetween(from, to);
-  return data.staff.map((s) => {
+  return data.staff.filter((s) => employedInRange(s, from, to)).map((s) => {
     const t = { morning: 0, afternoon: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {} };
     dates.forEach((date) => {
+      if (!isEmployedOn(s, date)) return;
       if (leaveOn(s, date)) return;
       const code = codeById((data.cells[date] || {})[s.id]);
       if (!code) return;
@@ -222,6 +248,9 @@ const migrate = (d) => {
     if (!Array.isArray(s.leavePeriods)) s.leavePeriods = [];
     if (s.maternity) s.leavePeriods.push({ id: uid(), type: "maternity", start: `${yr}-01-01`, end: `${yr}-12-31` });
     delete s.maternity;
+    // Employment dates: blank means "always employed" / "still employed"
+    if (s.startDate === undefined) s.startDate = "";
+    if (s.endDate === undefined) s.endDate = "";
   });
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
   if (d.fridayRule === undefined) d.fridayRule = true;
@@ -295,10 +324,20 @@ const weekSegments = (staff, days) => {
   const segs = [];
   let i = 0;
   while (i < days.length) {
+    // Days outside this person's employment window are shown as greyed, non-editable
+    if (!isEmployedOn(staff, days[i])) {
+      let j = i;
+      while (j + 1 < days.length && !isEmployedOn(staff, days[j + 1])) j++;
+      const before = staff.startDate && days[i] < staff.startDate;
+      segs.push({ kind: "notEmployed", span: j - i + 1, before });
+      i = j + 1;
+      continue;
+    }
     const p = leaveOn(staff, days[i]);
     if (!p) { segs.push({ kind: "cell", date: days[i], span: 1 }); i++; continue; }
     let j = i;
     while (j + 1 < days.length) {
+      if (!isEmployedOn(staff, days[j + 1])) break;
       const q = leaveOn(staff, days[j + 1]);
       if (q && q.id === p.id) j++; else break;
     }
@@ -485,13 +524,20 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
             </tr>
           </thead>
           <tbody>
-            {data.staff.map((s) => {
+            {staffForDays(data, days).map((s) => {
               const segs = weekSegments(s, days);
               const t = weekTotalsFor(data, s, days);
               return (
                 <tr key={s.id}>
                   <td style={{ ...td, position: "sticky", left: 0, background: "#fff", zIndex: 1, fontWeight: 600 }}>{s.name}</td>
                   {segs.map((seg, i) => {
+                    if (seg.kind === "notEmployed") {
+                      return (
+                        <td key={`ne${i}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: "#F2F4F5", color: "#9AA5AB", fontSize: 11.5, fontStyle: "italic" }}>
+                          {seg.span >= 2 ? (seg.before ? "Not yet joined" : "Left") : "—"}
+                        </td>
+                      );
+                    }
                     if (seg.kind === "leave") {
                       const st = styleFor(seg.period);
                       return (
@@ -587,6 +633,11 @@ function Records({ data, range, setRange, onExport }) {
                   <tr>
                     <td style={{ ...td, fontWeight: 600 }}>
                       {r.staff.name}
+                      {r.staff.endDate && (
+                        <span style={{ marginLeft: 8, fontSize: 11.5, background: "#ECEFF0", color: "#5A6B72", borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>
+                          left {shortDate(r.staff.endDate)}
+                        </span>
+                      )}
                       {r.maternityDays > 0 && <span style={{ marginLeft: 8 }}><LeaveChip type="maternity" /></span>}
                       {r.annualDays > 0 && <span style={{ marginLeft: 8 }}><LeaveChip type="annual" /></span>}
                     </td>
@@ -845,13 +896,20 @@ function RotaPrint({ data, weekStart }) {
           </tr>
         </thead>
         <tbody>
-          {data.staff.map((s) => {
+          {staffForDays(data, days).map((s) => {
             const segs = weekSegments(s, days);
             const t = weekTotalsFor(data, s, days);
             return (
               <tr key={s.id}>
                 <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{s.name}</td>
                 {segs.map((seg, i) => {
+                  if (seg.kind === "notEmployed") {
+                    return (
+                      <td key={`ne${i}`} colSpan={seg.span} style={{ ...ptd, background: "#F2F4F5", color: "#888", fontStyle: "italic" }}>
+                        {seg.span >= 2 ? (seg.before ? "Not yet joined" : "Left") : "—"}
+                      </td>
+                    );
+                  }
                   if (seg.kind === "leave") {
                     const st = styleFor(seg.period);
                     return (
@@ -916,7 +974,7 @@ function RecordsPrint({ data, from, to }) {
         <tbody>
           {rows.map((r) => (
             <tr key={r.staff.id}>
-              <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{r.staff.name}{r.maternityDays > 0 ? " (Maternity)" : ""}</td>
+              <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{r.staff.name}{r.staff.endDate ? ` (left ${shortDate(r.staff.endDate)})` : ""}{r.maternityDays > 0 ? " (Maternity)" : ""}</td>
               <td style={ptd}>{r.morning}</td>
               <td style={ptd}>{r.afternoon}</td>
               <td style={ptd}>{r.night}</td>
@@ -1110,13 +1168,18 @@ function StatsPrint({ data, from, to }) {
 
 /* ─────────────────── Staff tab ─────────────────── */
 function StaffTab({ data, update }) {
-  const empty = { name: "", contact: "", recc: "", licence: "", leavePeriods: [] };
+  const empty = { name: "", contact: "", recc: "", licence: "", startDate: "", endDate: "", leavePeriods: [] };
   const [form, setForm] = useState(null);
+  const [showFormer, setShowFormer] = useState(false);
   const npEmpty = { type: "annual", label: "", start: "", end: "" };
   const [np, setNp] = useState(npEmpty);
 
   const save = () => {
     if (!form.name.trim()) return;
+    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+      alert("Last working day cannot be before the joining date.");
+      return;
+    }
     update((d) => {
       if (form.id) { const i = d.staff.findIndex((s) => s.id === form.id); d.staff[i] = form; }
       else d.staff.push({ ...form, id: uid() });
@@ -1124,9 +1187,34 @@ function StaffTab({ data, update }) {
     });
     setForm(null); setNp(npEmpty);
   };
-  const remove = (id) => update((d) => {
-    d.staff = d.staff.filter((s) => s.id !== id);
-    Object.values(d.cells).forEach((day) => delete day[id]);
+  const remove = (id) => {
+    const s = data.staff.find((x) => x.id === id);
+    const ok = window.confirm(
+      `Permanently delete ${s?.name || "this staff member"}?\n\n` +
+      "This erases all their past duties, so old rotas and statistics will no longer be correct.\n\n" +
+      "If they have left, set a \"Last working day\" instead — that keeps the history."
+    );
+    if (!ok) return;
+    update((d) => {
+      d.staff = d.staff.filter((x) => x.id !== id);
+      Object.values(d.cells).forEach((day) => delete day[id]);
+      return d;
+    });
+  };
+  // Quick action: mark someone as having left today
+  const markLeft = (id) => {
+    const today = dstr(new Date());
+    const s = data.staff.find((x) => x.id === id);
+    if (!window.confirm(`Set ${s?.name}'s last working day to today (${niceDate(today)})?\n\nTheir past duties and statistics are kept.`)) return;
+    update((d) => {
+      const i = d.staff.findIndex((x) => x.id === id);
+      d.staff[i] = { ...d.staff[i], endDate: today };
+      return d;
+    });
+  };
+  const reactivate = (id) => update((d) => {
+    const i = d.staff.findIndex((x) => x.id === id);
+    d.staff[i] = { ...d.staff[i], endDate: "" };
     return d;
   });
 
@@ -1142,11 +1230,24 @@ function StaffTab({ data, update }) {
   const onLeaveToday = (s) => leaveOn(s, dstr(new Date()));
   const licenceSoon = (s) => s.licence && (parseD(s.licence) - new Date()) / 86400000 < 90;
 
+  const activeStaff = data.staff.filter((s) => !isFormer(s));
+  const formerStaff = data.staff.filter((s) => isFormer(s));
+  const visibleStaff = showFormer ? [...activeStaff, ...formerStaff] : activeStaff;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 18 }}>Staff ({data.staff.length})</h2>
-        <Btn onClick={() => setForm(empty)}><Plus size={15} /> Add staff</Btn>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 18 }}>Staff ({activeStaff.length})</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {formerStaff.length > 0 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, color: T.inkSoft, cursor: "pointer" }}>
+              <input type="checkbox" checked={showFormer} onChange={(e) => setShowFormer(e.target.checked)}
+                style={{ accentColor: T.lagoon, width: 15, height: 15 }} />
+              Show former staff ({formerStaff.length})
+            </label>
+          )}
+          <Btn onClick={() => setForm(empty)}><Plus size={15} /> Add staff</Btn>
+        </div>
       </div>
 
       {form && (
@@ -1156,6 +1257,28 @@ function StaffTab({ data, update }) {
             <Field label="Contact no."><input style={inputStyle} value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></Field>
             <Field label="RECC no."><input style={inputStyle} value={form.recc} onChange={(e) => setForm({ ...form, recc: e.target.value })} /></Field>
             <Field label="Licence expiry"><input type="date" style={inputStyle} value={form.licence} onChange={(e) => setForm({ ...form, licence: e.target.value })} /></Field>
+          </div>
+
+          <div style={{ marginTop: 16, borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Employment dates</div>
+            <div style={{ fontSize: 12, color: T.inkSoft, marginBottom: 10 }}>
+              Leave blank if unknown. Both dates are inclusive — they work on their joining day and on their last working day.
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <Field label="Joining date (optional)">
+                <input type="date" style={{ ...inputStyle, width: "auto" }} value={form.startDate || ""}
+                  onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
+              </Field>
+              <Field label="Last working day (if they have left)">
+                <input type="date" style={{ ...inputStyle, width: "auto" }} value={form.endDate || ""}
+                  onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
+              </Field>
+              {form.endDate && (
+                <Btn kind="ghost" small onClick={() => setForm({ ...form, endDate: "" })}>
+                  <X size={13} /> Clear (still working)
+                </Btn>
+              )}
+            </div>
           </div>
 
           <div style={{ marginTop: 16, borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
@@ -1207,20 +1330,25 @@ function StaffTab({ data, update }) {
       )}
 
       <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
           <thead>
-            <tr>{["Name & designation", "Contact", "RECC no.", "Licence expiry", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+            <tr>{["Name & designation", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
           </thead>
           <tbody>
-            {data.staff.map((s) => {
+            {visibleStaff.map((s) => {
               const today = onLeaveToday(s);
+              const gone = isFormer(s);
               return (
-                <tr key={s.id}>
+                <tr key={s.id} style={gone ? { background: "#FAFBFB", opacity: 0.72 } : undefined}>
                   <td style={{ ...td, fontWeight: 600 }}>{s.name}</td>
                   <td style={td}>{s.contact}</td>
                   <td style={td}>{s.recc}</td>
-                  <td style={{ ...td, color: licenceSoon(s) ? T.coral : T.ink, fontWeight: licenceSoon(s) ? 700 : 400 }}>
-                    {s.licence ? niceDate(s.licence) : "—"}{licenceSoon(s) && " ⚠"}
+                  <td style={{ ...td, color: gone ? T.inkSoft : licenceSoon(s) ? T.coral : T.ink, fontWeight: !gone && licenceSoon(s) ? 700 : 400 }}>
+                    {s.licence ? niceDate(s.licence) : "—"}{!gone && licenceSoon(s) && " ⚠"}
+                  </td>
+                  <td style={{ ...td, fontSize: 12 }}>
+                    {s.startDate ? `From ${shortDate(s.startDate)}` : "—"}
+                    {s.endDate && <><br /><span style={{ color: "#B3532F", fontWeight: 600 }}>Left {shortDate(s.endDate)}</span></>}
                   </td>
                   <td style={{ ...td, whiteSpace: "normal", maxWidth: 280 }}>
                     {(s.leavePeriods || []).length === 0 ? <span style={{ color: T.inkSoft }}>—</span> :
@@ -1233,22 +1361,31 @@ function StaffTab({ data, update }) {
                         );
                       })}
                   </td>
-                  <td style={td}>{today
+                  <td style={td}>{gone
+                    ? <span style={{ fontSize: 11.5, background: "#ECEFF0", color: "#5A6B72", borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>Former staff</span>
+                    : today
                     ? <LeaveChip period={today} />
                     : <span style={{ fontSize: 11.5, background: "#E8F5EC", color: T.leaf, borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>Active</span>}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>
                     <Btn kind="ghost" small onClick={() => setForm(s)} style={{ marginRight: 6 }}><Pencil size={13} /></Btn>
+                    {gone
+                      ? <Btn kind="ghost" small onClick={() => reactivate(s.id)} style={{ marginRight: 6 }}>Reactivate</Btn>
+                      : <Btn kind="ghost" small onClick={() => markLeft(s.id)} style={{ marginRight: 6 }}>Mark left</Btn>}
                     <Btn kind="danger" small onClick={() => remove(s.id)}><Trash2 size={13} /></Btn>
                   </td>
                 </tr>
               );
             })}
-            {data.staff.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
+            {visibleStaff.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
           </tbody>
         </table>
       </Card>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
         ⚠ marks licences expiring within 90 days. Annual leave is tracked by leave periods — each staff member's leave renews on their own dates.
+      </div>
+      <div style={{ fontSize: 12.5, color: T.inkSoft }}>
+        When someone resigns or transfers, use <strong>Mark left</strong> (or set a last working day) instead of deleting them.
+        They disappear from future rotas, but past rotas, coverage counts, and statistics stay correct. <strong>Delete</strong> erases their history permanently.
       </div>
     </div>
   );
