@@ -60,7 +60,7 @@ const T = {
   sand: "#F4B860", dusk: "#6C7BD9", night: "#2E3358",
 };
 
-const FRIDAY = 5, SATURDAY = 6;
+const FRIDAY = 5;
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const LEAVE_STYLES = {
   annual:       { label: "Annual Leave",     abbrev: "AL",  bg: "#D8EEE9", fg: "#0B6A60", icon: Plane },
@@ -104,18 +104,9 @@ const shortName = (name) => name.replace(/^(SRN|RN|EN)\s+/i, "").split(" ")[0];
 /* ─────────────────── Data helpers ─────────────────── */
 const isNonOff = (data, date) =>
   (data.fridayRule && parseD(date).getDay() === FRIDAY) || data.nonOfficial.includes(date);
-// Annual leave days only count on normal working days: Fridays, Saturdays,
-// and non-official days inside the period are NOT deducted.
-const countsAsALDay = (data, date) => {
-  const dow = parseD(date).getDay();
-  return dow !== FRIDAY && dow !== SATURDAY && !data.nonOfficial.includes(date);
-};
-const alWorkingDays = (data, period, from, to) => {
-  const s = period.start > from ? period.start : from;
-  const e = period.end < to ? period.end : to;
-  if (s > e) return 0;
-  return datesBetween(s, e).filter((d) => countsAsALDay(data, d)).length;
-};
+// All leave periods (annual, maternity, pre-maternity, emergency, other) count
+// calendar days: every day inside the period counts, including Fridays,
+// Saturdays, and non-official days.
 const leaveOn = (staff, date) => (staff.leavePeriods || []).find((p) => date >= p.start && date <= p.end) || null;
 const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
 
@@ -182,12 +173,13 @@ const recordsFor = (data, from, to) => {
         t.nonOfficialDuty++; t.nonOfficialDates.push({ date, code: code.code });
       }
     });
-    const annualDays = (s.leavePeriods || []).filter((p) => p.type === "annual")
-      .reduce((a, p) => a + alWorkingDays(data, p, from, to), 0);
+    // All leave periods count calendar days inside the selected range
     const rawOverlap = (p) => {
       const st = p.start > from ? p.start : from, e = p.end < to ? p.end : to;
       return st > e ? 0 : spanDays(st, e);
     };
+    const annualDays = (s.leavePeriods || []).filter((p) => p.type === "annual")
+      .reduce((a, p) => a + rawOverlap(p), 0);
     const maternityDays = (s.leavePeriods || []).filter((p) => p.type === "maternity")
       .reduce((a, p) => a + rawOverlap(p), 0);
     // Pre-maternity, emergency, and custom periods count as calendar days
@@ -686,7 +678,7 @@ function Records({ data, range, setRange, onExport }) {
         </Card>
       )}
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-        AL counts only normal working days (Fridays, Saturdays, and non-official days are not deducted). SL, FRL, and ML are counted from rota codes; "Other leave" covers other leave codes plus pre-maternity, emergency, and custom leave periods (calendar days).
+        AL, and all other leave periods, count every calendar day in the period (Fridays, Saturdays, and non-official days included). SL, FRL, and ML are counted from rota codes; "Other leave" covers other leave codes plus pre-maternity, emergency, and custom leave periods.
       </div>
     </div>
   );
@@ -1020,7 +1012,7 @@ function RecordsPrint({ data, from, to }) {
         </div>
       )}
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
-        AL counts working days only (Fridays, Saturdays, and non-official days excluded). Generated {niceDate(dstr(new Date()))}.
+        All leave periods count calendar days. Generated {niceDate(dstr(new Date()))}.
       </div>
     </div>
   );
@@ -1307,18 +1299,18 @@ function StaffTab({ data, update }) {
               {(form.leavePeriods || []).length === 0 && <span style={{ fontSize: 12.5, color: T.inkSoft }}>No leave periods yet.</span>}
               {(form.leavePeriods || []).map((p) => {
                 const st = styleFor(p);
-                const counted = p.type === "annual" ? alWorkingDays(data, p, p.start, p.end) : spanDays(p.start, p.end);
+                const counted = spanDays(p.start, p.end);
                 return (
                   <span key={p.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: st.bg, color: st.fg, borderRadius: 8, padding: "5px 10px", fontSize: 12.5, fontWeight: 600 }}>
                     {st.label}: {niceDate(p.start)} – {niceDate(p.end)}
-                    {p.type === "annual" ? ` (${counted} AL days of ${spanDays(p.start, p.end)}d)` : ` (${counted}d)`}
+                    {` (${counted}d)`}
                     <button onClick={() => removePeriod(p.id)} style={{ background: "none", border: "none", cursor: "pointer", color: st.fg, display: "flex", padding: 0 }}><X size={13} /></button>
                   </span>
                 );
               })}
             </div>
             <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 8 }}>
-              For annual leave, Fridays, Saturdays, and non-official days inside the period are not counted as AL days.
+              Every leave type counts calendar days — Fridays, Saturdays, and non-official days inside a period are all counted.
             </div>
           </div>
 
@@ -1471,7 +1463,7 @@ function SettingsTab({ data, update }) {
           ))}
         </div>
         <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 10 }}>
-          Non-official days also don't count as annual leave days when they fall inside a leave period.
+          Duty worked on a non-official day counts toward payment.
         </div>
       </Card>
 
