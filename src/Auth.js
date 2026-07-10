@@ -62,20 +62,44 @@ const okBox = {
 // e.g.  https://yoursite.app/#access_token=...&type=recovery
 // We check this directly because the PASSWORD_RECOVERY event can fire
 // before this component has mounted and started listening.
+const urlParams = () => {
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  const search = (window.location.search || '').replace(/^\?/, '');
+  return new URLSearchParams(hash || search);
+};
 const isRecoveryUrl = () => {
-  const hash = window.location.hash || '';
-  const search = window.location.search || '';
-  return /type=recovery/.test(hash) || /type=recovery/.test(search);
+  const p = urlParams();
+  return p.get('type') === 'recovery' && !p.get('error');
+};
+// A recovery started but not finished (survives a page refresh)
+const recoveryPending = () => {
+  if (isRecoveryUrl()) return true;
+  try { return sessionStorage.getItem('dutyrota:recovering') === '1'; } catch { return false; }
+};
+// Supabase puts failures in the URL too, e.g. error_code=otp_expired
+const urlError = () => {
+  const p = urlParams();
+  if (!p.get('error')) return '';
+  const code = p.get('error_code') || '';
+  if (/expired/i.test(code) || /expired/i.test(p.get('error_description') || '')) {
+    return 'That password reset link has expired or was already used. ' +
+      'Reset links can only be opened once, and some email apps open them automatically. ' +
+      'Request a new link below and click it as soon as it arrives.';
+  }
+  return (p.get('error_description') || 'That link is not valid.').replace(/\+/g, ' ');
 };
 
 export default function Auth() {
+  const startingError = urlError();
   // mode: 'login' | 'signup' | 'forgot' | 'reset'
-  const [mode, setMode] = useState(isRecoveryUrl() ? 'reset' : 'login');
+  const [mode, setMode] = useState(
+    recoveryPending() ? 'reset' : startingError ? 'forgot' : 'login'
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(startingError);
   const [notice, setNotice] = useState('');
 
   // Belt and braces: also catch the event, in case it fires after we mount.
@@ -91,6 +115,16 @@ export default function Auth() {
   }, []);
 
   const switchMode = (m) => {
+    // Leaving the reset screen without setting a password? The recovery link
+    // signed us in — end that session so it can never act as a free login.
+    if (mode === 'reset' && m !== 'reset') {
+      try { sessionStorage.removeItem('dutyrota:recovering'); } catch { /* ignore */ }
+      supabase.auth.signOut();
+    }
+    // Drop any error/token junk from the URL so it does not resurface
+    if (window.location.hash || window.location.search) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
     setMode(m);
     setError('');
     setNotice('');
@@ -145,8 +179,17 @@ export default function Auth() {
   const handleReset = async () => {
     if (password.length < 6) throw new Error('Password must be at least 6 characters.');
     if (password !== password2) throw new Error('The two passwords do not match.');
+    // The reset link must have signed us in. If not, the link was invalid/expired.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error(
+        'This reset link is no longer valid. Request a new one and click it as soon as it arrives.'
+      );
+    }
     const { error } = await supabase.auth.updateUser({ password });
     if (error) throw error;
+    // Recovery finished successfully — release the lock
+    try { sessionStorage.removeItem('dutyrota:recovering'); } catch { /* ignore */ }
     // Clear type=recovery from the URL so a refresh does not reopen this screen
     window.history.replaceState(null, '', window.location.pathname);
     setNotice('Password updated. Taking you to your rota…');
@@ -281,6 +324,13 @@ export default function Auth() {
           <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#555' }}>
             Remembered it?{' '}
             <button onClick={() => switchMode('login')} style={linkBtn}>Back to log in</button>
+          </p>
+        )}
+
+        {mode === 'reset' && (
+          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#555' }}>
+            Link not working?{' '}
+            <button onClick={() => switchMode('forgot')} style={linkBtn}>Send a new one</button>
           </p>
         )}
       </div>

@@ -3,17 +3,37 @@ import supabase from './supabaseClient';
 import Auth from './Auth';
 import DutyRota from './DutyRotaOriginal';
 
-// A password-reset link signs the user in automatically. Without this check,
-// App.js would see a valid session and jump straight to the rota, never giving
-// them a chance to type a new password. So while type=recovery is in the URL,
-// we keep showing the Auth screen.
-const isRecoveryUrl = () => /type=recovery/.test(window.location.hash || '')
-  || /type=recovery/.test(window.location.search || '');
+// A password-reset link SIGNS THE USER IN so they can change their password.
+// That session must never be usable for anything else. We remember that a
+// recovery is in progress (even across refreshes) and force a sign-out if the
+// user abandons it, so a reset link can never become a free login.
+const RECOVERY_FLAG = 'dutyrota:recovering';
+
+const isRecoveryUrl = () => {
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  const search = (window.location.search || '').replace(/^\?/, '');
+  const p = new URLSearchParams(hash || search);
+  return p.get('type') === 'recovery' && !p.get('error');
+};
+
+// True if a recovery is in progress right now, or was started and not finished
+const recoveryPending = () => {
+  if (isRecoveryUrl()) return true;
+  try { return sessionStorage.getItem(RECOVERY_FLAG) === '1'; } catch { return false; }
+};
 
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [recovering, setRecovering] = useState(isRecoveryUrl());
+  const [recovering, setRecovering] = useState(recoveryPending());
+
+  // Mark the recovery as in-progress immediately, so a refresh mid-reset does
+  // not drop the user straight into the app with an unchanged password.
+  useEffect(() => {
+    if (isRecoveryUrl()) {
+      try { sessionStorage.setItem(RECOVERY_FLAG, '1'); } catch { /* ignore */ }
+    }
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -22,17 +42,37 @@ export default function App() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY') setRecovering(true);
+      if (event === 'PASSWORD_RECOVERY') {
+        try { sessionStorage.setItem(RECOVERY_FLAG, '1'); } catch { /* ignore */ }
+        setRecovering(true);
+      }
+      if (event === 'SIGNED_OUT') {
+        try { sessionStorage.removeItem(RECOVERY_FLAG); } catch { /* ignore */ }
+        setRecovering(false);
+      }
       setSession(session);
     });
 
-    // Auth.js fires this once the new password is saved
-    const done = () => setRecovering(false);
+    // Auth.js fires this ONLY after the new password is saved successfully
+    const done = () => {
+      try { sessionStorage.removeItem(RECOVERY_FLAG); } catch { /* ignore */ }
+      setRecovering(false);
+    };
     window.addEventListener('dutyrota:recovery-done', done);
+
+    // If they close the tab mid-reset, end the session. A recovery link must
+    // never survive as a logged-in session without a new password being set.
+    const abandon = () => {
+      try {
+        if (sessionStorage.getItem(RECOVERY_FLAG) === '1') supabase.auth.signOut();
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('beforeunload', abandon);
 
     return () => {
       subscription.unsubscribe();
       window.removeEventListener('dutyrota:recovery-done', done);
+      window.removeEventListener('beforeunload', abandon);
     };
   }, []);
 
@@ -44,7 +84,8 @@ export default function App() {
     );
   }
 
-  // Show the Auth screen if nobody is logged in, OR if they are mid password reset
+  // Show the Auth screen if nobody is logged in, OR if a password reset is
+  // still unfinished. The recovery session grants no access to the app.
   if (!session || recovering) return <Auth />;
 
   return (
