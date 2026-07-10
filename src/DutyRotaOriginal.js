@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
-  ChevronLeft, ChevronRight, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
-  AlertTriangle, MoreHorizontal
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
+  AlertTriangle, MoreHorizontal, ArrowDownAZ
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -1210,6 +1210,27 @@ function StaffTab({ data, update }) {
     return d;
   });
 
+  // Move a staff member up/down. Swaps with the previous/next VISIBLE person,
+  // so hidden former staff never trap someone in place.
+  const move = (id, dir) => update((d) => {
+    const visibleIds = (showFormer ? d.staff : d.staff.filter((s) => !isFormer(s))).map((s) => s.id);
+    const vPos = visibleIds.indexOf(id);
+    const targetId = visibleIds[vPos + dir];
+    if (targetId === undefined) return d; // already at the edge
+    const a = d.staff.findIndex((s) => s.id === id);
+    const b = d.staff.findIndex((s) => s.id === targetId);
+    [d.staff[a], d.staff[b]] = [d.staff[b], d.staff[a]];
+    return d;
+  });
+
+  const sortAZ = () => {
+    if (!window.confirm("Sort all staff alphabetically by name?\n\nThis replaces your current order.")) return;
+    update((d) => {
+      d.staff = [...d.staff].sort((x, y) => x.name.localeCompare(y.name));
+      return d;
+    });
+  };
+
   const addPeriod = () => {
     if (!np.start || !np.end || np.end < np.start) return;
     const period = { type: np.type, start: np.start, end: np.end, id: uid() };
@@ -1224,7 +1245,8 @@ function StaffTab({ data, update }) {
 
   const activeStaff = data.staff.filter((s) => !isFormer(s));
   const formerStaff = data.staff.filter((s) => isFormer(s));
-  const visibleStaff = showFormer ? [...activeStaff, ...formerStaff] : activeStaff;
+  // Keep original array order so the up/down arrows behave predictably
+  const visibleStaff = showFormer ? data.staff : activeStaff;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1237,6 +1259,9 @@ function StaffTab({ data, update }) {
                 style={{ accentColor: T.lagoon, width: 15, height: 15 }} />
               Show former staff ({formerStaff.length})
             </label>
+          )}
+          {data.staff.length > 1 && (
+            <Btn kind="ghost" small onClick={sortAZ}><ArrowDownAZ size={14} /> Sort A–Z</Btn>
           )}
           <Btn onClick={() => setForm(empty)}><Plus size={15} /> Add staff</Btn>
         </div>
@@ -1324,14 +1349,35 @@ function StaffTab({ data, update }) {
       <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
           <thead>
-            <tr>{["Name & designation", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+            <tr>{["#", "Name & designation", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
           </thead>
           <tbody>
-            {visibleStaff.map((s) => {
+            {visibleStaff.map((s, idx) => {
               const today = onLeaveToday(s);
               const gone = isFormer(s);
+              const arrowStyle = (disabled) => ({
+                background: "transparent", border: `1px solid ${T.line}`, borderRadius: 6,
+                width: 24, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.3 : 1,
+                color: T.ink, padding: 0,
+              });
+              const atTop = idx === 0;
+              const atBottom = idx === visibleStaff.length - 1;
               return (
                 <tr key={s.id} style={gone ? { background: "#FAFBFB", opacity: 0.72 } : undefined}>
+                  <td style={{ ...td, padding: "6px 8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 700, minWidth: 14 }}>{idx + 1}</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <button title="Move up" disabled={atTop} onClick={() => move(s.id, -1)} style={arrowStyle(atTop)}>
+                          <ChevronUp size={13} />
+                        </button>
+                        <button title="Move down" disabled={atBottom} onClick={() => move(s.id, 1)} style={arrowStyle(atBottom)}>
+                          <ChevronDown size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </td>
                   <td style={{ ...td, fontWeight: 600 }}>{s.name}</td>
                   <td style={td}>{s.contact}</td>
                   <td style={td}>{s.recc}</td>
@@ -1368,12 +1414,15 @@ function StaffTab({ data, update }) {
                 </tr>
               );
             })}
-            {visibleStaff.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
+            {visibleStaff.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
           </tbody>
         </table>
       </Card>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
         ⚠ marks licences expiring within 90 days. Annual leave is tracked by leave periods — each staff member's leave renews on their own dates.
+      </div>
+      <div style={{ fontSize: 12.5, color: T.inkSoft }}>
+        Use the ▲ ▼ arrows to set the order staff appear in — this order is used in the weekly rota, records, statistics, and all PDF exports.
       </div>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
         When someone resigns or transfers, use <strong>Mark left</strong> (or set a last working day) instead of deleting them.
