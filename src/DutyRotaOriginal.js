@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
@@ -244,6 +244,7 @@ const migrate = (d) => {
     if (s.startDate === undefined) s.startDate = "";
     if (s.endDate === undefined) s.endDate = "";
   });
+  if (d.welcomeDismissed === undefined) d.welcomeDismissed = false;
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
   if (d.fridayRule === undefined) d.fridayRule = true;
   // add newer default codes if missing (match by code string)
@@ -340,6 +341,59 @@ const weekSegments = (staff, days) => {
 };
 
 /* ─────────────────── App ─────────────────── */
+/* ─────────────────── First-time welcome guide ───────────────────
+   Shows for new accounts. Each step ticks itself off automatically as
+   the user completes it, and the card disappears once all three are
+   done (or if the user dismisses it). Dismissal is stored in the rota
+   data itself, so it stays dismissed across devices.                  */
+function WelcomeGuide({ data, update, setTab }) {
+  if (data.welcomeDismissed) return null;
+
+  const step1 = data.title !== "ENTER AREA NAME" && data.title.trim() !== "";
+  const step2 = data.staff.length > 0;
+  const step3 = Object.keys(data.cells || {}).some((d) => Object.keys(data.cells[d] || {}).length > 0);
+  if (step1 && step2 && step3) return null; // fully set up — nothing to show
+
+  const dismiss = () => update((d) => { d.welcomeDismissed = true; return d; });
+
+  const Row = ({ done, n, text, action, goto }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "9px 0", borderBottom: `1px solid ${T.line}` }}>
+      <span style={{
+        flexShrink: 0, width: 24, height: 24, borderRadius: "50%",
+        background: done ? T.lagoon : "#fff", border: `2px solid ${done ? T.lagoon : T.line}`,
+        color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 12, fontWeight: 700,
+      }}>
+        {done ? <Check size={14} /> : <span style={{ color: T.inkSoft }}>{n}</span>}
+      </span>
+      <span style={{ flex: 1, fontSize: 13.5, color: done ? T.inkSoft : T.ink, textDecoration: done ? "line-through" : "none" }}>{text}</span>
+      {!done && (
+        <button onClick={() => setTab(goto)} style={{
+          fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+          background: T.lagoon, color: "#fff", border: "none", borderRadius: 7, padding: "6px 13px", whiteSpace: "nowrap",
+        }}>{action}</button>
+      )}
+    </div>
+  );
+
+  return (
+    <Card style={{ marginBottom: 18, border: `1.5px solid ${T.lagoon}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div>
+          <h3 style={{ margin: "0 0 3px", fontFamily: "Sora, sans-serif", fontSize: 16 }}>👋 Welcome! Three steps to get set up</h3>
+          <p style={{ margin: "0 0 6px", fontSize: 12.5, color: T.inkSoft }}>Each step ticks itself off as you go. The full guide is in the Help tab any time.</p>
+        </div>
+        <button onClick={dismiss} title="Hide this guide" style={{ background: "none", border: "none", cursor: "pointer", color: T.inkSoft, padding: 4 }}>
+          <X size={16} />
+        </button>
+      </div>
+      <Row done={step1} n={1} text="Give your area or ward a name" action="Open Settings" goto="settings" />
+      <Row done={step2} n={2} text="Add your staff members" action="Open Staff" goto="staff" />
+      <Row done={step3} n={3} text="Fill in your first duty on the weekly rota" action="Open Rota" goto="rota" />
+    </Card>
+  );
+}
+
 export default function DutyRota() {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("rota");
@@ -432,6 +486,7 @@ export default function DutyRota() {
       </header>
 
       <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
+        <WelcomeGuide data={data} update={update} setTab={setTab} />
         {tab === "rota" && <WeekRota data={data} update={update} weekStart={weekStart} setWeekStart={setWeekStart} onExport={() => setPrintView({ kind: "rota" })} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
@@ -439,6 +494,123 @@ export default function DutyRota() {
         {tab === "settings" && <SettingsTab data={data} update={update} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
+    </div>
+  );
+}
+
+/* ─────────────────── Duty code picker ───────────────────
+   Replaces the long native dropdown. Click the cell to open a small
+   panel: type to filter (e.g. "s" finds SL), Enter picks the top
+   match, Escape closes, or just tap a chip. Chips are finger-sized
+   for phone use, in the same order as Settings.                     */
+function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const [pos, setPos] = useState(null); // fixed-position coords for the panel
+
+  const current = codes.find((c) => c.id === value);
+  const q = query.trim().toLowerCase();
+  const filtered = q ? codes.filter((c) => c.code.toLowerCase().includes(q)) : codes;
+  // Exact match first so typing "m" prefers M over M(R), ML, M/OFF…
+  const ordered = q
+    ? [...filtered].sort((a, b) => {
+        const ax = a.code.toLowerCase() === q ? 0 : a.code.toLowerCase().startsWith(q) ? 1 : 2;
+        const bx = b.code.toLowerCase() === q ? 0 : b.code.toLowerCase().startsWith(q) ? 1 : 2;
+        return ax - bx;
+      })
+    : filtered;
+
+  const PANEL_W = 230, PANEL_H = 280;
+  const openPanel = () => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (r) {
+      // Clamp horizontally to the viewport; flip above the cell if no room below
+      const left = Math.min(Math.max(8, r.left + r.width / 2 - PANEL_W / 2), window.innerWidth - PANEL_W - 8);
+      const below = r.bottom + PANEL_H < window.innerHeight;
+      setPos({ left, top: below ? r.bottom + 4 : undefined, bottom: below ? undefined : window.innerHeight - r.top + 4 });
+    }
+    setQuery("");
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 10);
+  };
+  const close = () => { setOpen(false); setQuery(""); };
+  const pick = (id) => { onPick(id); close(); };
+
+  // Close when clicking anywhere else, or when the page/table scrolls
+  // (the panel is fixed-position, so it must not drift away from its cell)
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (!wrapRef.current?.contains(e.target)) close(); };
+    const onScroll = () => close();
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("touchstart", onDoc);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("touchstart", onDoc);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+
+  const onKey = (e) => {
+    if (e.key === "Escape") { close(); return; }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (q === "" || q === "-") pick("");           // Enter on empty = clear
+      else if (ordered.length > 0) pick(ordered[0].id); // top match
+    }
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button onClick={open ? close : openPanel} style={{
+        fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
+        padding: "7px 4px", borderRadius: 7, border: `1px solid ${hasCode ? "transparent" : T.line}`,
+        background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none",
+      }}>
+        {current ? current.code : "—"}
+      </button>
+
+      {open && pos && (
+        <div style={{
+          position: "fixed", zIndex: 40, left: pos.left, top: pos.top, bottom: pos.bottom,
+          width: 230, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
+          boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8,
+        }}>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Type to search… Enter = pick"
+            style={{
+              width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: 7,
+              border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none",
+            }}
+          />
+          <div style={{ maxHeight: 210, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 5 }}>
+            <button onClick={() => pick("")} style={{
+              fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+              padding: "7px 11px", borderRadius: 7, border: `1px dashed ${T.line}`,
+              background: "#fff", color: T.inkSoft, minWidth: 44,
+            }}>—</button>
+            {ordered.map((c, i) => (
+              <button key={c.id} onClick={() => pick(c.id)} style={{
+                fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+                padding: "7px 11px", borderRadius: 7, minWidth: 44,
+                border: q && i === 0 ? `2px solid ${T.ink}` : "1px solid transparent",
+                background: c.color, color: textOn(c.color),
+              }}>{c.code}</button>
+            ))}
+            {ordered.length === 0 && (
+              <div style={{ fontSize: 12, color: T.inkSoft, padding: "8px 4px" }}>No code matches "{query}"</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -551,15 +723,14 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
                     return (
                       <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
-                        <select value={codeId} onChange={(e) => setCell(date, s.id, e.target.value)} style={{
-                          fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
-                          padding: "7px 4px", borderRadius: 7, border: `1px solid ${code ? "transparent" : T.line}`,
-                          background: bg, color: code ? textOn(code.color) : T.inkSoft, cursor: "pointer",
-                          textAlign: "center", outline: "none",
-                        }}>
-                          <option value="">—</option>
-                          {data.codes.map((c) => <option key={c.id} value={c.id} style={{ background: "#fff", color: T.ink }}>{c.code}</option>)}
-                        </select>
+                        <CodePicker
+                          value={codeId}
+                          codes={data.codes}
+                          onPick={(id) => setCell(date, s.id, id)}
+                          cellBg={bg}
+                          cellFg={code ? textOn(code.color) : T.inkSoft}
+                          hasCode={!!code}
+                        />
                       </td>
                     );
                   })}
