@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
-  AlertTriangle, MoreHorizontal, ArrowDownAZ
+  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -407,6 +407,7 @@ export default function DutyRota() {
     { id: "stats", label: "Statistics", icon: BarChart3 },
     { id: "staff", label: "Staff", icon: Users },
     { id: "settings", label: "Settings", icon: Settings },
+    { id: "help", label: "Help", icon: HelpCircle },
   ];
 
   return (
@@ -436,6 +437,7 @@ export default function DutyRota() {
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "staff" && <StaffTab data={data} update={update} />}
         {tab === "settings" && <SettingsTab data={data} update={update} />}
+        {tab === "help" && <HelpTab data={data} />}
       </main>
     </div>
   );
@@ -1433,6 +1435,105 @@ function StaffTab({ data, update }) {
 }
 
 /* ─────────────────── Settings tab ─────────────────── */
+/* ─────────────────── Help / instructions ─────────────────── */
+function HelpTab({ data }) {
+  const Section = ({ title, children }) => (
+    <Card style={{ marginBottom: 14 }}>
+      <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 16, color: T.ink }}>{title}</h3>
+      <div style={{ fontSize: 13.5, lineHeight: 1.7, color: "#33474F" }}>{children}</div>
+    </Card>
+  );
+  const Code = ({ children }) => (
+    <span style={{ background: T.mist, border: `1px solid ${T.line}`, borderRadius: 5, padding: "1px 7px", fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap" }}>{children}</span>
+  );
+  const Step = ({ n, children }) => (
+    <div style={{ display: "flex", gap: 11, marginBottom: 9, alignItems: "flex-start" }}>
+      <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: T.lagoon, color: "#fff", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{n}</span>
+      <span>{children}</span>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 760 }}>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: "0 0 4px", fontFamily: "Sora, sans-serif", fontSize: 20 }}>How to use DutyRota</h2>
+        <p style={{ margin: 0, fontSize: 13.5, color: T.inkSoft }}>A quick guide to setting up and running your duty rota. You can come back here any time.</p>
+      </div>
+
+      <Section title="1. Getting started">
+        <Step n="1">Go to the <strong>Settings</strong> tab and type your area or ward name in the box at the top. This name shows at the top of every page and on your printed rota.</Step>
+        <Step n="2">Go to the <strong>Staff</strong> tab and add each staff member with the <strong>Add staff</strong> button.</Step>
+        <Step n="3">Go to the <strong>Weekly Rota</strong> tab and start filling in duties by clicking a cell and choosing a code.</Step>
+        <p style={{ marginTop: 10, marginBottom: 0 }}>That's it — your rota saves automatically, and syncs to any device you log in from.</p>
+      </Section>
+
+      <Section title="2. Filling in the rota">
+        <p style={{ marginTop: 0 }}>In the <strong>Weekly Rota</strong> tab, each staff member has a row and each day has a cell. Click a cell and pick the duty code for that day. Use the arrows at the top to move between weeks.</p>
+        <p>Your duty codes (you can change these in Settings):</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          {data.codes.map((c) => (
+            <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.mist, border: `1px solid ${T.line}`, borderRadius: 7, padding: "4px 9px", fontSize: 12.5 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: c.color, display: "inline-block" }} />
+              <strong>{c.label}</strong>
+            </span>
+          ))}
+        </div>
+        <p style={{ marginBottom: 0, marginTop: 12 }}>The bottom rows show how many staff are on Morning, Afternoon, and Night each day, so you can see your coverage at a glance.</p>
+      </Section>
+
+      <Section title="3. Non-official days & payment">
+        <p style={{ marginTop: 0 }}>Non-official days are days where duty counts for extra payment. There are two ways a day becomes non-official:</p>
+        <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}><strong>Fridays</strong> — if the Friday rule is switched on in Settings, every Friday is automatically non-official.</li>
+          <li>Any other day you mark by hand — click the small marker on a day's header in the Weekly Rota to toggle it.</li>
+        </ul>
+        <p style={{ marginBottom: 0 }}>When a staff member works a duty on a non-official day, it's counted toward their non-official day payment in the Staff Records and Statistics.</p>
+      </Section>
+
+      <Section title="4. Leave — two different kinds">
+        <p style={{ marginTop: 0 }}>DutyRota handles leave in two ways, and it helps to know the difference:</p>
+        <p style={{ marginBottom: 4 }}><strong>Leave periods</strong> (set in the Staff tab)</p>
+        <p style={{ marginTop: 0 }}>For longer, planned leave — <strong>annual, maternity, pre-maternity, emergency,</strong> and <strong>other</strong>. You give a start and end date, and it fills the whole period on the rota automatically. All of these count every calendar day in the period, including Fridays, Saturdays, and non-official days.</p>
+        <p style={{ marginBottom: 4 }}><strong>Leave codes</strong> (entered in the Weekly Rota)</p>
+        <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. The Statistics tab counts how many times each was taken.</p>
+      </Section>
+
+      <Section title="5. When someone joins or leaves">
+        <p style={{ marginTop: 0 }}>When a staff member resigns or moves to another department, <strong>do not delete them</strong> — that would erase their past duties and make old rotas and statistics wrong.</p>
+        <p>Instead, in the <strong>Staff</strong> tab, open that person and set a <strong>Last working day</strong> (or use the <strong>Mark left</strong> button for today). They will:</p>
+        <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}>Disappear from rotas after that date</li>
+          <li style={{ marginBottom: 5 }}>Still appear correctly in past rotas and reports</li>
+          <li>Move into "Former staff", hidden until you tick <strong>Show former staff</strong></li>
+        </ul>
+        <p style={{ marginBottom: 0 }}>For a new joiner, set a <strong>Joining date</strong> so they don't show on rotas before they started. If someone comes back, use <strong>Reactivate</strong>.</p>
+      </Section>
+
+      <Section title="6. Ordering your staff list">
+        <p style={{ margin: 0 }}>In the <strong>Staff</strong> tab, use the up and down arrows next to each name to set the order staff appear in. This order is used everywhere — the weekly rota, records, statistics, and printed PDFs. The <strong>Sort A–Z</strong> button arranges everyone alphabetically in one click.</p>
+      </Section>
+
+      <Section title="7. Reports & printing">
+        <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many times each leave code was taken.</p>
+        <p style={{ marginBottom: 0 }}>On any of these, the <strong>Export PDF</strong> button makes a clean printable version you can save or print for your records.</p>
+      </Section>
+
+      <Section title="8. Your account & data">
+        <ul style={{ margin: 0, paddingLeft: 20 }}>
+          <li style={{ marginBottom: 6 }}><strong>It saves automatically.</strong> There's no save button — every change is kept.</li>
+          <li style={{ marginBottom: 6 }}><strong>It works across devices.</strong> Log in on your laptop and your phone with the same email, and you'll see the same rota.</li>
+          <li style={{ marginBottom: 6 }}><strong>Your rota is private to your account.</strong> Only you can see it.</li>
+          <li><strong>Forgot your password?</strong> Use the "Forgot password?" link on the login screen. You'll get an email with a link — open it on the same device and choose a new password.</li>
+        </ul>
+      </Section>
+
+      <div style={{ fontSize: 12.5, color: T.inkSoft, textAlign: "center", padding: "6px 0 10px" }}>
+        Still stuck on something? Note down what happened and we'll sort it out.
+      </div>
+    </div>
+  );
+}
+
 function SettingsTab({ data, update }) {
   const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
   const [form, setForm] = useState(null);
