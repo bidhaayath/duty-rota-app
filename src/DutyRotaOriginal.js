@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
-  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle
+  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -451,6 +451,7 @@ export default function DutyRota() {
         {printView.kind === "rota" && <RotaPrint data={data} weekStart={weekStart} />}
         {printView.kind === "records" && <RecordsPrint data={data} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={data} from={statRange.from} to={statRange.to} />}
+        {printView.kind === "insights" && <InsightsPrint data={data} cfg={printView.cfg} />}
       </div>
     );
   }
@@ -459,6 +460,7 @@ export default function DutyRota() {
     { id: "rota", label: "Weekly Rota", icon: CalendarRange },
     { id: "records", label: "Staff Records", icon: LayoutDashboard },
     { id: "stats", label: "Statistics", icon: BarChart3 },
+    { id: "insights", label: "Insights", icon: Search },
     { id: "staff", label: "Staff", icon: Users },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "help", label: "Help", icon: HelpCircle },
@@ -490,6 +492,7 @@ export default function DutyRota() {
         {tab === "rota" && <WeekRota data={data} update={update} weekStart={weekStart} setWeekStart={setWeekStart} onExport={() => setPrintView({ kind: "rota" })} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
+        {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
         {tab === "staff" && <StaffTab data={data} update={update} />}
         {tab === "settings" && <SettingsTab data={data} update={update} />}
         {tab === "help" && <HelpTab data={data} />}
@@ -530,7 +533,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode }) {
       // Clamp horizontally to the viewport; flip above the cell if no room below
       const left = Math.min(Math.max(8, r.left + r.width / 2 - PANEL_W / 2), window.innerWidth - PANEL_W - 8);
       const below = r.bottom + PANEL_H < window.innerHeight;
-      setPos({ left, top: below ? r.bottom + 4 : undefined, bottom: below ? undefined : window.innerHeight - r.top + 4 });
+      setPos({ left, top: below ? r.bottom + 4 : undefined, bottom: below ? undefined : window.innerHeight - r.top + 4, up: !below });
     }
     setQuery("");
     setOpen(true);
@@ -580,18 +583,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode }) {
           width: 230, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
           boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8,
         }}>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Type to search… Enter = pick"
-            style={{
-              width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: 7,
-              border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none",
-            }}
-          />
-          <div style={{ maxHeight: 210, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 5 }}>
+          <div style={{ maxHeight: 210, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
             <button onClick={() => pick("")} style={{
               fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
               padding: "7px 11px", borderRadius: 7, border: `1px dashed ${T.line}`,
@@ -609,6 +601,17 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode }) {
               <div style={{ fontSize: 12, color: T.inkSoft, padding: "8px 4px" }}>No code matches "{query}"</div>
             )}
           </div>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Type to search… Enter = pick"
+            style={{
+              width: "100%", boxSizing: "border-box", padding: "7px 9px",
+              border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none",
+            }}
+          />
         </div>
       )}
     </div>
@@ -1607,6 +1610,296 @@ function StaffTab({ data, update }) {
 
 /* ─────────────────── Settings tab ─────────────────── */
 /* ─────────────────── Help / instructions ─────────────────── */
+/* ─────────────────── Insights: counting engine ───────────────────
+   For one staff member over a date range, count how many times each
+   duty code was worked. Leave days do NOT count as duty (matches the
+   rest of the app). Also break each code down by day-of-week and by
+   non-official days, so questions like "how many Friday M duties" are
+   answerable.                                                        */
+const insightsForStaff = (data, staff, from, to) => {
+  const codeById = codeByIdOf(data);
+  const dates = datesBetween(from, to).filter((d) => isEmployedOn(staff, d));
+  // perCode[codeId] = { total, byDow: [7], nonOfficial }
+  const perCode = {};
+  let leaveDays = 0, emptyDays = 0;
+  dates.forEach((date) => {
+    if (leaveOn(staff, date)) { leaveDays++; return; }
+    const cid = (data.cells[date] || {})[staff.id] || "";
+    if (!cid) { emptyDays++; return; }
+    const code = codeById(cid);
+    if (!code) { emptyDays++; return; }
+    if (!perCode[cid]) perCode[cid] = { total: 0, byDow: [0, 0, 0, 0, 0, 0, 0], nonOfficial: 0 };
+    perCode[cid].total++;
+    perCode[cid].byDow[parseD(date).getDay()]++;
+    if (isNonOff(data, date)) perCode[cid].nonOfficial++;
+  });
+  return { perCode, leaveDays, emptyDays, workingDays: dates.length };
+};
+
+// How many times a specific code was worked on a specific day-of-week
+// (dow = 0..6, or -1 for "any day") by one staff member in the range.
+const comboCount = (data, staff, codeId, dow, from, to) => {
+  const dates = datesBetween(from, to).filter((d) => isEmployedOn(staff, d));
+  let n = 0;
+  dates.forEach((date) => {
+    if (leaveOn(staff, date)) return;
+    if ((data.cells[date] || {})[staff.id] !== codeId) return;
+    if (dow !== -1 && parseD(date).getDay() !== dow) return;
+    n++;
+  });
+  return n;
+};
+
+// For one code across ALL staff: who did it most, in the range.
+const codeLeaderboard = (data, codeId, from, to) => {
+  const dates = datesBetween(from, to);
+  return data.staff
+    .filter((s) => employedInRange(s, from, to))
+    .map((s) => {
+      let n = 0;
+      dates.forEach((date) => {
+        if (!isEmployedOn(s, date)) return;
+        if (leaveOn(s, date)) return;
+        if ((data.cells[date] || {})[s.id] === codeId) n++;
+      });
+      return { staff: s, count: n };
+    })
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count);
+};
+
+function InsightsTab({ data, onExport }) {
+  const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
+  const [staffId, setStaffId] = useState(data.staff[0]?.id || "");
+  const [codeId, setCodeId] = useState(data.codes[0]?.id || "");
+  const [comboCode, setComboCode] = useState(data.codes[0]?.id || "");
+  const [comboDow, setComboDow] = useState(5); // Friday default
+  const [cmpA, setCmpA] = useState(data.staff[0]?.id || "");
+  const [cmpB, setCmpB] = useState(data.staff[1]?.id || "");
+
+  const codeById = codeByIdOf(data);
+  const staff = data.staff.find((s) => s.id === staffId);
+  const result = staff ? insightsForStaff(data, staff, range.from, range.to) : null;
+  const rows = result
+    ? Object.entries(result.perCode)
+        .map(([cid, v]) => ({ code: codeById(cid), ...v }))
+        .filter((r) => r.code)
+        .sort((a, b) => b.total - a.total)
+    : [];
+
+  const leaderboard = codeLeaderboard(data, codeId, range.from, range.to);
+  const combo = data.staff.find((s) => s.id === staffId)
+    ? comboCount(data, staff, comboCode, comboDow, range.from, range.to)
+    : 0;
+
+  const staffA = data.staff.find((s) => s.id === cmpA);
+  const staffB = data.staff.find((s) => s.id === cmpB);
+  const resA = staffA ? insightsForStaff(data, staffA, range.from, range.to) : null;
+  const resB = staffB ? insightsForStaff(data, staffB, range.from, range.to) : null;
+  const cmpCodes = data.codes.filter((c) => (resA?.perCode[c.id]?.total || 0) + (resB?.perCode[c.id]?.total || 0) > 0);
+
+  const selStyle = { ...inputStyle, width: "auto", minWidth: 150, cursor: "pointer" };
+  const H = ({ children }) => <h3 style={{ margin: "0 0 12px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>{children}</h3>;
+  const dowFull = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <h2 style={{ margin: "0 0 4px", fontFamily: "Sora, sans-serif", fontSize: 20 }}>Insights</h2>
+        <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>Dig into who did what. Leave days are not counted as duty.</p>
+      </div>
+
+      {/* Shared date range */}
+      <Card>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <Field label="From"><input type="date" style={{ ...inputStyle, width: "auto" }} value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></Field>
+          <Field label="To"><input type="date" style={{ ...inputStyle, width: "auto" }} value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></Field>
+          <Btn kind="ghost" small onClick={() => setRange({ from: monthStart(), to: monthEnd() })}>This month</Btn>
+        </div>
+      </Card>
+
+      {/* 1 + 2: Per-staff breakdown with Friday / non-official split */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <H>Staff breakdown</H>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select style={selStyle} value={staffId} onChange={(e) => setStaffId(e.target.value)}>
+              {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}{isFormer(s) ? " (former)" : ""}</option>)}
+            </select>
+            {staff && <Btn kind="ghost" small onClick={() => onExport({ view: "staff", staffId, range })}><Printer size={13} /> PDF</Btn>}
+          </div>
+        </div>
+        {!staff ? <div style={{ color: T.inkSoft, fontSize: 13 }}>No staff yet.</div> : rows.length === 0 ? (
+          <div style={{ color: T.inkSoft, fontSize: 13, padding: "20px 0", textAlign: "center" }}>No duties recorded for {staff.name} in this range.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
+              <thead><tr>{["Duty code", "Total", "Fridays", "Sat", "Non-official", "Mon", "Tue", "Wed", "Thu", "Sun"].map((h) => <th key={h} style={{ ...th, textAlign: h === "Duty code" ? "left" : "center" }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.code.id}>
+                    <td style={{ ...td }}><span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: r.code.color }} /><strong>{r.code.code}</strong> <span style={{ color: T.inkSoft, fontSize: 12 }}>{r.code.label}</span></span></td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{r.total}</td>
+                    <td style={{ ...td, textAlign: "center", color: r.byDow[5] ? T.ink : T.inkSoft }}>{r.byDow[5]}</td>
+                    <td style={{ ...td, textAlign: "center", color: r.byDow[6] ? T.ink : T.inkSoft }}>{r.byDow[6]}</td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 600, color: r.nonOfficial ? "#B3532F" : T.inkSoft }}>{r.nonOfficial}</td>
+                    <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>{r.byDow[1]}</td>
+                    <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>{r.byDow[2]}</td>
+                    <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>{r.byDow[3]}</td>
+                    <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>{r.byDow[4]}</td>
+                    <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>{r.byDow[0]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 8 }}>
+              Worked {result.workingDays} day(s) in range · on leave {result.leaveDays} day(s) · no duty entered {result.emptyDays} day(s).
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* 4: Specific combo counter */}
+      <Card>
+        <H>Quick question</H>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 14 }}>
+          <span>How many times did</span>
+          <select style={selStyle} value={staffId} onChange={(e) => setStaffId(e.target.value)}>
+            {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <span>do</span>
+          <select style={{ ...selStyle, minWidth: 90 }} value={comboCode} onChange={(e) => setComboCode(e.target.value)}>
+            {data.codes.map((c) => <option key={c.id} value={c.id}>{c.code}</option>)}
+          </select>
+          <span>on a</span>
+          <select style={{ ...selStyle, minWidth: 110 }} value={comboDow} onChange={(e) => setComboDow(Number(e.target.value))}>
+            <option value={-1}>any day</option>
+            {dowFull.map((d, i) => <option key={i} value={i}>{d}</option>)}
+          </select>
+          <span>?</span>
+        </div>
+        <div style={{ marginTop: 16, fontSize: 15 }}>
+          {staff && <span><strong style={{ fontSize: 22, color: T.lagoon }}>{combo}</strong> time{combo === 1 ? "" : "s"} — {staff.name} did <strong>{codeById(comboCode)?.code}</strong> on {comboDow === -1 ? "any day" : dowFull[comboDow] + "s"} in this range.</span>}
+        </div>
+      </Card>
+
+      {/* 3: Per-code leaderboard */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <H>Who did a code the most</H>
+          <select style={selStyle} value={codeId} onChange={(e) => setCodeId(e.target.value)}>
+            {data.codes.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.label}</option>)}
+          </select>
+        </div>
+        {leaderboard.length === 0 ? (
+          <div style={{ color: T.inkSoft, fontSize: 13, padding: "16px 0", textAlign: "center" }}>Nobody did {codeById(codeId)?.code} in this range.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {leaderboard.map((r, i) => {
+              const max = leaderboard[0].count;
+              return (
+                <div key={r.staff.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 20, textAlign: "right", fontSize: 12, color: T.inkSoft, fontWeight: 700 }}>{i + 1}</span>
+                  <span style={{ width: 160, fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.staff.name}</span>
+                  <div style={{ flex: 1, background: T.mist, borderRadius: 6, height: 22, position: "relative", minWidth: 60 }}>
+                    <div style={{ width: `${(r.count / max) * 100}%`, background: codeById(codeId)?.color || T.lagoon, height: "100%", borderRadius: 6, minWidth: 24 }} />
+                    <span style={{ position: "absolute", right: 8, top: 0, lineHeight: "22px", fontSize: 12, fontWeight: 700, color: T.ink }}>{r.count}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* 5: Compare two staff */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <H>Compare two staff</H>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select style={{ ...selStyle, minWidth: 130 }} value={cmpA} onChange={(e) => setCmpA(e.target.value)}>
+              {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <ArrowLeftRight size={16} color={T.inkSoft} />
+            <select style={{ ...selStyle, minWidth: 130 }} value={cmpB} onChange={(e) => setCmpB(e.target.value)}>
+              {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        </div>
+        {!staffA || !staffB ? <div style={{ color: T.inkSoft, fontSize: 13 }}>Pick two staff to compare.</div> : cmpCodes.length === 0 ? (
+          <div style={{ color: T.inkSoft, fontSize: 13, padding: "16px 0", textAlign: "center" }}>Neither did any duties in this range.</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>
+              <th style={{ ...th, textAlign: "left" }}>Duty code</th>
+              <th style={{ ...th, textAlign: "center" }}>{staffA.name}</th>
+              <th style={{ ...th, textAlign: "center" }}>{staffB.name}</th>
+            </tr></thead>
+            <tbody>
+              {cmpCodes.map((c) => {
+                const a = resA.perCode[c.id]?.total || 0, b = resB.perCode[c.id]?.total || 0;
+                return (
+                  <tr key={c.id}>
+                    <td style={td}><span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: c.color }} /><strong>{c.code}</strong></span></td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: a >= b ? 700 : 400, color: a > b ? T.lagoon : T.ink }}>{a}</td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: b >= a ? 700 : 400, color: b > a ? T.lagoon : T.ink }}>{b}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function InsightsPrint({ data, cfg }) {
+  const staff = data.staff.find((s) => s.id === cfg.staffId);
+  if (!staff) return <div>Staff not found.</div>;
+  const codeById = codeByIdOf(data);
+  const res = insightsForStaff(data, staff, cfg.range.from, cfg.range.to);
+  const rows = Object.entries(res.perCode)
+    .map(([cid, v]) => ({ code: codeById(cid), ...v }))
+    .filter((r) => r.code)
+    .sort((a, b) => b.total - a.total);
+  const cols = ["Duty code", "Total", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Non-official"];
+  return (
+    <div>
+      <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
+      <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
+        Duty breakdown — {staff.name} · {niceDate(cfg.range.from)} – {niceDate(cfg.range.to)}
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ textAlign: "center", fontSize: 12, color: "#666", padding: "20px 0" }}>No duties recorded in this range.</div>
+      ) : (
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead><tr>{cols.map((h) => <th key={h} style={{ ...pth, textAlign: h === "Duty code" ? "left" : "center", background: h === "Non-official" ? "#F6E3B4" : "#E8E8E8" }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.code.id}>
+                <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{r.code.code} <span style={{ fontWeight: 400, color: "#666" }}>{r.code.label}</span></td>
+                <td style={{ ...ptd, fontWeight: 700 }}>{r.total}</td>
+                <td style={ptd}>{r.byDow[0]}</td>
+                <td style={ptd}>{r.byDow[1]}</td>
+                <td style={ptd}>{r.byDow[2]}</td>
+                <td style={ptd}>{r.byDow[3]}</td>
+                <td style={ptd}>{r.byDow[4]}</td>
+                <td style={ptd}>{r.byDow[5]}</td>
+                <td style={ptd}>{r.byDow[6]}</td>
+                <td style={{ ...ptd, background: "#F6E3B4", fontWeight: 800 }}>{r.nonOfficial}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div style={{ fontSize: 11, color: "#666", marginTop: 8 }}>
+        Worked {res.workingDays} day(s) · on leave {res.leaveDays} · no duty entered {res.emptyDays}. Leave days are not counted as duty.
+      </div>
+    </div>
+  );
+}
+
 function HelpTab({ data }) {
   const Section = ({ title, children }) => (
     <Card style={{ marginBottom: 14 }}>
