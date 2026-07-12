@@ -460,9 +460,9 @@ export default function DutyRota() {
     { id: "rota", label: "Weekly Rota", icon: CalendarRange },
     { id: "records", label: "Staff Records", icon: LayoutDashboard },
     { id: "stats", label: "Statistics", icon: BarChart3 },
-    { id: "insights", label: "Insights", icon: Search },
     { id: "staff", label: "Staff", icon: Users },
     { id: "settings", label: "Settings", icon: Settings },
+    { id: "insights", label: "Insights", icon: Search },
     { id: "help", label: "Help", icon: HelpCircle },
   ];
 
