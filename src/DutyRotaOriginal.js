@@ -1047,12 +1047,12 @@ function Stats({ data, range, setRange, onExport }) {
         </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "1 1 340px", minWidth: 300 }}>
+          <Card style={{ flex: "1 1 300px", maxWidth: 460, minWidth: 260 }}>
             <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave codes taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(times taken)</span></h3>
             {!anyLeaveCodes ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
             ) : (
-              <ResponsiveContainer width="100%" height={230}>
+              <ResponsiveContainer width="100%" height={180}>
                 <BarChart data={leaveCodesTaken}>
                   <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
@@ -1066,20 +1066,26 @@ function Stats({ data, range, setRange, onExport }) {
         </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "1 1 340px", minWidth: 300 }}>
+          <Card style={{ flex: "1 1 100%", minWidth: 300 }}>
             <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Non-official duties per staff <span style={{ fontSize: 12, color: "#A5731B", fontWeight: 600 }}>(paid days)</span></h3>
-            <ResponsiveContainer width="100%" height={230}>
-              <BarChart data={nonOffByStaff}>
-                <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="days" fill="#D9A93F" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {nonOffByStaff.length === 0 ? (
+              <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No staff in this range.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={Math.max(140, nonOffByStaff.length * 30 + 30)}>
+                <BarChart data={nonOffByStaff} layout="vertical" margin={{ left: 10, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} interval={0} />
+                  <Tooltip formatter={(v) => [`${v} day(s)`, "Non-official duty"]} />
+                  <Bar dataKey="days" fill="#D9A93F" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </Card>
+        </div>
 
-          <Card style={{ flex: "2 1 420px", minWidth: 320 }}>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <Card style={{ flex: "1 1 100%", minWidth: 320 }}>
             <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Daily coverage</h3>
             {coverage === null ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>Range too long for a daily chart — pick 3 months or less.</div>
@@ -1398,16 +1404,19 @@ function StatsPrint({ data, from, to }) {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ ...box, flex: "0 0 38%" }}>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ ...box }}>
           <h4 style={chartTitle}>Non-official duties per staff (paid days)</h4>
-          <BarChart width={370} height={200} data={nonOffByStaff}>
+          <BarChart width={720} height={Math.max(120, nonOffByStaff.length * 24 + 24)} data={nonOffByStaff} layout="vertical" margin={{ left: 10, right: 20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-            <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
+            <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10 }} />
+            <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 9 }} interval={0} />
             <Bar dataKey="days" fill="#D9A93F" isAnimationActive={false} />
           </BarChart>
         </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
         <div style={{ ...box, flex: 1 }}>
           <h4 style={chartTitle}>Daily coverage</h4>
           {coverage === null ? (
