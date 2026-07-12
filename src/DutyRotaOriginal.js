@@ -1008,12 +1008,12 @@ function Stats({ data, range, setRange, onExport }) {
         </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "2 1 420px", minWidth: 320 }}>
+          <Card style={{ flex: "1 1 100%", minWidth: 320 }}>
             <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Duties per staff</h3>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={dutyByStaff}>
                 <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -1025,13 +1025,15 @@ function Stats({ data, range, setRange, onExport }) {
               </BarChart>
             </ResponsiveContainer>
           </Card>
+        </div>
 
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Card style={{ flex: "1 1 280px", minWidth: 260 }}>
             <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Staff on leave (by type)</h3>
             {!anyLeaveByType ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
             ) : (
-              <ResponsiveContainer width="100%" height={260}>
+              <ResponsiveContainer width="100%" height={230}>
                 <BarChart data={leaveTypeData}>
                   <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} />
@@ -1044,15 +1046,13 @@ function Stats({ data, range, setRange, onExport }) {
               </ResponsiveContainer>
             )}
           </Card>
-        </div>
 
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "1 1 300px", maxWidth: 460, minWidth: 260 }}>
+          <Card style={{ flex: "1 1 280px", minWidth: 260 }}>
             <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave codes taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(times taken)</span></h3>
             {!anyLeaveCodes ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
             ) : (
-              <ResponsiveContainer width="100%" height={180}>
+              <ResponsiveContainer width="100%" height={230}>
                 <BarChart data={leaveCodesTaken}>
                   <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
