@@ -110,6 +110,11 @@ const isNonOff = (data, date) =>
 const leaveOn = (staff, date) => (staff.leavePeriods || []).find((p) => date >= p.start && date <= p.end) || null;
 const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
 
+/* Cell notes live in a separate map so all the duty-counting code, which
+   reads cells[date][staffId] as a plain code id, keeps working unchanged.
+   data.cellMeta[date][staffId] = { note?: string }                        */
+const cellMetaOf = (data, date, staffId) => (data.cellMeta?.[date]?.[staffId]) || null;
+
 /* ── Employment window (start/end dates are INCLUSIVE) ────────────────
    startDate empty = always employed from the beginning.
    endDate   empty = still employed (active staff).                     */
@@ -217,6 +222,7 @@ const seed = () => ({
   staff: [],
   codes: DEFAULT_CODES,
   cells: {},
+  cellMeta: {},
   nonOfficial: [],
   fridayRule: true,
   title: "ENTER AREA NAME",
@@ -245,6 +251,7 @@ const migrate = (d) => {
     if (s.endDate === undefined) s.endDate = "";
   });
   if (d.welcomeDismissed === undefined) d.welcomeDismissed = false;
+  if (!d.cellMeta) d.cellMeta = {};
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
   if (d.fridayRule === undefined) d.fridayRule = true;
   // add newer default codes if missing (match by code string)
@@ -502,22 +509,24 @@ export default function DutyRota() {
 }
 
 /* ─────────────────── Duty code picker ───────────────────
-   Replaces the long native dropdown. Click the cell to open a small
-   panel: type to filter (e.g. "s" finds SL), Enter picks the top
-   match, Escape closes, or just tap a chip. Chips are finger-sized
-   for phone use, in the same order as Settings.                     */
-function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode }) {
+   Click a cell to open a panel: filter/pick a code, add a note, see the
+   Click a cell to open a panel: filter/pick a code, add a note, or add a
+   brand-new code without leaving the rota. Chips are finger-sized.       */
+const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", "#4DB6AC", "#F06292", "#A1887F", "#9575CD", "#4DD0E1"];
+
+function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [mode, setMode] = useState("pick"); // 'pick' | 'note' | 'add'
+  const [noteText, setNoteText] = useState(note || "");
+  const [nc, setNc] = useState({ code: "", label: "", color: NEW_CODE_COLORS[0], counts: "morning" });
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
-
-  const [pos, setPos] = useState(null); // fixed-position coords for the panel
+  const [pos, setPos] = useState(null);
 
   const current = codes.find((c) => c.id === value);
   const q = query.trim().toLowerCase();
   const filtered = q ? codes.filter((c) => c.code.toLowerCase().includes(q)) : codes;
-  // Exact match first so typing "m" prefers M over M(R), ML, M/OFF…
   const ordered = q
     ? [...filtered].sort((a, b) => {
         const ax = a.code.toLowerCase() === q ? 0 : a.code.toLowerCase().startsWith(q) ? 1 : 2;
@@ -526,24 +535,21 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode }) {
       })
     : filtered;
 
-  const PANEL_W = 230, PANEL_H = 280;
+  const PANEL_W = 244, PANEL_H = 330;
   const openPanel = () => {
     const r = wrapRef.current?.getBoundingClientRect();
     if (r) {
-      // Clamp horizontally to the viewport; flip above the cell if no room below
       const left = Math.min(Math.max(8, r.left + r.width / 2 - PANEL_W / 2), window.innerWidth - PANEL_W - 8);
       const below = r.bottom + PANEL_H < window.innerHeight;
-      setPos({ left, top: below ? r.bottom + 4 : undefined, bottom: below ? undefined : window.innerHeight - r.top + 4, up: !below });
+      setPos({ left, top: below ? r.bottom + 4 : undefined, bottom: below ? undefined : window.innerHeight - r.top + 4 });
     }
-    setQuery("");
+    setQuery(""); setMode("pick"); setNoteText(note || "");
     setOpen(true);
     setTimeout(() => inputRef.current?.focus(), 10);
   };
-  const close = () => { setOpen(false); setQuery(""); };
+  const close = () => { setOpen(false); setQuery(""); setMode("pick"); };
   const pick = (id) => { onPick(id); close(); };
 
-  // Close when clicking anywhere else, or when the page/table scrolls
-  // (the panel is fixed-position, so it must not drift away from its cell)
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => { if (!wrapRef.current?.contains(e.target)) close(); };
@@ -562,56 +568,102 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode }) {
     if (e.key === "Escape") { close(); return; }
     if (e.key === "Enter") {
       e.preventDefault();
-      if (q === "" || q === "-") pick("");           // Enter on empty = clear
-      else if (ordered.length > 0) pick(ordered[0].id); // top match
+      if (q === "" || q === "-") pick("");
+      else if (ordered.length > 0) pick(ordered[0].id);
     }
   };
+
+  const saveNote = () => { onNote(noteText); close(); };
+  const saveNewCode = () => {
+    const c = nc.code.trim();
+    if (!c) return;
+    const id = onAddCode({ code: c, label: nc.label.trim() || c, color: nc.color, counts: nc.counts });
+    onPick(id); // apply the new code to this cell straight away
+    close();
+  };
+
+  const CATS = [
+    ["morning", "Morning"], ["afternoon", "Afternoon"], ["night", "Night"],
+    ["other", "Other duty"], ["release", "Release duty"], ["off", "Off day"], ["leave", "Leave"],
+  ];
+  const btnMini = { fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "6px 9px", borderRadius: 7, border: "none" };
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <button onClick={open ? close : openPanel} style={{
         fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
         padding: "7px 4px", borderRadius: 7, border: `1px solid ${hasCode ? "transparent" : T.line}`,
-        background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none",
+        background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none", position: "relative",
       }}>
         {current ? current.code : "—"}
+        {/* small blue dot marks a cell that has a note */}
+        {note && <span title="Has a note" style={{ position: "absolute", top: 2, right: 2, width: 7, height: 7, borderRadius: "50%", background: "#2F6DB5", border: "1px solid #fff" }} />}
       </button>
 
       {open && pos && (
         <div style={{
           position: "fixed", zIndex: 40, left: pos.left, top: pos.top, bottom: pos.bottom,
-          width: 230, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
+          width: PANEL_W, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
           boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8,
         }}>
-          <div style={{ maxHeight: 210, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
-            <button onClick={() => pick("")} style={{
-              fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
-              padding: "7px 11px", borderRadius: 7, border: `1px dashed ${T.line}`,
-              background: "#fff", color: T.inkSoft, minWidth: 44,
-            }}>—</button>
-            {ordered.map((c, i) => (
-              <button key={c.id} onClick={() => pick(c.id)} style={{
-                fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
-                padding: "7px 11px", borderRadius: 7, minWidth: 44,
-                border: q && i === 0 ? `2px solid ${T.ink}` : "1px solid transparent",
-                background: c.color, color: textOn(c.color),
-              }}>{c.code}</button>
-            ))}
-            {ordered.length === 0 && (
-              <div style={{ fontSize: 12, color: T.inkSoft, padding: "8px 4px" }}>No code matches "{query}"</div>
-            )}
-          </div>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Type to search… Enter = pick"
-            style={{
-              width: "100%", boxSizing: "border-box", padding: "7px 9px",
-              border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none",
-            }}
-          />
+          {mode === "pick" && (
+            <>
+              <div style={{ maxHeight: 190, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+                <button onClick={() => pick("")} style={{ ...btnMini, padding: "7px 11px", border: `1px dashed ${T.line}`, background: "#fff", color: T.inkSoft, minWidth: 44 }}>—</button>
+                {ordered.map((c, i) => (
+                  <button key={c.id} onClick={() => pick(c.id)} style={{ ...btnMini, padding: "7px 11px", minWidth: 44, border: q && i === 0 ? `2px solid ${T.ink}` : "1px solid transparent", background: c.color, color: textOn(c.color) }}>{c.code}</button>
+                ))}
+                {ordered.length === 0 && <div style={{ fontSize: 12, color: T.inkSoft, padding: "8px 4px" }}>No code matches "{query}"</div>}
+              </div>
+              <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKey} placeholder="Type to search… Enter = pick"
+                style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 7 }} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setMode("note")} style={{ ...btnMini, flex: 1, background: note ? "#E7F0FA" : T.mist, color: note ? "#2F6DB5" : T.ink, border: `1px solid ${T.line}` }}>
+                  {note ? "✎ Edit note" : "+ Note"}
+                </button>
+                <button onClick={() => setMode("add")} style={{ ...btnMini, flex: 1, background: T.mist, color: T.ink, border: `1px solid ${T.line}` }}>+ New code</button>
+              </div>
+            </>
+          )}
+
+          {mode === "note" && (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Note for this duty</div>
+              <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} autoFocus rows={3}
+                placeholder="e.g. Left after 4 hours · swapped with Mariyam"
+                style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", resize: "vertical" }} />
+              <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
+                <button onClick={() => setMode("pick")} style={{ ...btnMini, flex: 1, background: "#fff", color: T.inkSoft, border: `1px solid ${T.line}` }}>Back</button>
+                <button onClick={saveNote} style={{ ...btnMini, flex: 1, background: T.lagoon, color: "#fff" }}>Save note</button>
+              </div>
+            </div>
+          )}
+
+          {mode === "add" && (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>New duty code</div>
+              <input value={nc.code} onChange={(e) => setNc({ ...nc, code: e.target.value })} autoFocus placeholder="Short code (e.g. M/N)"
+                style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 6 }} />
+              <input value={nc.label} onChange={(e) => setNc({ ...nc, label: e.target.value })} placeholder="Full name (optional)"
+                style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 6 }} />
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 4 }}>Counts as</div>
+              <select value={nc.counts} onChange={(e) => setNc({ ...nc, counts: e.target.value })}
+                style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 8, cursor: "pointer" }}>
+                {CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 4 }}>Colour</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 9 }}>
+                {NEW_CODE_COLORS.map((col) => (
+                  <button key={col} onClick={() => setNc({ ...nc, color: col })} style={{ width: 22, height: 22, borderRadius: 6, background: col, cursor: "pointer", border: nc.color === col ? `2px solid ${T.ink}` : "1px solid #ccc" }} />
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setMode("pick")} style={{ ...btnMini, flex: 1, background: "#fff", color: T.inkSoft, border: `1px solid ${T.line}` }}>Back</button>
+                <button onClick={saveNewCode} disabled={!nc.code.trim()} style={{ ...btnMini, flex: 1, background: nc.code.trim() ? T.lagoon : "#B9CDCA", color: "#fff", cursor: nc.code.trim() ? "pointer" : "not-allowed" }}>Add &amp; use</button>
+              </div>
+              <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 7 }}>You can rename or recolour it later in Settings.</div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -628,6 +680,22 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
     if (codeId) d.cells[date][staffId] = codeId; else delete d.cells[date][staffId];
     return d;
   });
+
+  const setCellNote = (date, staffId, note) => update((d) => {
+    if (!d.cellMeta) d.cellMeta = {};
+    if (!d.cellMeta[date]) d.cellMeta[date] = {};
+    if (!d.cellMeta[date][staffId]) d.cellMeta[date][staffId] = {};
+    const t = (note || "").trim();
+    if (t) d.cellMeta[date][staffId].note = t;
+    else delete d.cellMeta[date][staffId];
+    return d;
+  });
+
+  const addCode = (codeObj) => {
+    const created = { ...codeObj, id: uid() };
+    update((d) => { d.codes = [...d.codes, created]; return d; });
+    return created.id;
+  };
 
   const toggleNonOfficial = (date) => {
     if (data.fridayRule && parseD(date).getDay() === FRIDAY) return;
@@ -724,6 +792,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                     const codeId = (data.cells[date] || {})[s.id] || "";
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
+                    const meta = cellMetaOf(data, date, s.id);
                     return (
                       <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
                         <CodePicker
@@ -733,6 +802,9 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                           cellBg={bg}
                           cellFg={code ? textOn(code.color) : T.inkSoft}
                           hasCode={!!code}
+                          note={meta?.note || ""}
+                          onNote={(txt) => setCellNote(date, s.id, txt)}
+                          onAddCode={addCode}
                         />
                       </td>
                     );
@@ -1039,6 +1111,15 @@ const ptd = { border: "1px solid #999", padding: "5px 7px", fontSize: 11, textAl
 function RotaPrint({ data, weekStart }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const codeById = codeByIdOf(data);
+  // Collect notes shown this week, numbered, to list under the rota
+  const noteList = [];
+  const noteNum = (date, staffId) => {
+    const m = cellMetaOf(data, date, staffId);
+    if (!m?.note) return null;
+    const staff = data.staff.find((x) => x.id === staffId);
+    noteList.push({ n: noteList.length + 1, who: staff?.name || "", date, note: m.note });
+    return noteList.length;
+  };
   return (
     <div>
       <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
@@ -1087,9 +1168,11 @@ function RotaPrint({ data, weekStart }) {
                     );
                   }
                   const code = codeById((data.cells[seg.date] || {})[s.id]);
+                  const num = noteNum(seg.date, s.id);
                   return (
-                    <td key={seg.date} style={{ ...ptd, background: code ? code.color : "#fff", color: code ? textOn(code.color) : "#999", fontWeight: 700 }}>
+                    <td key={seg.date} style={{ ...ptd, background: code ? code.color : "#fff", color: code ? textOn(code.color) : "#999", fontWeight: 700, position: "relative" }}>
                       {code ? code.code : ""}
+                      {num && <sup style={{ fontSize: 8 }}>{num}</sup>}
                     </td>
                   );
                 })}
@@ -1117,6 +1200,19 @@ function RotaPrint({ data, weekStart }) {
       </table>
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
         Legend: {data.codes.map((c) => `${c.code} = ${c.label}`).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave
+      </div>
+      {noteList.length > 0 && (
+        <div style={{ marginTop: 10, border: "1px solid #ccc", borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Notes</div>
+          {noteList.map((x) => (
+            <div key={x.n} style={{ fontSize: 10.5, color: "#333", marginBottom: 2 }}>
+              <sup>{x.n}</sup> {x.who}, {shortDate(x.date)}: {x.note}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 9.5, color: "#888", marginTop: 6 }}>
+        Superscript numbers refer to the notes above.
       </div>
     </div>
   );
@@ -1932,8 +2028,16 @@ function HelpTab({ data }) {
       </Section>
 
       <Section title="2. Filling in the rota">
-        <p style={{ marginTop: 0 }}>In the <strong>Weekly Rota</strong> tab, each staff member has a row and each day has a cell. Click a cell and pick the duty code for that day. Use the arrows at the top to move between weeks.</p>
-        <p>Your duty codes (you can change these in Settings):</p>
+        <p style={{ marginTop: 0 }}>In the <strong>Weekly Rota</strong> tab, each staff member has a row and each day has a cell. Click a cell to open the code picker. Use the arrows at the top to move between weeks.</p>
+        <p style={{ marginBottom: 4 }}><strong>Three fast ways to enter a duty:</strong></p>
+        <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}><strong>Tap a colour chip</strong> — quickest on a phone.</li>
+          <li style={{ marginBottom: 5 }}><strong>Type and press Enter</strong> — type a letter or two (like <Code>m</Code> or <Code>sl</Code>) and press Enter to pick the top match. Fastest on a laptop.</li>
+          <li>Tap <strong>—</strong> to clear a cell.</li>
+        </ul>
+        <p style={{ marginBottom: 4 }}><strong>Add a note to any duty.</strong> In the picker, tap <strong>+ Note</strong> to jot something like "left after 4 hours" or "swapped with Mariyam". A small blue dot marks cells that have a note, and all notes appear on the printed rota. Notes are just for your record — they don't change any counts.</p>
+        <p style={{ marginBottom: 10 }}><strong>Need a code that doesn't exist yet?</strong> Tap <strong>+ New code</strong> right in the picker — give it a name, colour, and what it counts as (morning, night, off, etc.), and it's added and applied straight away. No need to leave the rota. You can rename or recolour it later in Settings.</p>
+        <p>Your current duty codes (change these any time in Settings):</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
           {data.codes.map((c) => (
             <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.mist, border: `1px solid ${T.line}`, borderRadius: 7, padding: "4px 9px", fontSize: 12.5 }}>
@@ -1982,7 +2086,18 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>On any of these, the <strong>Export PDF</strong> button makes a clean printable version you can save or print for your records.</p>
       </Section>
 
-      <Section title="8. Your account & data">
+      <Section title="8. Digging into the details (Insights tab)">
+        <p style={{ marginTop: 0 }}>The <strong>Insights</strong> tab answers specific questions about who did what. Pick a date range at the top, then use any of these:</p>
+        <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 6 }}><strong>Staff breakdown</strong> — choose a nurse to see every duty code she worked, split by day of the week, with Fridays, Saturdays, and non-official days shown separately.</li>
+          <li style={{ marginBottom: 6 }}><strong>Quick question</strong> — build a sentence like "How many times did Aminath do M on a Friday?" and get an instant answer.</li>
+          <li style={{ marginBottom: 6 }}><strong>Who did a code the most</strong> — pick a code and see which staff did it most often, ranked.</li>
+          <li><strong>Compare two staff</strong> — see two nurses' duty counts side by side.</li>
+        </ul>
+        <p style={{ marginBottom: 0 }}>Leave days are never counted as duty here, and you can export the staff breakdown to PDF.</p>
+      </Section>
+
+      <Section title="9. Your account & data">
         <ul style={{ margin: 0, paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>It saves automatically.</strong> There's no save button — every change is kept.</li>
           <li style={{ marginBottom: 6 }}><strong>It works across devices.</strong> Log in on your laptop and your phone with the same email, and you'll see the same rota.</li>
