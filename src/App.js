@@ -3,10 +3,11 @@ import supabase from './supabaseClient';
 import Auth from './Auth';
 import DutyRota from './DutyRotaOriginal';
 
-// A password-reset link SIGNS THE USER IN so they can change their password.
-// That session must never be usable for anything else. We remember that a
-// recovery is in progress (even across refreshes) and force a sign-out if the
-// user abandons it, so a reset link can never become a free login.
+// A password-reset link signs the user in automatically. Without this check,
+// App.js would see a valid session and jump straight to the rota, never giving
+// them a chance to type a new password. So while type=recovery is in the URL,
+// we keep showing the Auth screen. An expired link carries error=... instead,
+// and Auth handles that on its own.
 const RECOVERY_FLAG = 'dutyrota:recovering';
 
 const isRecoveryUrl = () => {
@@ -16,19 +17,102 @@ const isRecoveryUrl = () => {
   return p.get('type') === 'recovery' && !p.get('error');
 };
 
-// True if a recovery is in progress right now, or was started and not finished
 const recoveryPending = () => {
   if (isRecoveryUrl()) return true;
   try { return sessionStorage.getItem(RECOVERY_FLAG) === '1'; } catch { return false; }
 };
 
+/* ─────────────── Trial & subscription ───────────────
+   Every account gets 30 free days from first login. During the trial there is
+   no mention of payment (except a quiet note in the last 7 days). After 30
+   days the rota becomes view-only and a subscribe banner appears.
+   Paid accounts are activated manually: set status='active' (and optionally
+   paid_until) on their row in the Supabase subscriptions table.            */
+const TRIAL_DAYS = 30;
+const WHATSAPP = '9607666261'; // +960 Maldives
+const WA_LINK = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(
+  "Hi! My DutyRota free trial has ended and I'd like to subscribe."
+)}`;
+
+const fetchSubscription = async (userId) => {
+  try {
+    const { data: row } = await supabase
+      .from('subscriptions')
+      .select('trial_start, status, paid_until')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (row) return row;
+    // First login: start the 30-day trial. trial_start is set by the
+    // database itself, so it can't be tampered with from the browser.
+    await supabase.from('subscriptions').insert({ user_id: userId });
+    const { data: fresh } = await supabase
+      .from('subscriptions')
+      .select('trial_start, status, paid_until')
+      .eq('user_id', userId)
+      .maybeSingle();
+    return fresh;
+  } catch (e) {
+    console.error('Subscription check failed:', e);
+    return null; // fail open — a Supabase hiccup must never lock a paying user out
+  }
+};
+
+const subscriptionState = (row) => {
+  if (!row) return { locked: false, daysLeft: null, active: false }; // fail open
+  const today = new Date();
+  const paidOk = !row.paid_until || today <= new Date(row.paid_until + 'T23:59:59');
+  if (row.status === 'active' && paidOk) return { locked: false, daysLeft: null, active: true };
+  const elapsed = Math.floor((Date.now() - new Date(row.trial_start).getTime()) / 86400000);
+  const daysLeft = TRIAL_DAYS - elapsed;
+  return { locked: daysLeft <= 0, daysLeft: Math.max(0, daysLeft), active: false };
+};
+
+/* ─────────────── Banners ─────────────── */
+
+function TrialEndingNote({ daysLeft }) {
+  // Quiet heads-up, last 7 days only. No price, no button — just so the
+  // view-only switch on day 31 is never a surprise.
+  return (
+    <div style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '8px 20px', fontSize: 13, color: '#7A6320', textAlign: 'center' }}>
+      Your free trial ends in <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>.
+    </div>
+  );
+}
+
+function Paywall() {
+  return (
+    <div style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
+      <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
+        <div style={{ flex: '1 1 320px' }}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Your free trial has ended</div>
+          <div style={{ fontSize: 13, opacity: 0.95, lineHeight: 1.5 }}>
+            Your rota and all your data are safe — you can still view everything and export PDFs,
+            but editing is paused. Subscribe to continue right where you left off.
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, lineHeight: 1.6, textAlign: 'right' }}>
+            <div><strong>MVR 154</strong> / month <span style={{ opacity: 0.85 }}>($9.99)</span></div>
+            <div><strong>MVR 107</strong> / month billed annually <span style={{ opacity: 0.85 }}>($6.99)</span></div>
+          </div>
+          <a href={WA_LINK} target="_blank" rel="noreferrer" style={{
+            background: '#fff', color: '#0B6A60', fontWeight: 800, fontSize: 14,
+            padding: '11px 18px', borderRadius: 8, textDecoration: 'none', whiteSpace: 'nowrap',
+          }}>
+            Subscribe on WhatsApp
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [recovering, setRecovering] = useState(recoveryPending());
+  const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false });
 
-  // Mark the recovery as in-progress immediately, so a refresh mid-reset does
-  // not drop the user straight into the app with an unchanged password.
   useEffect(() => {
     if (isRecoveryUrl()) {
       try { sessionStorage.setItem(RECOVERY_FLAG, '1'); } catch { /* ignore */ }
@@ -53,15 +137,12 @@ export default function App() {
       setSession(session);
     });
 
-    // Auth.js fires this ONLY after the new password is saved successfully
     const done = () => {
       try { sessionStorage.removeItem(RECOVERY_FLAG); } catch { /* ignore */ }
       setRecovering(false);
     };
     window.addEventListener('dutyrota:recovery-done', done);
 
-    // If they close the tab mid-reset, end the session. A recovery link must
-    // never survive as a logged-in session without a new password being set.
     const abandon = () => {
       try {
         if (sessionStorage.getItem(RECOVERY_FLAG) === '1') supabase.auth.signOut();
@@ -76,6 +157,16 @@ export default function App() {
     };
   }, []);
 
+  // Check trial/subscription whenever someone is logged in
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let cancelled = false;
+    fetchSubscription(session.user.id).then((row) => {
+      if (!cancelled) setSub(subscriptionState(row));
+    });
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
@@ -84,12 +175,14 @@ export default function App() {
     );
   }
 
-  // Show the Auth screen if nobody is logged in, OR if a password reset is
-  // still unfinished. The recovery session grants no access to the app.
   if (!session || recovering) return <Auth />;
+
+  const showEndingNote = !sub.active && !sub.locked && sub.daysLeft !== null && sub.daysLeft <= 7;
 
   return (
     <div>
+      {sub.locked && <Paywall />}
+      {showEndingNote && <TrialEndingNote daysLeft={sub.daysLeft} />}
       <div style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '20px' }}>📋 DutyRota</h1>
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
@@ -102,7 +195,7 @@ export default function App() {
           </button>
         </div>
       </div>
-      <DutyRota />
+      <DutyRota locked={sub.locked} />
     </div>
   );
 }

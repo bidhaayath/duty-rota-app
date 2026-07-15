@@ -401,7 +401,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota() {
+export default function DutyRota({ locked = false }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("rota");
   const [weekStart, setWeekStart] = useState(startOfWeek(dstr(new Date())));
@@ -429,7 +429,16 @@ export default function DutyRota() {
     return () => { clearTimeout(timer); window.removeEventListener("afterprint", done); };
   }, [printView]);
 
-  const update = (fn) => setData((d) => fn(structuredClone(d)));
+  // Every edit in the whole app flows through this one function, so this
+  // single gate makes the entire rota view-only when the trial has ended.
+  // Viewing and PDF export still work.
+  const update = (fn) => {
+    if (locked) {
+      alert("Your free trial has ended, so the rota is view-only for now.\n\nYou can still view everything and export PDFs. To keep editing, use the Subscribe button at the top.");
+      return;
+    }
+    setData((d) => fn(structuredClone(d)));
+  };
 
   if (!data) return <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
 
