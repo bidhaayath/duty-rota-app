@@ -67,7 +67,7 @@ const LEAVE_STYLES = {
   maternity:    { label: "Maternity",        abbrev: "MAT", bg: "#E9E9E9", fg: "#5A6B72", icon: Baby },
   prematernity: { label: "Pre-Maternity",    abbrev: "PML", bg: "#F6E0EC", fg: "#9C3D6E", icon: Baby },
   emergency:    { label: "Emergency Leave",  abbrev: "EL",  bg: "#FBE3DF", fg: "#B3532F", icon: AlertTriangle },
-  other:        { label: "Other Leave",      abbrev: "LV",  bg: "#E6E4F5", fg: "#4E4A8C", icon: MoreHorizontal },
+  other:        { label: "Other Extended Leave", abbrev: "LV", bg: "#E6E4F5", fg: "#4E4A8C", icon: MoreHorizontal },
 };
 // Resolve a period's display style (custom "other" labels keep the generic style)
 const styleFor = (period) => {
@@ -75,6 +75,17 @@ const styleFor = (period) => {
   return period.type === "other" && period.label ? { ...base, label: period.label } : base;
 };
 const DUTY_CATS = ["morning", "afternoon", "night", "other", "release"];
+// Which leave column a code feeds. "leave" is the catch-all that feeds the
+// Other leave column; sl/frl/ml feed their own, so a code like N/FRL can be
+// counted as FRL without being named "FRL". Newer codes say so explicitly via `counts`.
+// Rotas saved before this existed have every leave code on counts:"leave", so
+// fall back to the code text — that keeps their SL/FRL/ML tallies unchanged.
+const leaveBucket = (code) => {
+  if (["sl", "frl", "ml"].includes(code.counts)) return code.counts;
+  if (code.counts !== "leave") return null;
+  const c = (code.code || "").toUpperCase();
+  return c === "SL" ? "sl" : c === "FRL" ? "frl" : c === "ML" ? "ml" : "other";
+};
 
 /* ─────────────────── Date helpers ─────────────────── */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -165,14 +176,18 @@ const recordsFor = (data, from, to) => {
   const codeById = codeByIdOf(data);
   const dates = datesBetween(from, to);
   return data.staff.filter((s) => employedInRange(s, from, to)).map((s) => {
-    const t = { morning: 0, afternoon: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {} };
+    const t = { morning: 0, afternoon: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {}, leaveByBucket: { sl: 0, frl: 0, ml: 0, other: 0 } };
     dates.forEach((date) => {
       if (!isEmployedOn(s, date)) return;
       if (leaveOn(s, date)) return;
       const code = codeById((data.cells[date] || {})[s.id]);
       if (!code) return;
-      if (code.counts in t) t[code.counts]++;
-      if (code.counts === "leave") t.leaveByCode[code.code.toUpperCase()] = (t.leaveByCode[code.code.toUpperCase()] || 0) + 1;
+      if (DUTY_CATS.includes(code.counts) || code.counts === "off") t[code.counts]++;
+      const bucket = leaveBucket(code);
+      if (bucket) {
+        t.leaveByCode[code.code.toUpperCase()] = (t.leaveByCode[code.code.toUpperCase()] || 0) + 1;
+        t.leaveByBucket[bucket]++;
+      }
       if (code.counts === "off" && parseD(date).getDay() === FRIDAY) t.fridayOff++;
       if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) {
         t.nonOfficialDuty++; t.nonOfficialDates.push({ date, code: code.code });
@@ -191,10 +206,8 @@ const recordsFor = (data, from, to) => {
     const otherPeriodDays = (s.leavePeriods || [])
       .filter((p) => !["annual", "maternity"].includes(p.type))
       .reduce((a, p) => a + rawOverlap(p), 0);
-    const sl = t.leaveByCode["SL"] || 0, frl = t.leaveByCode["FRL"] || 0, ml = t.leaveByCode["ML"] || 0;
-    const otherLeave = Object.entries(t.leaveByCode)
-      .filter(([k]) => !["SL", "FRL", "ML"].includes(k))
-      .reduce((a, [, v]) => a + v, 0) + otherPeriodDays;
+    const sl = t.leaveByBucket.sl, frl = t.leaveByBucket.frl, ml = t.leaveByBucket.ml;
+    const otherLeave = t.leaveByBucket.other + otherPeriodDays;
     return {
       staff: s, ...t, annualDays, maternityDays, otherPeriodDays, sl, frl, ml, otherLeave,
       totalDuty: t.morning + t.afternoon + t.night + t.other + t.release,
@@ -213,9 +226,9 @@ const DEFAULT_CODES = [
   { id: "RD",   code: "RD",     label: "Release duty (other unit)", color: "#C08552", counts: "release" },
   { id: "OFF",  code: "OFF",    label: "Off day",              color: "#FFFFFF", counts: "off" },
   { id: "NOFF", code: "(N)OFF", label: "Off after night",      color: "#E8EEF2", counts: "off" },
-  { id: "SL",   code: "SL",     label: "Sick leave",           color: "#F0A090", counts: "leave" },
-  { id: "FRL",  code: "FRL",    label: "Family related leave", color: "#D98BD3", counts: "leave" },
-  { id: "ML",   code: "ML",     label: "Medical leave",        color: "#5E3A87", counts: "leave" },
+  { id: "SL",   code: "SL",     label: "Sick leave",           color: "#F0A090", counts: "sl" },
+  { id: "FRL",  code: "FRL",    label: "Family related leave", color: "#D98BD3", counts: "frl" },
+  { id: "ML",   code: "ML",     label: "Medical leave",        color: "#5E3A87", counts: "ml" },
 ];
 
 const seed = () => ({
@@ -593,7 +606,9 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 
   const CATS = [
     ["morning", "Morning"], ["afternoon", "Afternoon"], ["night", "Night"],
-    ["other", "Other duty"], ["release", "Release duty"], ["off", "Off day"], ["leave", "Leave"],
+    ["other", "Other duty"], ["release", "Release duty"], ["off", "Off day"],
+    ["sl", "Sick leave (SL)"], ["frl", "Family related leave (FRL)"],
+    ["ml", "Medical leave (ML)"], ["leave", "Other leave"],
   ];
   const btnMini = { fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "6px 9px", borderRadius: 7, border: "none" };
 
@@ -935,7 +950,7 @@ function Records({ data, range, setRange, onExport }) {
         </Card>
       )}
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-        AL, and all other leave periods, count every calendar day in the period (Fridays, Saturdays, and non-official days included). SL, FRL, and ML are counted from rota codes; "Other leave" covers other leave codes plus pre-maternity, emergency, and custom leave periods.
+        AL, and all other leave periods, count every calendar day in the period (Fridays, Saturdays, and non-official days included). SL, FRL, and ML are counted from rota codes — each code’s "Counts as" setting decides which column it feeds, so a code like N/FRL can count as FRL. "Other leave" covers leave codes set to Other leave, plus pre-maternity, emergency, and other extended leave periods.
       </div>
     </div>
   );
@@ -960,7 +975,7 @@ function Stats({ data, range, setRange, onExport }) {
     { name: "Maternity", value: staffOnLeaveType("maternity"), color: "#9AA5AB" },
     { name: "Pre-maternity", value: staffOnLeaveType("prematernity"), color: "#9C3D6E" },
     { name: "Emergency", value: staffOnLeaveType("emergency"), color: "#E4604E" },
-    { name: "Other", value: staffOnLeaveType("other"), color: "#6C7BD9" },
+    { name: "Other ext.", value: staffOnLeaveType("other"), color: "#6C7BD9" },
   ];
   const anyLeaveByType = leaveTypeData.some((x) => x.value > 0);
 
@@ -1320,7 +1335,7 @@ function StatsPrint({ data, from, to }) {
     { name: "Maternity", value: staffOnLeaveType("maternity"), color: "#9AA5AB" },
     { name: "Pre-mat.", value: staffOnLeaveType("prematernity"), color: "#9C3D6E" },
     { name: "Emergency", value: staffOnLeaveType("emergency"), color: "#E4604E" },
-    { name: "Other", value: staffOnLeaveType("other"), color: "#6C7BD9" },
+    { name: "Other ext.", value: staffOnLeaveType("other"), color: "#6C7BD9" },
   ];
   const anyLeaveByType = leaveTypeData.some((x) => x.value > 0);
   const codeTotals = {};
@@ -1597,7 +1612,7 @@ function StaffTab({ data, update }) {
                   <option value="maternity">Maternity</option>
                   <option value="prematernity">Pre-maternity</option>
                   <option value="emergency">Emergency leave</option>
-                  <option value="other">Other (custom name)</option>
+                  <option value="other">Other extended leave (custom name)</option>
                 </select>
               </Field>
               {np.type === "other" && (
@@ -2168,7 +2183,7 @@ function SettingsTab({ data, update }) {
   const removeDate = (date) => update((d) => { d.nonOfficial = d.nonOfficial.filter((x) => x !== date); return d; });
   const clearAll = () => update((d) => { d.nonOfficial = []; return d; });
 
-  const countsLabel = { morning: "Morning duty", afternoon: "Afternoon duty", night: "Night duty", other: "Other duty", release: "Release duty", off: "Off day", leave: "Leave" };
+  const countsLabel = { morning: "Morning duty", afternoon: "Afternoon duty", night: "Night duty", other: "Other duty", release: "Release duty", off: "Off day", sl: "Sick leave (SL)", frl: "Family related leave (FRL)", ml: "Medical leave (ML)", leave: "Other leave" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -2232,7 +2247,10 @@ function SettingsTab({ data, update }) {
                 <option value="other">Other duty (e.g. evening, 4th/5th shift)</option>
                 <option value="release">Release duty (staff only, not unit)</option>
                 <option value="off">Off day</option>
-                <option value="leave">Leave</option>
+                <option value="sl">Sick leave (SL)</option>
+                <option value="frl">Family related leave (FRL)</option>
+                <option value="ml">Medical leave (ML)</option>
+                <option value="leave">Other leave</option>
               </select>
             </Field>
             <Field label="Color">
