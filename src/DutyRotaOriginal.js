@@ -1037,10 +1037,13 @@ function Stats({ data, range, setRange, onExport }) {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Card style={{ flex: "1 1 100%", minWidth: 320 }}>
             <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Duties per staff</h3>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={dutyByStaff}>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={dutyByStaff} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
+                {/* Names are rotated upright: with a long staff list they collide
+                    when laid flat, and recharts silently drops the ones that
+                    don't fit. interval={0} keeps every name on the axis. */}
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-90} textAnchor="end" height={72} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -1386,9 +1389,9 @@ function StatsPrint({ data, from, to }) {
       <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
         <div style={{ ...box, flex: "0 0 62%" }}>
           <h4 style={chartTitle}>Duties per staff</h4>
-          <BarChart width={620} height={220} data={dutyByStaff}>
+          <BarChart width={620} height={280} data={dutyByStaff} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-            <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+            <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-90} textAnchor="end" height={72} />
             <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
             <Legend wrapperStyle={{ fontSize: 10 }} />
             <Bar dataKey="Morning" stackId="a" fill="#F4B860" isAnimationActive={false} />
