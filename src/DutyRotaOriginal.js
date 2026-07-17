@@ -1064,10 +1064,11 @@ function Stats({ data, range, setRange, onExport }) {
             {!anyLeaveByType ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
             ) : (
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={leaveTypeData}>
+              <ResponsiveContainer width="100%" height={270}>
+                <BarChart data={leaveTypeData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} />
+                  {/* Angled so "Pre-maternity" and "Emergency" don't collide on a phone */}
+                  <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-40} textAnchor="end" height={66} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                   <Tooltip formatter={(v) => [`${v} staff`, "On leave"]} />
                   <Bar dataKey="value" radius={[4, 4, 0, 0]}>
@@ -1083,10 +1084,10 @@ function Stats({ data, range, setRange, onExport }) {
             {!anyLeaveCodes ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
             ) : (
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={leaveCodesTaken}>
+              <ResponsiveContainer width="100%" height={270}>
+                <BarChart data={leaveCodesTaken} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-40} textAnchor="end" height={66} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                   <Tooltip formatter={(v) => [`${v}×`, "Taken"]} />
                   <Bar dataKey="value" fill="#6C7BD9" radius={[4, 4, 0, 0]} />
@@ -1414,9 +1415,9 @@ function StatsPrint({ data, from, to }) {
           {!anyLeaveByType ? (
             <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
           ) : (
-            <BarChart width={470} height={220} data={leaveTypeData}>
+            <BarChart width={470} height={250} data={leaveTypeData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-              <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} />
+              <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-40} textAnchor="end" height={60} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
               <Bar dataKey="value" isAnimationActive={false}>
                 {leaveTypeData.map((x) => <Cell key={x.name} fill={x.color} />)}
@@ -1429,9 +1430,9 @@ function StatsPrint({ data, from, to }) {
           {!anyLeaveCodes ? (
             <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
           ) : (
-            <BarChart width={470} height={220} data={leaveCodesTaken}>
+            <BarChart width={470} height={250} data={leaveCodesTaken} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} />
+              <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-40} textAnchor="end" height={60} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
               <Bar dataKey="value" fill="#6C7BD9" isAnimationActive={false} />
             </BarChart>
