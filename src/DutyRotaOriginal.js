@@ -86,6 +86,20 @@ const leaveBucket = (code) => {
   const c = (code.code || "").toUpperCase();
   return c === "SL" ? "sl" : c === "FRL" ? "frl" : c === "ML" ? "ml" : "other";
 };
+const LEAVE_BUCKET_LABELS = [["sl", "SL"], ["frl", "FRL"], ["ml", "ML"], ["other", "Other leave"]];
+// Leave days grouped by category, not by the code text. A code named N/FRL set
+// to count as FRL adds to the FRL bar, and every code set to Other leave shares
+// one bar — so this always matches the SL/FRL/ML/Other leave columns.
+const leaveTakenFrom = (rows) => {
+  const totals = { sl: 0, frl: 0, ml: 0, other: 0 };
+  rows.forEach((r) => {
+    const b = r.leaveByBucket || {};
+    ["sl", "frl", "ml", "other"].forEach((k) => { totals[k] += b[k] || 0; });
+  });
+  return LEAVE_BUCKET_LABELS
+    .map(([k, name]) => ({ name, value: totals[k] }))
+    .filter((x) => x.value > 0);
+};
 
 /* ─────────────────── Date helpers ─────────────────── */
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -983,16 +997,8 @@ function Stats({ data, range, setRange, onExport }) {
   ];
   const anyLeaveByType = leaveTypeData.some((x) => x.value > 0);
 
-  // Chart 2: total times each leave CODE (SL, FRL, ML, custom) was taken across the range
-  const codeTotals = {};
-  rows.forEach((r) => {
-    Object.entries(r.leaveByCode || {}).forEach(([code, n]) => {
-      codeTotals[code] = (codeTotals[code] || 0) + n;
-    });
-  });
-  const leaveCodesTaken = Object.entries(codeTotals)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
+  // Chart 2: leave days by category across the range
+  const leaveCodesTaken = leaveTakenFrom(rows);
   const anyLeaveCodes = leaveCodesTaken.length > 0;
 
   const coverage = useMemo(() => {
@@ -1080,9 +1086,9 @@ function Stats({ data, range, setRange, onExport }) {
           </Card>
 
           <Card style={{ flex: "1 1 280px", minWidth: 260 }}>
-            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave codes taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(times taken)</span></h3>
+            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(days by category)</span></h3>
             {!anyLeaveCodes ? (
-              <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
+              <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave recorded in this range.</div>
             ) : (
               <ResponsiveContainer width="100%" height={270}>
                 <BarChart data={leaveCodesTaken} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
@@ -1346,15 +1352,7 @@ function StatsPrint({ data, from, to }) {
     { name: "Other ext.", value: staffOnLeaveType("other"), color: "#6C7BD9" },
   ];
   const anyLeaveByType = leaveTypeData.some((x) => x.value > 0);
-  const codeTotals = {};
-  rows.forEach((r) => {
-    Object.entries(r.leaveByCode || {}).forEach(([code, n]) => {
-      codeTotals[code] = (codeTotals[code] || 0) + n;
-    });
-  });
-  const leaveCodesTaken = Object.entries(codeTotals)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
+  const leaveCodesTaken = leaveTakenFrom(rows);
   const anyLeaveCodes = leaveCodesTaken.length > 0;
   const dates = datesBetween(from, to);
   const coverage = dates.length > 92 ? null : dates.map((date) => ({
@@ -1426,9 +1424,9 @@ function StatsPrint({ data, from, to }) {
           )}
         </div>
         <div style={{ ...box, flex: 1 }}>
-          <h4 style={chartTitle}>Leave codes taken (times taken)</h4>
+          <h4 style={chartTitle}>Leave taken (days by category)</h4>
           {!anyLeaveCodes ? (
-            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
+            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave recorded in this range.</div>
           ) : (
             <BarChart width={470} height={250} data={leaveCodesTaken} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
@@ -2113,7 +2111,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 4 }}><strong>Leave periods</strong> (set in the Staff tab)</p>
         <p style={{ marginTop: 0 }}>For longer, planned leave — <strong>annual, maternity, pre-maternity, emergency,</strong> and <strong>other</strong>. You give a start and end date, and it fills the whole period on the rota automatically. All of these count every calendar day in the period, including Fridays, Saturdays, and non-official days.</p>
         <p style={{ marginBottom: 4 }}><strong>Leave codes</strong> (entered in the Weekly Rota)</p>
-        <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. The Statistics tab counts how many times each was taken.</p>
+        <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. Each code\u2019s <strong>Counts as</strong> setting decides which category it adds to, so a code like <Code>N/FRL</Code> can count as FRL.</p>
       </Section>
 
       <Section title="5. When someone joins or leaves">
@@ -2132,7 +2130,7 @@ function HelpTab({ data }) {
       </Section>
 
       <Section title="7. Reports & printing">
-        <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many times each leave code was taken.</p>
+        <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many leave days were taken in each category (SL, FRL, ML, Other leave).</p>
         <p style={{ marginBottom: 0 }}>On any of these, the <strong>Export PDF</strong> button makes a clean printable version you can save or print for your records.</p>
       </Section>
 
