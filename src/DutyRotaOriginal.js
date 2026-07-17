@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
-  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight
+  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -575,7 +575,10 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => { if (!wrapRef.current?.contains(e.target)) close(); };
-    const onScroll = () => close();
+    // The panel is position:fixed with coordinates worked out when it opened, so
+    // it has to close if the page scrolls behind it. Scrolling the code list
+    // inside the panel is not that — ignore those.
+    const onScroll = (e) => { if (!wrapRef.current?.contains(e.target)) close(); };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("touchstart", onDoc);
     window.addEventListener("scroll", onScroll, true);
@@ -2029,6 +2032,11 @@ function InsightsPrint({ data, cfg }) {
   );
 }
 
+const SUPPORT_WHATSAPP = "9607666261"; // +960 Maldives
+const SUPPORT_LINK = `https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent(
+  "Hi! I have a question about DutyRota."
+)}`;
+
 function HelpTab({ data }) {
   const Section = ({ title, children }) => (
     <Card style={{ marginBottom: 14 }}>
@@ -2139,9 +2147,20 @@ function HelpTab({ data }) {
         </ul>
       </Section>
 
-      <div style={{ fontSize: 12.5, color: T.inkSoft, textAlign: "center", padding: "6px 0 10px" }}>
-        Still stuck on something? Note down what happened and we'll sort it out.
-      </div>
+      <Section title="Still stuck? Message us">
+        <p style={{ marginTop: 0 }}>
+          If something isn't working, you're not sure how to do something, or you'd like a feature
+          added — send us a message on WhatsApp. It helps if you say what you were trying to do and
+          what happened instead.
+        </p>
+        <a href={SUPPORT_LINK} target="_blank" rel="noreferrer" style={{
+          display: "inline-flex", alignItems: "center", gap: 8, background: T.lagoon, color: "#fff",
+          fontWeight: 700, fontSize: 13.5, padding: "10px 18px", borderRadius: 8,
+          textDecoration: "none", marginTop: 4,
+        }}>
+          <MessageCircle size={16} /> Message us on WhatsApp
+        </a>
+      </Section>
     </div>
   );
 }
