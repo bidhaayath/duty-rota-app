@@ -465,6 +465,7 @@ export default function DutyRota({ locked = false }) {
       .no-print { display: none !important; }
       body { background: #fff !important; }
       * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .recharts-wrapper, .recharts-surface { break-inside: avoid; page-break-inside: avoid; }
     }
     @page { size: A4 landscape; margin: 10mm; }
   `;
@@ -1367,7 +1368,9 @@ function StatsPrint({ data, from, to }) {
     leave: rows.reduce((a, r) => a + r.annualDays + r.maternityDays + r.sl + r.frl + r.ml + r.otherLeave, 0),
     off: rows.reduce((a, r) => a + r.off, 0),
   };
-  const box = { border: "1px solid #BBB", borderRadius: 8, padding: 10, background: "#fff" };
+  // breakInside keeps a chart card whole — without it a tall card leaves an
+  // empty box on one page and its chart on the next.
+  const box = { border: "1px solid #BBB", borderRadius: 8, padding: 10, background: "#fff", breakInside: "avoid", pageBreakInside: "avoid" };
   const chartTitle = { fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 12, margin: "0 0 6px" };
 
   return (
@@ -1386,10 +1389,12 @@ function StatsPrint({ data, from, to }) {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        <div style={{ ...box, flex: "0 0 62%" }}>
+      {/* Duties per staff gets its own row — with a long staff list and upright
+          names it needs the full width. The two leave charts pair on the next. */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={box}>
           <h4 style={chartTitle}>Duties per staff</h4>
-          <BarChart width={620} height={280} data={dutyByStaff} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+          <BarChart width={980} height={280} data={dutyByStaff} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
             <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-90} textAnchor="end" height={72} />
             <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
@@ -1401,12 +1406,15 @@ function StatsPrint({ data, from, to }) {
             <Bar dataKey="Release" stackId="a" fill="#C08552" isAnimationActive={false} />
           </BarChart>
         </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
         <div style={{ ...box, flex: 1 }}>
           <h4 style={chartTitle}>Staff on leave (by type)</h4>
           {!anyLeaveByType ? (
             <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
           ) : (
-            <BarChart width={330} height={220} data={leaveTypeData}>
+            <BarChart width={470} height={220} data={leaveTypeData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
               <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
@@ -1416,15 +1424,12 @@ function StatsPrint({ data, from, to }) {
             </BarChart>
           )}
         </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
         <div style={{ ...box, flex: 1 }}>
           <h4 style={chartTitle}>Leave codes taken (times taken)</h4>
           {!anyLeaveCodes ? (
             <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave codes recorded in this range.</div>
           ) : (
-            <BarChart width={620} height={200} data={leaveCodesTaken}>
+            <BarChart width={470} height={220} data={leaveCodesTaken}>
               <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
               <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
