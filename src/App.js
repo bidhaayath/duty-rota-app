@@ -33,6 +33,9 @@ const WHATSAPP = '9607666261'; // +960 Maldives
 const WA_LINK = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(
   "Hi! My DutyRota free trial has ended and I'd like to subscribe."
 )}`;
+const WA_LINK_EARLY = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(
+  "Hi! My DutyRota free trial is ending soon and I'd like to subscribe."
+)}`;
 
 const fetchSubscription = async (userId) => {
   try {
@@ -70,11 +73,19 @@ const subscriptionState = (row) => {
 /* ─────────────── Banners ─────────────── */
 
 function TrialEndingNote({ daysLeft }) {
-  // Quiet heads-up, last 7 days only. No price, no button — just so the
-  // view-only switch on day 31 is never a surprise.
+  // Heads-up in the last 7 days, with a subscribe link so people can act
+  // before the view-only switch rather than after it.
   return (
-    <div style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '8px 20px', fontSize: 13, color: '#7A6320', textAlign: 'center' }}>
-      Your free trial ends in <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>.
+    <div style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '10px 20px', fontSize: 13, color: '#7A6320', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+      <span>
+        Your free trial ends in <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>.
+      </span>
+      <a href={WA_LINK_EARLY} target="_blank" rel="noreferrer" style={{
+        background: '#0F8B7E', color: '#fff', fontWeight: 700, fontSize: 12,
+        padding: '6px 14px', borderRadius: 6, textDecoration: 'none', whiteSpace: 'nowrap',
+      }}>
+        Subscribe on WhatsApp
+      </a>
     </div>
   );
 }
