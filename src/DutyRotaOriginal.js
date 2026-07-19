@@ -67,6 +67,88 @@ const saveUserRota = async (rotaData) => {
   }
 };
 
+/* ─────────────── Departments ───────────────
+   One login can own several departments, each with its own rota row.
+   Everyone currently trialing gets the Plus-level limit; the paywall
+   tiers will feed this number later.                                 */
+const DEPT_LIMIT = 6;
+
+// Lists this user's departments, and self-heals accounts that predate the
+// department system (or signed up between migration and deploy): any rota
+// without a department gets one, named after the rota's title.
+const setupDepartments = async () => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    let { data: deps } = await supabase
+      .from("departments")
+      .select("id, name, created_at")
+      .order("created_at", { ascending: true });
+    deps = deps || [];
+    const { data: orphans } = await supabase
+      .from("rotas").select("id, title")
+      .is("department_id", null).eq("user_id", user.id);
+    for (const o of orphans || []) {
+      const { data: d } = await supabase
+        .from("departments")
+        .insert({ owner_user_id: user.id, name: (o.title || "").trim() || "Department 1" })
+        .select("id, name, created_at").single();
+      if (d) {
+        await supabase.from("rotas").update({ department_id: d.id }).eq("id", o.id);
+        deps.push(d);
+      }
+    }
+    if (deps.length === 0) {
+      const { data: d } = await supabase
+        .from("departments")
+        .insert({ owner_user_id: user.id, name: "Department 1" })
+        .select("id, name, created_at").single();
+      if (d) deps.push(d);
+    }
+    return deps;
+  } catch (e) {
+    console.error("Department setup failed, falling back to single-rota mode:", e);
+    return []; // legacy mode — the app still loads
+  }
+};
+
+const loadRotaFor = async (deptId) => {
+  try {
+    const { data: rows } = await supabase
+      .from("rotas").select("rota_data")
+      .eq("department_id", deptId).limit(1);
+    const row = rows && rows[0];
+    if (row && row.rota_data) return row.rota_data;
+  } catch (e) {
+    console.error("Supabase load failed, using local backup:", e);
+  }
+  try {
+    const local = localStorage.getItem("rota:v2:" + deptId);
+    if (local) return JSON.parse(local);
+  } catch (e) { /* ignore */ }
+  return null;
+};
+
+const saveRotaFor = async (deptId, rotaData) => {
+  try {
+    localStorage.setItem("rota:v2:" + deptId, JSON.stringify(rotaData));
+  } catch (e) { /* ignore */ }
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !deptId) return;
+    const { data: existing } = await supabase
+      .from("rotas").select("id").eq("department_id", deptId).limit(1);
+    const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
+    if (existing && existing[0]) {
+      await supabase.from("rotas").update(payload).eq("id", existing[0].id);
+    } else {
+      await supabase.from("rotas").insert({ user_id: user.id, department_id: deptId, ...payload });
+    }
+  } catch (e) {
+    console.error("Supabase save failed (local backup kept):", e);
+  }
+};
+
 /* ─────────────────── Design tokens ─────────────────── */
 const T = {
   ink: "#142B33", inkSoft: "#4A6570", mist: "#EEF4F3", card: "#FFFFFF",
@@ -457,6 +539,10 @@ function WelcomeGuide({ data, update, setTab }) {
 
 export default function DutyRota({ locked = false }) {
   const [data, setData] = useState(null);
+  const [departments, setDepartments] = useState([]);
+  const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
+  const [deptMenuOpen, setDeptMenuOpen] = useState(false);
+  const switchingDept = useRef(false); // guards the autosave while a switch loads
   const [tab, setTab] = useState("rota");
   const [weekStart, setWeekStart] = useState(startOfWeek(dstr(new Date())));
   const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
@@ -465,15 +551,83 @@ export default function DutyRota({ locked = false }) {
 
   useEffect(() => {
     (async () => {
-      const saved = await loadUserRota();
-      setData(saved ? migrate(saved) : seed());
+      const deps = await setupDepartments();
+      if (deps.length > 0) {
+        setDepartments(deps);
+        switchingDept.current = true;
+        setDeptId(deps[0].id);
+        let saved = await loadRotaFor(deps[0].id);
+        if (!saved) saved = await loadUserRota(); // old local backups
+        setData(saved ? migrate(saved) : seed());
+        switchingDept.current = false;
+      } else {
+        // Departments unreachable — legacy mode so nobody is locked out
+        const saved = await loadUserRota();
+        setData(saved ? migrate(saved) : seed());
+      }
     })();
   }, []);
 
   useEffect(() => {
-    if (!data) return;
-    saveUserRota(data);
-  }, [data]);
+    if (!data || switchingDept.current) return;
+    if (deptId) saveRotaFor(deptId, data);
+    else saveUserRota(data);
+  }, [data, deptId]);
+
+  const switchDept = async (id) => {
+    if (id === deptId) return;
+    switchingDept.current = true;
+    setData(null);
+    setDeptId(id);
+    const saved = await loadRotaFor(id);
+    setData(saved ? migrate(saved) : seed());
+    switchingDept.current = false;
+  };
+
+  const addDepartment = async () => {
+    if (departments.length >= DEPT_LIMIT) {
+      window.alert(`Your plan allows up to ${DEPT_LIMIT} departments.`);
+      return;
+    }
+    const name = window.prompt("Name for the new department:", `Department ${departments.length + 1}`);
+    if (!name || !name.trim()) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: d, error } = await supabase
+      .from("departments")
+      .insert({ owner_user_id: user.id, name: name.trim() })
+      .select("id, name, created_at").single();
+    if (error || !d) { window.alert("Could not create the department. Please try again."); return; }
+    setDepartments((prev) => [...prev, d]);
+    switchingDept.current = true;
+    setData(null);
+    setDeptId(d.id);
+    setData(seed());
+    switchingDept.current = false;
+  };
+
+  const renameDepartment = async () => {
+    const cur = departments.find((x) => x.id === deptId);
+    if (!cur) return;
+    const name = window.prompt("Rename department:", cur.name);
+    if (!name || !name.trim() || name.trim() === cur.name) return;
+    const { error } = await supabase.from("departments").update({ name: name.trim() }).eq("id", deptId);
+    if (error) { window.alert("Could not rename the department. Please try again."); return; }
+    setDepartments((prev) => prev.map((x) => (x.id === deptId ? { ...x, name: name.trim() } : x)));
+  };
+
+  const deleteDepartment = async () => {
+    if (departments.length <= 1) { window.alert("You need at least one department."); return; }
+    const cur = departments.find((x) => x.id === deptId);
+    if (!cur) return;
+    if (!window.confirm(`Delete "${cur.name}" and ALL its rota data?\n\nThis cannot be undone.`)) return;
+    const { error: rotaErr } = await supabase.from("rotas").delete().eq("department_id", deptId);
+    const { error: depErr } = rotaErr ? { error: rotaErr } : await supabase.from("departments").delete().eq("id", deptId);
+    if (rotaErr || depErr) { window.alert("Could not delete the department. Please try again."); return; }
+    try { localStorage.removeItem("rota:v2:" + deptId); } catch (e) { /* ignore */ }
+    const remaining = departments.filter((x) => x.id !== deptId);
+    setDepartments(remaining);
+    await switchDept(remaining[0].id);
+  };
 
   useEffect(() => {
     if (!printView) return;
@@ -542,6 +696,60 @@ export default function DutyRota({ locked = false }) {
       <style>{globalCss}</style>
 
       <header style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
+        {departments.length > 0 && (
+          <div style={{ position: "relative", display: "inline-block", marginBottom: 8 }}>
+            <button onClick={() => setDeptMenuOpen((o) => !o)} style={{
+              fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 7,
+              background: "rgba(255,255,255,0.12)", color: "#DDEBE8", border: "1px solid rgba(255,255,255,0.22)",
+              borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            }}>
+              <Users size={13} /> {(departments.find((d) => d.id === deptId) || {}).name || "Department"}
+              <ChevronDown size={13} style={{ transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
+            </button>
+            {deptMenuOpen && (
+              <>
+                <div onClick={() => setDeptMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 59 }} />
+                <div style={{
+                  position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
+                  background: "#fff", color: T.ink, borderRadius: 12, border: `1px solid ${T.line}`,
+                  boxShadow: "0 12px 30px rgba(15,30,28,0.18)", overflow: "hidden",
+                }}>
+                  {departments.map((d) => (
+                    <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
+                      fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "10px 14px", border: "none", background: d.id === deptId ? T.mist : "#fff",
+                      fontSize: 13.5, fontWeight: d.id === deptId ? 700 : 500, cursor: "pointer", textAlign: "left",
+                    }}>
+                      {d.id === deptId ? <Check size={14} color={T.lagoon} /> : <span style={{ width: 14 }} />}
+                      {d.name}
+                    </button>
+                  ))}
+                  <div style={{ borderTop: `1px solid ${T.line}` }}>
+                    {!locked && (
+                      <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
+                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
+                        fontWeight: 600, color: T.lagoon, cursor: "pointer", textAlign: "left",
+                      }}><Plus size={14} /> Add department</button>
+                    )}
+                    <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
+                      fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
+                      fontWeight: 600, cursor: "pointer", textAlign: "left",
+                    }}><Pencil size={14} /> Rename this department</button>
+                    {!locked && departments.length > 1 && (
+                      <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
+                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
+                        fontWeight: 600, color: T.coral, cursor: "pointer", textAlign: "left",
+                      }}><Trash2 size={14} /> Delete this department</button>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
           <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
           <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
