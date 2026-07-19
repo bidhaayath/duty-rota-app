@@ -74,7 +74,7 @@ const styleFor = (period) => {
   const base = LEAVE_STYLES[period.type] || LEAVE_STYLES.other;
   return period.type === "other" && period.label ? { ...base, label: period.label } : base;
 };
-const DUTY_CATS = ["morning", "afternoon", "night", "other", "release"];
+const DUTY_CATS = ["morning", "afternoon", "evening", "night", "other", "release"];
 // Which leave column a code feeds. "leave" is the catch-all that feeds the
 // Other leave column; sl/frl/ml feed their own, so a code like N/FRL can be
 // counted as FRL without being named "FRL". Newer codes say so explicitly via `counts`.
@@ -190,7 +190,7 @@ const recordsFor = (data, from, to) => {
   const codeById = codeByIdOf(data);
   const dates = datesBetween(from, to);
   return data.staff.filter((s) => employedInRange(s, from, to)).map((s) => {
-    const t = { morning: 0, afternoon: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {}, leaveByBucket: { sl: 0, frl: 0, ml: 0, other: 0 } };
+    const t = { morning: 0, afternoon: 0, evening: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {}, leaveByBucket: { sl: 0, frl: 0, ml: 0, other: 0 } };
     dates.forEach((date) => {
       if (!isEmployedOn(s, date)) return;
       if (leaveOn(s, date)) return;
@@ -224,7 +224,7 @@ const recordsFor = (data, from, to) => {
     const otherLeave = t.leaveByBucket.other + otherPeriodDays;
     return {
       staff: s, ...t, annualDays, maternityDays, otherPeriodDays, sl, frl, ml, otherLeave,
-      totalDuty: t.morning + t.afternoon + t.night + t.other + t.release,
+      totalDuty: t.morning + t.afternoon + t.evening + t.night + t.other + t.release,
     };
   });
 };
@@ -252,6 +252,7 @@ const seed = () => ({
   cellMeta: {},
   nonOfficial: [],
   fridayRule: true,
+  eveningEnabled: false,
   title: "ENTER AREA NAME",
 });
 
@@ -281,6 +282,9 @@ const migrate = (d) => {
   if (!d.cellMeta) d.cellMeta = {};
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
   if (d.fridayRule === undefined) d.fridayRule = true;
+  // Evening shift is opt-in: most units run 3 shifts, so the row/column only
+  // exists for rotas that turn it on (e.g. 4-shift Ramadan rosters).
+  if (d.eveningEnabled === undefined) d.eveningEnabled = false;
   // add newer default codes if missing (match by code string)
   const have = new Set(d.codes.map((c) => c.code.toUpperCase()));
   DEFAULT_CODES.forEach((c) => { if (!have.has(c.code.toUpperCase())) d.codes.push({ ...c }); });
@@ -560,7 +564,7 @@ export default function DutyRota({ locked = false }) {
    brand-new code without leaving the rota. Chips are finger-sized.       */
 const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", "#4DB6AC", "#F06292", "#A1887F", "#9575CD", "#4DD0E1"];
 
-function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode }) {
+function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState("pick"); // 'pick' | 'note' | 'add'
@@ -632,7 +636,8 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
   };
 
   const CATS = [
-    ["morning", "Morning"], ["afternoon", "Afternoon"], ["night", "Night"],
+    ["morning", "Morning"], ["afternoon", "Afternoon"],
+    ...(eveningEnabled ? [["evening", "Evening"]] : []), ["night", "Night"],
     ["other", "Other duty"], ["release", "Release duty"], ["off", "Off day"],
     ["sl", "Sick leave (SL)"], ["frl", "Family related leave (FRL)"],
     ["ml", "Medical leave (ML)"], ["leave", "Other leave"],
@@ -805,7 +810,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                   </th>
                 );
               })}
-              {["M", "A", "N", "OD", "RD", "OFF"].map((h) => (
+              {["M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "OFF"].map((h) => (
                 <th key={h} style={{ ...th, textAlign: "center", background: "#F4F8F7" }}>{h}</th>
               ))}
               <th style={{ ...th, textAlign: "center", background: "#FBF1DC", color: "#A5731B" }}>NON-OFF DUTY</th>
@@ -849,6 +854,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                         <CodePicker
                           value={codeId}
                           codes={data.codes}
+                          eveningEnabled={data.eveningEnabled}
                           onPick={(id) => setCell(date, s.id, id)}
                           cellBg={bg}
                           cellFg={code ? textOn(code.color) : T.inkSoft}
@@ -862,6 +868,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
                   })}
                   <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#FEF7E8" }}>{t.morning}</td>
                   <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#F0F7EA" }}>{t.afternoon}</td>
+                  {data.eveningEnabled && <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#FBEEE9" }}>{t.evening}</td>}
                   <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#EBF3FB" }}>{t.night}</td>
                   <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#F0EBF8" }}>{t.other}</td>
                   <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#F7EFE7" }}>{t.release}</td>
@@ -872,7 +879,8 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
             })}
           </tbody>
           <tfoot>
-            {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"], ["NIGHT", "night", "#6FA8DC"],
+            {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
+              ...(data.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []), ["NIGHT", "night", "#6FA8DC"],
               ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color]) => (
               <tr key={cat}>
                 <td style={{ ...td, position: "sticky", left: 0, zIndex: 1, background: color, color: textOn(color), fontWeight: 800, fontSize: 12 }}>{label}</td>
@@ -898,7 +906,7 @@ function Records({ data, range, setRange, onExport }) {
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
-  const cols = ["Staff", "M", "A", "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
+  const cols = ["Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -934,6 +942,7 @@ function Records({ data, range, setRange, onExport }) {
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>{r.morning}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.afternoon}</td>
+                    {data.eveningEnabled && <td style={{ ...td, textAlign: "center" }}>{r.evening}</td>}
                     <td style={{ ...td, textAlign: "center" }}>{r.night}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.other}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.release}</td>
@@ -990,7 +999,7 @@ function Stats({ data, range, setRange, onExport }) {
 
   const dutyByStaff = rows.map((r) => ({
     name: shortName(r.staff.name),
-    Morning: r.morning, Afternoon: r.afternoon, Night: r.night, "Other duty": r.other, Release: r.release,
+    Morning: r.morning, Afternoon: r.afternoon, Evening: r.evening, Night: r.night, "Other duty": r.other, Release: r.release,
   }));
   const nonOffByStaff = rows.map((r) => ({ name: shortName(r.staff.name), days: r.nonOfficialDuty }));
   // Chart 1: how many DISTINCT staff have each leave-period type overlapping the range
@@ -1018,6 +1027,7 @@ function Stats({ data, range, setRange, onExport }) {
       date: shortDate(date),
       Morning: dayCountFor(data, date, "morning"),
       Afternoon: dayCountFor(data, date, "afternoon"),
+      Evening: dayCountFor(data, date, "evening"),
       Night: dayCountFor(data, date, "night"),
     }));
   }, [data, range, valid]);
@@ -1065,6 +1075,7 @@ function Stats({ data, range, setRange, onExport }) {
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="Morning" stackId="a" fill="#F4B860" />
                 <Bar dataKey="Afternoon" stackId="a" fill="#8FBF6B" />
+                {data.eveningEnabled && <Bar dataKey="Evening" stackId="a" fill="#E58E77" />}
                 <Bar dataKey="Night" stackId="a" fill="#6FA8DC" />
                 <Bar dataKey="Other duty" stackId="a" fill="#8E7CC3" />
                 <Bar dataKey="Release" stackId="a" fill="#C08552" radius={[4, 4, 0, 0]} />
@@ -1146,6 +1157,7 @@ function Stats({ data, range, setRange, onExport }) {
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Line type="monotone" dataKey="Morning" stroke="#E8A33D" dot={false} strokeWidth={2} />
                   <Line type="monotone" dataKey="Afternoon" stroke="#6E9E4C" dot={false} strokeWidth={2} />
+                  {data.eveningEnabled && <Line type="monotone" dataKey="Evening" stroke="#D0694F" dot={false} strokeWidth={2} />}
                   <Line type="monotone" dataKey="Night" stroke="#4A82BC" dot={false} strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
@@ -1194,7 +1206,7 @@ function RotaPrint({ data, weekStart }) {
                 </th>
               );
             })}
-            {["M", "A", "N", "OD", "RD", "OFF", "NON-OFF DUTY"].map((h) => <th key={h} style={pth}>{h}</th>)}
+            {["M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "OFF", "NON-OFF DUTY"].map((h) => <th key={h} style={pth}>{h}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -1231,6 +1243,7 @@ function RotaPrint({ data, weekStart }) {
                 })}
                 <td style={ptd}>{t.morning}</td>
                 <td style={ptd}>{t.afternoon}</td>
+                {data.eveningEnabled && <td style={ptd}>{t.evening}</td>}
                 <td style={ptd}>{t.night}</td>
                 <td style={ptd}>{t.other}</td>
                 <td style={ptd}>{t.release}</td>
@@ -1241,7 +1254,8 @@ function RotaPrint({ data, weekStart }) {
           })}
         </tbody>
         <tfoot>
-          {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"], ["NIGHT", "night", "#6FA8DC"],
+          {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
+            ...(data.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []), ["NIGHT", "night", "#6FA8DC"],
             ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color]) => (
             <tr key={cat}>
               <td style={{ ...ptd, textAlign: "left", background: color, color: textOn(color), fontWeight: 800 }}>{label}</td>
@@ -1273,7 +1287,7 @@ function RotaPrint({ data, weekStart }) {
 
 function RecordsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
-  const cols = ["Staff", "M", "A", "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
+  const cols = ["Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
       <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
@@ -1294,6 +1308,7 @@ function RecordsPrint({ data, from, to }) {
               <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{r.staff.name}{r.staff.endDate ? ` (left ${shortDate(r.staff.endDate)})` : ""}{r.maternityDays > 0 ? " (Maternity)" : ""}</td>
               <td style={ptd}>{r.morning}</td>
               <td style={ptd}>{r.afternoon}</td>
+              {data.eveningEnabled && <td style={ptd}>{r.evening}</td>}
               <td style={ptd}>{r.night}</td>
               <td style={ptd}>{r.other}</td>
               <td style={ptd}>{r.release}</td>
@@ -1347,7 +1362,7 @@ function StatsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
   const dutyByStaff = rows.map((r) => ({
     name: shortName(r.staff.name),
-    Morning: r.morning, Afternoon: r.afternoon, Night: r.night, "Other duty": r.other, Release: r.release,
+    Morning: r.morning, Afternoon: r.afternoon, Evening: r.evening, Night: r.night, "Other duty": r.other, Release: r.release,
   }));
   const nonOffByStaff = rows.map((r) => ({ name: shortName(r.staff.name), days: r.nonOfficialDuty }));
   const overlaps = (p) => p.start <= to && p.end >= from;
@@ -1368,6 +1383,7 @@ function StatsPrint({ data, from, to }) {
     date: shortDate(date),
     Morning: dayCountFor(data, date, "morning"),
     Afternoon: dayCountFor(data, date, "afternoon"),
+    Evening: dayCountFor(data, date, "evening"),
     Night: dayCountFor(data, date, "night"),
   }));
   const totals = {
@@ -1409,6 +1425,7 @@ function StatsPrint({ data, from, to }) {
             <Legend wrapperStyle={{ fontSize: 10 }} />
             <Bar dataKey="Morning" stackId="a" fill="#F4B860" isAnimationActive={false} />
             <Bar dataKey="Afternoon" stackId="a" fill="#8FBF6B" isAnimationActive={false} />
+            {data.eveningEnabled && <Bar dataKey="Evening" stackId="a" fill="#E58E77" isAnimationActive={false} />}
             <Bar dataKey="Night" stackId="a" fill="#6FA8DC" isAnimationActive={false} />
             <Bar dataKey="Other duty" stackId="a" fill="#8E7CC3" isAnimationActive={false} />
             <Bar dataKey="Release" stackId="a" fill="#C08552" isAnimationActive={false} />
@@ -1472,6 +1489,7 @@ function StatsPrint({ data, from, to }) {
               <Legend wrapperStyle={{ fontSize: 10 }} />
               <Line type="monotone" dataKey="Morning" stroke="#E8A33D" dot={false} strokeWidth={2} isAnimationActive={false} />
               <Line type="monotone" dataKey="Afternoon" stroke="#6E9E4C" dot={false} strokeWidth={2} isAnimationActive={false} />
+              {data.eveningEnabled && <Line type="monotone" dataKey="Evening" stroke="#D0694F" dot={false} strokeWidth={2} isAnimationActive={false} />}
               <Line type="monotone" dataKey="Night" stroke="#4A82BC" dot={false} strokeWidth={2} isAnimationActive={false} />
             </LineChart>
           )}
@@ -2103,7 +2121,7 @@ function HelpTab({ data }) {
             </span>
           ))}
         </div>
-        <p style={{ marginBottom: 0, marginTop: 12 }}>The bottom rows show how many staff are on Morning, Afternoon, and Night each day, so you can see your coverage at a glance.</p>
+        <p style={{ marginBottom: 0, marginTop: 12 }}>The bottom rows show how many staff are on Morning, Afternoon, and Night each day, so you can see your coverage at a glance. Running a 4-shift roster (e.g. during Ramadan)? Turn on <strong>Evening shift</strong> in Settings and Evening gets its own coverage row, column and “Counts as” option.</p>
       </Section>
 
       <Section title="3. Non-official days & payment">
@@ -2120,7 +2138,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 4 }}><strong>Leave periods</strong> (set in the Staff tab)</p>
         <p style={{ marginTop: 0 }}>For longer, planned leave — <strong>annual, maternity, pre-maternity, emergency,</strong> and <strong>other</strong>. You give a start and end date, and it fills the whole period on the rota automatically. All of these count every calendar day in the period, including Fridays, Saturdays, and non-official days.</p>
         <p style={{ marginBottom: 4 }}><strong>Leave codes</strong> (entered in the Weekly Rota)</p>
-        <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. Each code\u2019s <strong>Counts as</strong> setting decides which category it adds to, so a code like <Code>N/FRL</Code> can count as FRL.</p>
+        <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. Each code’s <strong>Counts as</strong> setting decides which category it adds to, so a code like <Code>N/FRL</Code> can count as FRL.</p>
       </Section>
 
       <Section title="5. When someone joins or leaves">
@@ -2218,7 +2236,7 @@ function SettingsTab({ data, update }) {
   const removeDate = (date) => update((d) => { d.nonOfficial = d.nonOfficial.filter((x) => x !== date); return d; });
   const clearAll = () => update((d) => { d.nonOfficial = []; return d; });
 
-  const countsLabel = { morning: "Morning duty", afternoon: "Afternoon duty", night: "Night duty", other: "Other duty", release: "Release duty", off: "Off day", sl: "Sick leave (SL)", frl: "Family related leave (FRL)", ml: "Medical leave (ML)", leave: "Other leave" };
+  const countsLabel = { morning: "Morning duty", afternoon: "Afternoon duty", evening: "Evening duty", night: "Night duty", other: "Other duty", release: "Release duty", off: "Off day", sl: "Sick leave (SL)", frl: "Family related leave (FRL)", ml: "Medical leave (ML)", leave: "Other leave" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -2227,6 +2245,21 @@ function SettingsTab({ data, update }) {
           <input style={{ ...inputStyle, maxWidth: 380 }} value={data.title}
             onChange={(e) => update((d) => { d.title = e.target.value; return d; })} />
         </Field>
+      </Card>
+
+      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Shifts</h2>
+      <Card>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+          <input type="checkbox" checked={!!data.eveningEnabled}
+            onChange={(e) => update((d) => { d.eveningEnabled = e.target.checked; return d; })}
+            style={{ accentColor: T.lagoon, width: 16, height: 16 }} />
+          Enable Evening shift (for 4-shift rosters)
+        </label>
+        <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 6 }}>
+          {data.eveningEnabled
+            ? "Evening appears as its own coverage row, column and \u201cCounts as\u201d option. Codes already set to Evening keep their counts even if you turn this off later."
+            : "Off by default \u2014 most units run 3 shifts. Turn on for a 4-shift roster (e.g. Ramadan) to get an Evening coverage row, column and \u201cCounts as\u201d option."}
+        </div>
       </Card>
 
       <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Non-official days</h2>
@@ -2278,8 +2311,9 @@ function SettingsTab({ data, update }) {
               <select style={inputStyle} value={form.counts} onChange={(e) => setForm({ ...form, counts: e.target.value })}>
                 <option value="morning">Morning duty</option>
                 <option value="afternoon">Afternoon duty</option>
+                {data.eveningEnabled && <option value="evening">Evening duty</option>}
                 <option value="night">Night duty</option>
-                <option value="other">Other duty (e.g. evening, 4th/5th shift)</option>
+                <option value="other">Other duty (e.g. extra or 5th shift)</option>
                 <option value="release">Release duty (staff only, not unit)</option>
                 <option value="off">Off day</option>
                 <option value="sl">Sick leave (SL)</option>
