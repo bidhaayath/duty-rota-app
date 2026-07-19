@@ -286,6 +286,15 @@ const migrate = (d) => {
   DEFAULT_CODES.forEach((c) => { if (!have.has(c.code.toUpperCase())) d.codes.push({ ...c }); });
   const mr = d.codes.find((c) => c.code.toUpperCase() === "M(R)");
   if (mr && /relief/i.test(mr.label)) mr.label = "Morning request";
+  // The SL/FRL/ML default codes used to count as the generic "leave". Now each
+  // has its own category. Point them at it so Settings, the columns and the
+  // charts all agree. Only the untouched defaults are moved — if someone
+  // deliberately set one to something else, we leave their choice alone.
+  const DEFAULT_LEAVE = { SL: "sl", FRL: "frl", ML: "ml" };
+  d.codes.forEach((c) => {
+    const want = DEFAULT_LEAVE[(c.code || "").toUpperCase()];
+    if (want && c.counts === "leave") c.counts = want;
+  });
   return d;
 };
 
