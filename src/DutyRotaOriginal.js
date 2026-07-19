@@ -2481,15 +2481,16 @@ function SettingsTab({ data, update }) {
             onChange={(e) => update((d) => {
               const on = e.target.checked;
               d.eveningEnabled = on;
-              // Keep the E codes consistent with the toggle: on -> the stock
-              // E / E(R) codes count as Evening duty; off -> anything counting
-              // as Evening moves back to Other duty so no shift disappears
-              // from the charts and columns.
-              d.codes.forEach((c) => {
-                const cc = (c.code || "").toUpperCase();
-                if (on && c.counts === "other" && (cc === "E" || cc === "E(R)")) c.counts = "evening";
-                if (!on && c.counts === "evening") c.counts = "other";
-              });
+              // Convenience on enable: the stock E / E(R) codes start counting
+              // as Evening duty. Disabling changes nothing — codes keep their
+              // Evening category (still fully counted in totals and payment;
+              // only the E column, coverage row and chart segment hide).
+              if (on) {
+                d.codes.forEach((c) => {
+                  const cc = (c.code || "").toUpperCase();
+                  if (c.counts === "other" && (cc === "E" || cc === "E(R)")) c.counts = "evening";
+                });
+              }
               return d;
             })}
             style={{ accentColor: T.lagoon, width: 16, height: 16 }} />
@@ -2497,8 +2498,8 @@ function SettingsTab({ data, update }) {
         </label>
         <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 6 }}>
           {data.eveningEnabled
-            ? "Evening has its own coverage row, column and \u201cCounts as\u201d option, and your E / E(R) codes count as Evening duty. Turning this off moves them back to Other duty."
-            : "Off by default \u2014 most units run 3 shifts. Turn on for a 4-shift roster (e.g. Ramadan): Evening gets its own coverage row and column, and your E / E(R) codes automatically count as Evening duty."}
+            ? "Evening has its own coverage row, column and \u201cCounts as\u201d option, and your E / E(R) codes count as Evening duty."
+            : "Off by default \u2014 most units run 3 shifts. Turn on for a 4-shift roster (e.g. Ramadan): Evening gets its own coverage row and column, and your E / E(R) codes automatically count as Evening duty. Turning it off later only hides the Evening column and row \u2014 evening shifts still count in totals and payment."}
         </div>
       </Card>
 
@@ -2551,7 +2552,7 @@ function SettingsTab({ data, update }) {
               <select style={inputStyle} value={form.counts} onChange={(e) => setForm({ ...form, counts: e.target.value })}>
                 <option value="morning">Morning duty</option>
                 <option value="afternoon">Afternoon duty</option>
-                {data.eveningEnabled && <option value="evening">Evening duty</option>}
+                {(data.eveningEnabled || form.counts === "evening") && <option value="evening">Evening duty</option>}
                 <option value="night">Night duty</option>
                 <option value="other">Other duty (e.g. extra or 5th shift)</option>
                 <option value="release">Release duty (staff only, not unit)</option>
