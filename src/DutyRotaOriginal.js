@@ -162,7 +162,7 @@ const staffForDays = (data, days) =>
 
 const weekTotalsFor = (data, staff, days) => {
   const codeById = codeByIdOf(data);
-  const t = { morning: 0, afternoon: 0, night: 0, other: 0, release: 0, off: 0, nonOfficialDuty: 0 };
+  const t = { morning: 0, afternoon: 0, evening: 0, night: 0, other: 0, release: 0, off: 0, nonOfficialDuty: 0 };
   days.forEach((date) => {
     if (!isEmployedOn(staff, date)) return;
     if (leaveOn(staff, date)) return;
@@ -894,7 +894,7 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
         </table>
       </Card>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-        RD (release duty) counts as duty for the staff member — including for non-official day payment — but not in this unit's Morning/Afternoon/Night coverage rows. Annual leave and maternity are set in the <strong>Staff</strong> tab and appear as merged bands.
+        RD (release duty) counts as duty for the staff member — including for non-official day payment — but not in this unit's shift coverage rows. Annual leave and maternity are set in the <strong>Staff</strong> tab and appear as merged bands.
       </div>
     </div>
   );
@@ -1229,6 +1229,11 @@ function RotaPrint({ data, weekStart }) {
                     return (
                       <td key={`l${i}`} colSpan={seg.span} style={{ ...ptd, background: st.bg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
                         {seg.span >= 3 ? st.label : st.abbrev}
+                        {seg.span >= 3 && (
+                          <span style={{ fontWeight: 500, letterSpacing: 0, marginLeft: 6, fontSize: 8.5 }}>
+                            ({niceDate(seg.period.start)} – {niceDate(seg.period.end)})
+                          </span>
+                        )}
                       </td>
                     );
                   }
