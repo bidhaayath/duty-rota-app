@@ -2478,14 +2478,27 @@ function SettingsTab({ data, update }) {
       <Card>
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
           <input type="checkbox" checked={!!data.eveningEnabled}
-            onChange={(e) => update((d) => { d.eveningEnabled = e.target.checked; return d; })}
+            onChange={(e) => update((d) => {
+              const on = e.target.checked;
+              d.eveningEnabled = on;
+              // Keep the E codes consistent with the toggle: on -> the stock
+              // E / E(R) codes count as Evening duty; off -> anything counting
+              // as Evening moves back to Other duty so no shift disappears
+              // from the charts and columns.
+              d.codes.forEach((c) => {
+                const cc = (c.code || "").toUpperCase();
+                if (on && c.counts === "other" && (cc === "E" || cc === "E(R)")) c.counts = "evening";
+                if (!on && c.counts === "evening") c.counts = "other";
+              });
+              return d;
+            })}
             style={{ accentColor: T.lagoon, width: 16, height: 16 }} />
           Enable Evening shift (for 4-shift rosters)
         </label>
         <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 6 }}>
           {data.eveningEnabled
-            ? "Evening appears as its own coverage row, column and \u201cCounts as\u201d option. Codes already set to Evening keep their counts even if you turn this off later."
-            : "Off by default \u2014 most units run 3 shifts. Turn on for a 4-shift roster (e.g. Ramadan) to get an Evening coverage row, column and \u201cCounts as\u201d option."}
+            ? "Evening has its own coverage row, column and \u201cCounts as\u201d option, and your E / E(R) codes count as Evening duty. Turning this off moves them back to Other duty."
+            : "Off by default \u2014 most units run 3 shifts. Turn on for a 4-shift roster (e.g. Ramadan): Evening gets its own coverage row and column, and your E / E(R) codes automatically count as Evening duty."}
         </div>
       </Card>
 
