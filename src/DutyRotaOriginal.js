@@ -16,11 +16,16 @@ const loadUserRota = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      const { data: row } = await supabase
+      // Ordered + limit 1 instead of maybeSingle: once multi-department
+      // arrives a user can own several rota rows, and maybeSingle would
+      // throw on the second one. Oldest row = the original rota.
+      const { data: rows } = await supabase
         .from("rotas")
         .select("rota_data")
         .eq("user_id", user.id)
-        .maybeSingle();
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const row = rows && rows[0];
       if (row && row.rota_data) return row.rota_data;
     }
   } catch (e) {
@@ -42,12 +47,21 @@ const saveUserRota = async (rotaData) => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase
+    // Update-by-id (or insert if none) rather than upsert on user_id: the
+    // upsert needed the one-rota-per-user uniqueness rule, which
+    // multi-department removes. This path works with or without it.
+    const { data: existing } = await supabase
       .from("rotas")
-      .upsert(
-        { user_id: user.id, title: rotaData.title || "Duty Rota", rota_data: rotaData },
-        { onConflict: "user_id" }
-      );
+      .select("id")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(1);
+    const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
+    if (existing && existing[0]) {
+      await supabase.from("rotas").update(payload).eq("id", existing[0].id);
+    } else {
+      await supabase.from("rotas").insert({ user_id: user.id, ...payload });
+    }
   } catch (e) {
     console.error("Supabase save failed (local backup kept):", e);
   }
