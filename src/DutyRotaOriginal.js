@@ -651,10 +651,13 @@ export default function DutyRota({ locked = false }) {
 
   useEffect(() => {
     if (!printView) return;
-    const timer = setTimeout(() => { try { window.print(); } catch (e) { console.error(e); } }, 400);
+    // Close the export screen once a print job completes. No longer
+    // auto-opens the print dialog — the user picks Print/Save as PDF or
+    // Save as image explicitly, which is the only way both buttons are
+    // reachable (cancelling the browser dialog would close the screen).
     const done = () => setPrintView(null);
     window.addEventListener("afterprint", done);
-    return () => { clearTimeout(timer); window.removeEventListener("afterprint", done); };
+    return () => window.removeEventListener("afterprint", done);
   }, [printView]);
 
   // Every edit in the whole app flows through this one function, so this
