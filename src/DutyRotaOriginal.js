@@ -695,7 +695,7 @@ export default function DutyRota({ locked = false }) {
         // 2x pixel density so the image is crisp on retina/phone screens.
         const dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true });
         const link = document.createElement("a");
-        link.download = `${(data.title || "rota").replace(/[^\w\-]+/g, "_")}.png`;
+        link.download = `${(data.title || "rota").replace(/[^\w-]+/g, "_")}.png`;
         link.href = dataUrl;
         link.click();
       } catch (e) {
