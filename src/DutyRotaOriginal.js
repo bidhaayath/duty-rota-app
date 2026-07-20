@@ -559,7 +559,7 @@ export default function DutyRota({ locked = false }) {
     ? (() => {
         const out = [];
         let d = monthRange.start;
-        while (d <= monthRange.end && out.length < 32) { out.push(d); d = addDays(d, 1); }
+        while (d <= monthRange.end && out.length < 45) { out.push(d); d = addDays(d, 1); }
         return out;
       })()
     : Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -972,13 +972,18 @@ function WeekRota({ data, update, weekStart, setWeekStart, days, rotaView, setRo
 
   const spanOf = (a, b) => {
     let n = 0, d = a;
-    while (d <= b && n <= 40) { n++; d = addDays(d, 1); }
+    while (d <= b && n <= 60) { n++; d = addDays(d, 1); }
     return n;
   };
+  // Native date inputs fire onChange while you're still typing the year,
+  // so any comparison against a value like "0027-06-30" (year 27) would fail.
+  // Ignore anything that clearly isn't a real date, then silently clamp
+  // rather than throw an alert on every keystroke.
+  const looksLikeDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && s >= "1900-01-01";
   const setRange = (start, end) => {
-    if (!start || !end) return;
-    if (end < start) { window.alert("The end date must be after the start date."); return; }
-    if (spanOf(start, end) > 32) { window.alert("The range can't be longer than 32 days."); return; }
+    if (!looksLikeDate(start) || !looksLikeDate(end)) return;
+    if (end < start) end = start;
+    if (spanOf(start, end) > 45) end = addDays(start, 44);
     setMonthRange({ start, end });
   };
   const shiftRange = (dir) => setMonthRange({
@@ -1481,7 +1486,7 @@ function RotaPrint({ data, days }) {
   };
   return (
     <div>
-      {days.length > 10 && <style>{"@page { size: landscape; }"}</style>}
+      {days.length > 10 && <style>{"@page { size: landscape; margin: 10mm; }"}</style>}
       <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])}
