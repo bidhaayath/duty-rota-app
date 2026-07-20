@@ -691,7 +691,13 @@ export default function DutyRota({ locked = false }) {
   `;
 
   if (printView) {
+    // 30 days is the widest the image reliably captures across devices;
+    // beyond that some phones crop the right-hand columns silently. PDF export
+    // is not capped — its page break is real, not a screenshot cut.
+    const IMG_MAX_DAYS = 30;
+    const canSaveImage = !(printView.kind === "rota" && rotaDays.length > IMG_MAX_DAYS);
     const saveAsImage = async () => {
+      if (!canSaveImage) return;
       const node = printBodyRef.current;
       if (!node) return;
       try {
@@ -711,7 +717,8 @@ export default function DutyRota({ locked = false }) {
         <style>{globalCss}</style>
         <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
           <Btn small onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</Btn>
-          <Btn small onClick={saveAsImage}><Image size={14} /> Save as image</Btn>
+          <Btn small onClick={saveAsImage} disabled={!canSaveImage} title={canSaveImage ? "" : `Available for ranges up to ${IMG_MAX_DAYS} days — use Print / Save as PDF for wider ranges.`}><Image size={14} /> Save as image</Btn>
+          {!canSaveImage && <span style={{ alignSelf: "center", fontSize: 12, color: T.inkSoft }}>Image export supports up to {IMG_MAX_DAYS} days — use PDF for wider ranges.</span>}
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
         <div ref={printBodyRef}>
