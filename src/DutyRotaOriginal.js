@@ -332,7 +332,7 @@ const DEFAULT_CODES = [
   { id: "AR",   code: "A(R)",   label: "Afternoon request",    color: "#6E9E4C", counts: "afternoon" },
   { id: "N",    code: "N",      label: "Night duty",           color: "#6FA8DC", counts: "night" },
   { id: "NR",   code: "N(R)",   label: "Night request",        color: "#4A82BC", counts: "night" },
-  { id: "E",    code: "E",      label: "Evening duty",         color: "#8E7CC3", counts: "other" },
+  { id: "E",    code: "E",      label: "Evening duty",         color: "#8E7CC3", counts: "evening" },
   { id: "RD",   code: "RD",     label: "Release duty (other unit)", color: "#C08552", counts: "release" },
   { id: "OFF",  code: "OFF",    label: "Off day",              color: "#FFFFFF", counts: "off" },
   { id: "NOFF", code: "(N)OFF", label: "Off after night",      color: "#E8EEF2", counts: "off" },
