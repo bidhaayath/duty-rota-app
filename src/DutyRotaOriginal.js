@@ -32,19 +32,15 @@ const loadUserRota = async () => {
   } catch (e) {
     console.error("Supabase load failed, using local backup:", e);
   }
-  try {
-    const local = localStorage.getItem("rota:v2");
-    if (local) return JSON.parse(local);
-  } catch (e) { /* ignore */ }
+  // No localStorage fallback: the old "rota:v2" key wasn't keyed by user,
+  // so on shared browsers it could hand one account's rota to another.
   return null;
 };
 
 // Save the rota to a local backup (instant) and Supabase (cross-device).
 // Both are wrapped so a failure never breaks the app.
 const saveUserRota = async (rotaData) => {
-  try {
-    localStorage.setItem("rota:v2", JSON.stringify(rotaData));
-  } catch (e) { /* ignore */ }
+  // Local backup dropped: it was a global per-browser key and could cross accounts.
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -570,18 +566,26 @@ export default function DutyRota({ locked = false }) {
   const printBodyRef = useRef(null);
 
   useEffect(() => {
+    // Retire the pre-multi-department localStorage key. It was a global,
+    // per-browser cache (not per-user), so on a browser that had ever been
+    // used by another account it would poison fresh sign-ups with that
+    // account’s data. setupDepartments already self-heals orphan rotas from
+    // the server, so this fallback path is no longer needed for anyone.
+    try { localStorage.removeItem("rota:v2"); } catch (e) { /* ignore */ }
+
     (async () => {
       const deps = await setupDepartments();
       if (deps.length > 0) {
         setDepartments(deps);
         switchingDept.current = true;
         setDeptId(deps[0].id);
-        let saved = await loadRotaFor(deps[0].id);
-        if (!saved) saved = await loadUserRota(); // old local backups
+        const saved = await loadRotaFor(deps[0].id);
         setData(saved ? migrate(saved) : seed());
         switchingDept.current = false;
       } else {
-        // Departments unreachable — legacy mode so nobody is locked out
+        // Departments unreachable — legacy mode so nobody is locked out.
+        // Server-only load; the shared localStorage fallback would cross
+        // accounts, so it’s intentionally not consulted here.
         const saved = await loadUserRota();
         setData(saved ? migrate(saved) : seed());
       }
