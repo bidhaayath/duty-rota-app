@@ -545,6 +545,24 @@ export default function DutyRota({ locked = false }) {
   const switchingDept = useRef(false); // guards the autosave while a switch loads
   const [tab, setTab] = useState("rota");
   const [weekStart, setWeekStart] = useState(startOfWeek(dstr(new Date())));
+  const [rotaView, setRotaView] = useState("weekly");
+  const [monthRange, setMonthRange] = useState(() => {
+    const t = new Date();
+    return {
+      start: dstr(new Date(t.getFullYear(), t.getMonth(), 1)),
+      end: dstr(new Date(t.getFullYear(), t.getMonth() + 1, 0)),
+    };
+  });
+  // The rota table and its PDF both render whatever this range is —
+  // 7 days in weekly view, up to 32 in monthly.
+  const rotaDays = rotaView === "monthly"
+    ? (() => {
+        const out = [];
+        let d = monthRange.start;
+        while (d <= monthRange.end && out.length < 32) { out.push(d); d = addDays(d, 1); }
+        return out;
+      })()
+    : Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
   const [statRange, setStatRange] = useState({ from: monthStart(), to: monthEnd() });
   const [printView, setPrintView] = useState(null);
@@ -673,7 +691,7 @@ export default function DutyRota({ locked = false }) {
           <Btn small onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</Btn>
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
-        {printView.kind === "rota" && <RotaPrint data={data} weekStart={weekStart} />}
+        {printView.kind === "rota" && <RotaPrint data={data} days={rotaDays} />}
         {printView.kind === "records" && <RecordsPrint data={data} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={data} from={statRange.from} to={statRange.to} />}
         {printView.kind === "insights" && <InsightsPrint data={data} cfg={printView.cfg} />}
@@ -768,7 +786,7 @@ export default function DutyRota({ locked = false }) {
 
       <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
         <WelcomeGuide data={data} update={update} setTab={setTab} />
-        {tab === "rota" && <WeekRota data={data} update={update} weekStart={weekStart} setWeekStart={setWeekStart} onExport={() => setPrintView({ kind: "rota" })} />}
+        {tab === "rota" && <WeekRota data={data} update={update} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
@@ -949,9 +967,35 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 }
 
 /* ─────────────────── Weekly rota grid ─────────────────── */
-function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+function WeekRota({ data, update, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport }) {
   const codeById = codeByIdOf(data);
+
+  const spanOf = (a, b) => {
+    let n = 0, d = a;
+    while (d <= b && n <= 40) { n++; d = addDays(d, 1); }
+    return n;
+  };
+  const setRange = (start, end) => {
+    if (!start || !end) return;
+    if (end < start) { window.alert("The end date must be after the start date."); return; }
+    if (spanOf(start, end) > 32) { window.alert("The range can't be longer than 32 days."); return; }
+    setMonthRange({ start, end });
+  };
+  const shiftRange = (dir) => setMonthRange({
+    start: addDays(monthRange.start, dir * days.length),
+    end: addDays(monthRange.end, dir * days.length),
+  });
+  const thisMonth = () => {
+    const t = new Date();
+    setMonthRange({
+      start: dstr(new Date(t.getFullYear(), t.getMonth(), 1)),
+      end: dstr(new Date(t.getFullYear(), t.getMonth() + 1, 0)),
+    });
+  };
+  const dateInput = {
+    fontFamily: "inherit", fontSize: 12.5, padding: "6px 8px",
+    border: `1px solid ${T.line}`, borderRadius: 8, background: "#fff", color: T.ink,
+  };
 
   const setCell = (date, staffId, codeId) => update((d) => {
     if (!d.cells[date]) d.cells[date] = {};
@@ -985,16 +1029,45 @@ function WeekRota({ data, update, weekStart, setWeekStart, onExport }) {
     });
   };
 
-  const range = `${niceDate(days[0])} – ${niceDate(days[6])}`;
+  const range = `${niceDate(days[0])} – ${niceDate(days[days.length - 1])}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={15} /></Btn>
-          <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
-          <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={15} /></Btn>
-          <Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date())))}>Today</Btn>
+          <div style={{ display: "inline-flex", border: `1px solid ${T.line}`, borderRadius: 8, overflow: "hidden" }}>
+            {["weekly", "monthly"].map((v) => (
+              <button key={v} onClick={() => {
+                if (v === rotaView) return;
+                if (v === "weekly") setWeekStart(startOfWeek(dstr(new Date())));
+                setRotaView(v);
+              }} style={{
+                fontFamily: "inherit", padding: "6px 13px", fontSize: 12.5, fontWeight: 700,
+                border: "none", cursor: "pointer",
+                background: rotaView === v ? T.lagoon : "#fff",
+                color: rotaView === v ? "#fff" : T.inkSoft,
+              }}>{v === "weekly" ? "Weekly" : "Monthly"}</button>
+            ))}
+          </div>
+          {rotaView === "weekly" ? (
+            <>
+              <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={15} /></Btn>
+              <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
+              <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={15} /></Btn>
+              <Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date())))}>Today</Btn>
+            </>
+          ) : (
+            <>
+              <Btn kind="ghost" small onClick={() => shiftRange(-1)}><ChevronLeft size={15} /></Btn>
+              <input type="date" style={dateInput} value={monthRange.start}
+                onChange={(e) => setRange(e.target.value, monthRange.end)} />
+              <span style={{ color: T.inkSoft }}>–</span>
+              <input type="date" style={dateInput} value={monthRange.end}
+                onChange={(e) => setRange(monthRange.start, e.target.value)} />
+              <Btn kind="ghost" small onClick={() => shiftRange(1)}><ChevronRight size={15} /></Btn>
+              <Btn kind="ghost" small onClick={thisMonth}>This month</Btn>
+            </>
+          )}
         </div>
         <Btn kind="ghost" small onClick={onExport}><Printer size={14} /> Export PDF</Btn>
       </div>
@@ -1395,8 +1468,7 @@ function Stats({ data, range, setRange, onExport }) {
 const pth = { border: "1px solid #999", padding: "5px 7px", fontSize: 10.5, fontWeight: 700, textAlign: "center", background: "#E8E8E8" };
 const ptd = { border: "1px solid #999", padding: "5px 7px", fontSize: 11, textAlign: "center" };
 
-function RotaPrint({ data, weekStart }) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+function RotaPrint({ data, days }) {
   const codeById = codeByIdOf(data);
   // Collect notes shown this week, numbered, to list under the rota
   const noteList = [];
@@ -1409,9 +1481,10 @@ function RotaPrint({ data, weekStart }) {
   };
   return (
     <div>
+      {days.length > 10 && <style>{"@page { size: landscape; }"}</style>}
       <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
-        Weekly Duty Rota · {niceDate(days[0])} – {niceDate(days[6])}
+        {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])}
       </div>
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
