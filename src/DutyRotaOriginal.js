@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { toPng } from "html-to-image";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
-  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle
+  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -566,6 +567,7 @@ export default function DutyRota({ locked = false }) {
   const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
   const [statRange, setStatRange] = useState({ from: monthStart(), to: monthEnd() });
   const [printView, setPrintView] = useState(null);
+  const printBodyRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -680,21 +682,41 @@ export default function DutyRota({ locked = false }) {
       * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .recharts-wrapper, .recharts-surface { break-inside: avoid; page-break-inside: avoid; }
     }
+    /* Landscape for wide rota ranges only; the per-print page override
+       below wins for narrower ones (weekly, records, stats). */
     @page { size: A4 landscape; margin: 10mm; }
   `;
 
   if (printView) {
+    const saveAsImage = async () => {
+      const node = printBodyRef.current;
+      if (!node) return;
+      try {
+        // 2x pixel density so the image is crisp on retina/phone screens.
+        const dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true });
+        const link = document.createElement("a");
+        link.download = `${(data.title || "rota").replace(/[^\w\-]+/g, "_")}.png`;
+        link.href = dataUrl;
+        link.click();
+      } catch (e) {
+        console.error("Image export failed:", e);
+        window.alert("Sorry, couldn't create the image. Try Print / Save as PDF instead.");
+      }
+    };
     return (
       <div style={{ fontFamily: "Inter, system-ui, sans-serif", background: "#fff", minHeight: "100vh", color: T.ink, padding: 16 }}>
         <style>{globalCss}</style>
-        <div className="no-print" style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
           <Btn small onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</Btn>
+          <Btn small onClick={saveAsImage}><Image size={14} /> Save as image</Btn>
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
+        <div ref={printBodyRef}>
         {printView.kind === "rota" && <RotaPrint data={data} days={rotaDays} />}
         {printView.kind === "records" && <RecordsPrint data={data} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={data} from={statRange.from} to={statRange.to} />}
         {printView.kind === "insights" && <InsightsPrint data={data} cfg={printView.cfg} />}
+        </div>
       </div>
     );
   }
@@ -1486,7 +1508,9 @@ function RotaPrint({ data, days }) {
   };
   return (
     <div>
-      {days.length > 10 && <style>{"@page { size: landscape; margin: 10mm; }"}</style>}
+      <style>{days.length > 10
+        ? "@page { size: A4 landscape; margin: 10mm; }"
+        : "@page { size: A4 portrait; margin: 10mm; }"}</style>
       <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])}
