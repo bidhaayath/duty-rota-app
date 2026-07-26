@@ -811,7 +811,7 @@ export default function DutyRota({ locked = false }) {
             <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
             <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
           </div>
-          {data.logo && <img src={data.logo} alt="" style={{ height: 40, maxWidth: 150, objectFit: "contain", flexShrink: 0 }} />}
+          {data.logo && <img src={data.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
         </div>
         <nav style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto" }}>
           {tabs.map(({ id, label, icon: Icon }) => (
@@ -1532,7 +1532,7 @@ function RotaPrint({ data, days }) {
         : "@page { size: A4 portrait; margin: 10mm; }"}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])}
@@ -1643,7 +1643,7 @@ function RecordsPrint({ data, from, to }) {
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         Staff Duty & Leave Record · {niceDate(from)} – {niceDate(to)}
@@ -1755,7 +1755,7 @@ function StatsPrint({ data, from, to }) {
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 12 }}>
         Duty Statistics · {niceDate(from)} – {niceDate(to)}
@@ -2391,7 +2391,7 @@ function InsightsPrint({ data, cfg }) {
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         Duty breakdown — {staff.name} · {niceDate(cfg.range.from)} – {niceDate(cfg.range.to)}
@@ -2622,9 +2622,9 @@ function SettingsTab({ data, update }) {
       <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           {data.logo ? (
-            <img src={data.logo} alt="Logo" style={{ height: 56, maxWidth: 180, objectFit: "contain", border: `1px solid ${T.line}`, borderRadius: 8, padding: 6, background: "#fff" }} />
+            <img src={data.logo} alt="Logo" style={{ height: 76, maxWidth: 240, objectFit: "contain", border: `1px solid ${T.line}`, borderRadius: 8, padding: 8, background: "#fff" }} />
           ) : (
-            <div style={{ height: 56, width: 110, border: `1px dashed ${T.line}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: T.inkSoft }}>No logo</div>
+            <div style={{ height: 76, width: 140, border: `1px dashed ${T.line}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: T.inkSoft }}>No logo</div>
           )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={{
@@ -2645,7 +2645,7 @@ function SettingsTab({ data, update }) {
                   reader.onload = () => {
                     const img = new window.Image();
                     img.onload = () => {
-                      const maxW = 240, maxH = 120;
+                      const maxW = 480, maxH = 240;
                       let { width: w, height: h } = img;
                       const scale = Math.min(maxW / w, maxH / h, 1);
                       w = Math.round(w * scale); h = Math.round(h * scale);
@@ -2654,7 +2654,7 @@ function SettingsTab({ data, update }) {
                       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
                       // PNG keeps transparency, which most logos need.
                       const out = canvas.toDataURL("image/png");
-                      if (out.length > 400000) { window.alert("That image is too large even after resizing. Try a simpler logo file."); return; }
+                      if (out.length > 700000) { window.alert("That image is too large even after resizing. Try a simpler logo file."); return; }
                       update((d) => { d.logo = out; return d; });
                     };
                     img.onerror = () => window.alert("Sorry, that image could not be read. Try a PNG or JPG.");
