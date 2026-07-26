@@ -691,6 +691,16 @@ export default function DutyRota({ locked = false }) {
       * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .recharts-wrapper, .recharts-surface { break-inside: avoid; page-break-inside: avoid; }
     }
+    /* Export header: title centred, logo pinned right. On a narrow screen
+       there is no room beside the title, so the logo stacks underneath
+       instead of overlapping it. Print uses paper width, so printed output
+       keeps the side-by-side layout regardless of device. */
+    .rp-head { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 2px; position: relative; }
+    .rp-logo { height: 56px; max-width: 200px; object-fit: contain; position: absolute; right: 0; }
+    @media screen and (max-width: 760px) {
+      .rp-head { flex-direction: column; gap: 8px; }
+      .rp-logo { position: static; height: 46px; max-width: 62%; }
+    }
     /* Landscape for wide rota ranges only; the per-print page override
        below wins for narrower ones (weekly, records, stats). */
     @page { size: A4 landscape; margin: 10mm; }
@@ -708,7 +718,16 @@ export default function DutyRota({ locked = false }) {
       if (!node) return;
       try {
         // 2x pixel density so the image is crisp on retina/phone screens.
-        const dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true });
+        // On a phone the export is wider than the screen, so only part of the
+        // node is laid out on-screen. Capture its full scroll width, otherwise
+        // the right-hand columns are silently cropped out of the image.
+        const fullW = Math.ceil(Math.max(node.scrollWidth, node.offsetWidth));
+        const fullH = Math.ceil(Math.max(node.scrollHeight, node.offsetHeight));
+        const dataUrl = await toPng(node, {
+          pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true,
+          width: fullW, height: fullH,
+          style: { width: fullW + "px", height: fullH + "px" },
+        });
         const link = document.createElement("a");
         link.download = `${(data.title || "rota").replace(/[^\w-]+/g, "_")}.png`;
         link.href = dataUrl;
@@ -1530,9 +1549,9 @@ function RotaPrint({ data, days }) {
       <style>{days.length > 10
         ? "@page { size: A4 landscape; margin: 10mm; }"
         : "@page { size: A4 portrait; margin: 10mm; }"}</style>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+      <div className="rp-head">
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])}
@@ -1641,9 +1660,9 @@ function RecordsPrint({ data, from, to }) {
   const cols = ["Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+      <div className="rp-head">
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         Staff Duty & Leave Record · {niceDate(from)} – {niceDate(to)}
@@ -1753,9 +1772,9 @@ function StatsPrint({ data, from, to }) {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+      <div className="rp-head">
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 12 }}>
         Duty Statistics · {niceDate(from)} – {niceDate(to)}
@@ -2389,9 +2408,9 @@ function InsightsPrint({ data, cfg }) {
   const cols = ["Duty code", "Total", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Non-official"];
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+      <div className="rp-head">
         <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
-        {data.logo && <img src={data.logo} alt="" style={{ height: 56, maxWidth: 200, objectFit: "contain", position: "absolute", right: 0 }} />}
+        {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         Duty breakdown — {staff.name} · {niceDate(cfg.range.from)} – {niceDate(cfg.range.to)}
@@ -2564,15 +2583,10 @@ function SettingsTab({ data, update }) {
   const [form, setForm] = useState(null);
   const [nd, setNd] = useState({ from: "", to: "" });
   const palette = [
-    // warm
     "#F4B860", "#E8A33D", "#E58E77", "#E4604E", "#C0483A", "#C08552", "#8C5A2B",
-    // green
     "#8FBF6B", "#6E9E4C", "#4F7D3A", "#9AD1C8", "#5FA89C", "#2E7D6F",
-    // blue / purple
     "#6FA8DC", "#4A82BC", "#2C5C8A", "#8E7CC3", "#6C5BA8", "#5E3A87",
-    // pink / red
     "#D98BD3", "#B761B0", "#F0A090", "#D96A6A",
-    // neutral
     "#2E3358", "#5A6472", "#98A2B3", "#C9D2DC", "#E8EEF2", "#FFFFFF",
   ];
 
@@ -2638,22 +2652,21 @@ function SettingsTab({ data, update }) {
                   const file = e.target.files && e.target.files[0];
                   e.target.value = "";
                   if (!file) return;
-                  // Shrink before storing: the logo travels inside rota_data, so
-                  // a full-size photo would bloat every save. 240px wide is plenty
-                  // for a 40px header and a 34px print header on retina screens.
+                  // Shrink before storing: the logo travels inside rota_data, so a
+                  // full-size photo would bloat every save. 480px keeps it sharp at
+                  // the header and export sizes, including on retina screens.
                   const reader = new FileReader();
                   reader.onload = () => {
                     const img = new window.Image();
                     img.onload = () => {
                       const maxW = 480, maxH = 240;
-                      let { width: w, height: h } = img;
+                      let w = img.width, h = img.height;
                       const scale = Math.min(maxW / w, maxH / h, 1);
                       w = Math.round(w * scale); h = Math.round(h * scale);
                       const canvas = document.createElement("canvas");
                       canvas.width = w; canvas.height = h;
                       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-                      // PNG keeps transparency, which most logos need.
-                      const out = canvas.toDataURL("image/png");
+                      const out = canvas.toDataURL("image/png"); // PNG keeps transparency
                       if (out.length > 700000) { window.alert("That image is too large even after resizing. Try a simpler logo file."); return; }
                       update((d) => { d.logo = out; return d; });
                     };
