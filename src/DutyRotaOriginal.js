@@ -346,6 +346,7 @@ const seed = () => ({
   nonOfficial: [],
   fridayRule: true,
   eveningEnabled: false,
+  logo: "",
   title: "ENTER AREA NAME",
 });
 
@@ -378,6 +379,7 @@ const migrate = (d) => {
   // Evening shift is opt-in: most units run 3 shifts, so the row/column only
   // exists for rotas that turn it on (e.g. 4-shift Ramadan rosters).
   if (d.eveningEnabled === undefined) d.eveningEnabled = false;
+  if (d.logo === undefined) d.logo = "";
   // add newer default codes if missing (match by code string)
   const have = new Set(d.codes.map((c) => c.code.toUpperCase()));
   DEFAULT_CODES.forEach((c) => { if (!have.has(c.code.toUpperCase())) d.codes.push({ ...c }); });
@@ -804,9 +806,12 @@ export default function DutyRota({ locked = false }) {
             )}
           </div>
         )}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-          <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
-          <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+            <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
+            <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
+          </div>
+          {data.logo && <img src={data.logo} alt="" style={{ height: 40, maxWidth: 150, objectFit: "contain", flexShrink: 0 }} />}
         </div>
         <nav style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto" }}>
           {tabs.map(({ id, label, icon: Icon }) => (
@@ -1525,7 +1530,10 @@ function RotaPrint({ data, days }) {
       <style>{days.length > 10
         ? "@page { size: A4 landscape; margin: 10mm; }"
         : "@page { size: A4 portrait; margin: 10mm; }"}</style>
-      <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+      </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])}
       </div>
@@ -1633,7 +1641,10 @@ function RecordsPrint({ data, from, to }) {
   const cols = ["Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
-      <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+      </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         Staff Duty & Leave Record · {niceDate(from)} – {niceDate(to)}
       </div>
@@ -1742,7 +1753,10 @@ function StatsPrint({ data, from, to }) {
 
   return (
     <div>
-      <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+      </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 12 }}>
         Duty Statistics · {niceDate(from)} – {niceDate(to)}
       </div>
@@ -2375,7 +2389,10 @@ function InsightsPrint({ data, cfg }) {
   const cols = ["Duty code", "Total", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Non-official"];
   return (
     <div>
-      <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{data.title}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 2, position: "relative" }}>
+        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        {data.logo && <img src={data.logo} alt="" style={{ height: 34, maxWidth: 120, objectFit: "contain", position: "absolute", right: 0 }} />}
+      </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         Duty breakdown — {staff.name} · {niceDate(cfg.range.from)} – {niceDate(cfg.range.to)}
       </div>
@@ -2546,7 +2563,18 @@ function SettingsTab({ data, update }) {
   const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
   const [form, setForm] = useState(null);
   const [nd, setNd] = useState({ from: "", to: "" });
-  const palette = ["#F4B860", "#E8A33D", "#8FBF6B", "#6E9E4C", "#6FA8DC", "#4A82BC", "#C08552", "#9AD1C8", "#F0A090", "#D98BD3", "#5E3A87", "#2E3358", "#E8EEF2", "#FFFFFF"];
+  const palette = [
+    // warm
+    "#F4B860", "#E8A33D", "#E58E77", "#E4604E", "#C0483A", "#C08552", "#8C5A2B",
+    // green
+    "#8FBF6B", "#6E9E4C", "#4F7D3A", "#9AD1C8", "#5FA89C", "#2E7D6F",
+    // blue / purple
+    "#6FA8DC", "#4A82BC", "#2C5C8A", "#8E7CC3", "#6C5BA8", "#5E3A87",
+    // pink / red
+    "#D98BD3", "#B761B0", "#F0A090", "#D96A6A",
+    // neutral
+    "#2E3358", "#5A6472", "#98A2B3", "#C9D2DC", "#E8EEF2", "#FFFFFF",
+  ];
 
   const save = () => {
     if (!form.code.trim()) return;
@@ -2588,6 +2616,64 @@ function SettingsTab({ data, update }) {
           <input style={{ ...inputStyle, maxWidth: 380 }} value={data.title}
             onChange={(e) => update((d) => { d.title = e.target.value; return d; })} />
         </Field>
+      </Card>
+
+      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Logo</h2>
+      <Card>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          {data.logo ? (
+            <img src={data.logo} alt="Logo" style={{ height: 56, maxWidth: 180, objectFit: "contain", border: `1px solid ${T.line}`, borderRadius: 8, padding: 6, background: "#fff" }} />
+          ) : (
+            <div style={{ height: 56, width: 110, border: `1px dashed ${T.line}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: T.inkSoft }}>No logo</div>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <label style={{
+              fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              background: T.lagoon, color: "#fff", padding: "9px 15px", borderRadius: 8,
+              display: "inline-flex", alignItems: "center", gap: 7,
+            }}>
+              <Image size={14} /> {data.logo ? "Replace logo" : "Upload logo"}
+              <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  // Shrink before storing: the logo travels inside rota_data, so
+                  // a full-size photo would bloat every save. 240px wide is plenty
+                  // for a 40px header and a 34px print header on retina screens.
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const img = new window.Image();
+                    img.onload = () => {
+                      const maxW = 240, maxH = 120;
+                      let { width: w, height: h } = img;
+                      const scale = Math.min(maxW / w, maxH / h, 1);
+                      w = Math.round(w * scale); h = Math.round(h * scale);
+                      const canvas = document.createElement("canvas");
+                      canvas.width = w; canvas.height = h;
+                      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                      // PNG keeps transparency, which most logos need.
+                      const out = canvas.toDataURL("image/png");
+                      if (out.length > 400000) { window.alert("That image is too large even after resizing. Try a simpler logo file."); return; }
+                      update((d) => { d.logo = out; return d; });
+                    };
+                    img.onerror = () => window.alert("Sorry, that image could not be read. Try a PNG or JPG.");
+                    img.src = reader.result;
+                  };
+                  reader.onerror = () => window.alert("Sorry, that file could not be read.");
+                  reader.readAsDataURL(file);
+                }} />
+            </label>
+            {data.logo && (
+              <Btn kind="danger" small onClick={() => { if (window.confirm("Remove the logo?")) update((d) => { d.logo = ""; return d; }); }}>
+                <Trash2 size={14} /> Remove
+              </Btn>
+            )}
+          </div>
+        </div>
+        <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 10 }}>
+          Appears on the right of the header and on every PDF and image export. PNG with a transparent background looks best. Images are resized automatically.
+        </div>
       </Card>
 
       <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Shifts</h2>
