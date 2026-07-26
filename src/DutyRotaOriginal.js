@@ -2478,11 +2478,13 @@ function HelpTab({ data }) {
         <Step n="1">Go to the <strong>Settings</strong> tab and type your area or ward name in the box at the top. This name shows at the top of every page and on your printed rota.</Step>
         <Step n="2">Go to the <strong>Staff</strong> tab and add each staff member with the <strong>Add staff</strong> button.</Step>
         <Step n="3">Go to the <strong>Weekly Rota</strong> tab and start filling in duties by clicking a cell and choosing a code.</Step>
-        <p style={{ marginTop: 10, marginBottom: 0 }}>That's it — your rota saves automatically, and syncs to any device you log in from.</p>
+        <Step n="4">Optional — in <strong>Settings</strong>, upload your organisation&rsquo;s <strong>logo</strong>. It appears at the top right of the app and on every PDF and image you export.</Step>
+        <p style={{ marginTop: 10, marginBottom: 0 }}>That&rsquo;s it — your rota saves automatically, and syncs to any device you log in from.</p>
       </Section>
 
       <Section title="2. Filling in the rota">
         <p style={{ marginTop: 0 }}>In the <strong>Weekly Rota</strong> tab, each staff member has a row and each day has a cell. Click a cell to open the code picker. Use the arrows at the top to move between weeks.</p>
+        <p style={{ marginBottom: 10 }}><strong>Weekly or Monthly view.</strong> Use the <strong>Weekly</strong> / <strong>Monthly</strong> buttons at the top left. Weekly shows seven days. Monthly lets you pick any date range up to 45 days — handy for a pay period that runs, say, the 15th to the 15th rather than a calendar month. Use <strong>This month</strong> for the current calendar month, and the arrows to step forward or back by the same length of range. You can edit duties in either view.</p>
         <p style={{ marginBottom: 4 }}><strong>Three fast ways to enter a duty:</strong></p>
         <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
           <li style={{ marginBottom: 5 }}><strong>Tap a colour chip</strong> — quickest on a phone.</li>
@@ -2537,10 +2539,26 @@ function HelpTab({ data }) {
 
       <Section title="7. Reports & printing">
         <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many leave days were taken in each category (SL, FRL, ML, Other leave).</p>
-        <p style={{ marginBottom: 0 }}>On any of these, the <strong>Export PDF</strong> button makes a clean printable version you can save or print for your records.</p>
+        <p>On any of these, the <strong>Export PDF</strong> button opens an export view with two choices:</p>
+        <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}><strong>Print / Save as PDF</strong> — a clean printable version for your records or the noticeboard. Best done from a computer; wide monthly ranges print in landscape automatically.</li>
+          <li><strong>Save as image</strong> — downloads the same layout as a picture, ready to share on WhatsApp. This is usually the easier option on a phone. Available for ranges up to 30 days.</li>
+        </ul>
+        <p style={{ marginBottom: 0 }}>Your logo, if you have set one, appears on both.</p>
       </Section>
 
-      <Section title="8. Digging into the details (Insights tab)">
+      <Section title="8. Managing more than one department">
+        <p style={{ marginTop: 0 }}>If you run more than one ward or unit, you don&rsquo;t need a separate login for each. Use the department button at the top left — the one showing your current department name.</p>
+        <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}><strong>Switch</strong> — tap any department in the list to open its rota.</li>
+          <li style={{ marginBottom: 5 }}><strong>Add department</strong> — creates a fresh rota with its own staff, codes, settings and logo.</li>
+          <li style={{ marginBottom: 5 }}><strong>Rename this department</strong> — change its name in the list.</li>
+          <li><strong>Delete this department</strong> — removes it and all of its rota data. This cannot be undone, and you always keep at least one department.</li>
+        </ul>
+        <p style={{ marginBottom: 0 }}>Departments are completely separate: staff, duty codes, statistics and exports never mix between them.</p>
+      </Section>
+
+      <Section title="9. Digging into the details (Insights tab)">
         <p style={{ marginTop: 0 }}>The <strong>Insights</strong> tab answers specific questions about who did what. Pick a date range at the top, then use any of these:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>Staff breakdown</strong> — choose a nurse to see every duty code she worked, split by day of the week, with Fridays, Saturdays, and non-official days shown separately.</li>
@@ -2551,7 +2569,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Leave days are never counted as duty here, and you can export the staff breakdown to PDF.</p>
       </Section>
 
-      <Section title="9. Your account & data">
+      <Section title="10. Your account & data">
         <ul style={{ margin: 0, paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>It saves automatically.</strong> There's no save button — every change is kept.</li>
           <li style={{ marginBottom: 6 }}><strong>It works across devices.</strong> Log in on your laptop and your phone with the same email, and you'll see the same rota.</li>
