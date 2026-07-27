@@ -23,12 +23,13 @@ const recoveryPending = () => {
 };
 
 /* ─────────────── Trial & subscription ───────────────
-   Every account gets 30 free days from first login. During the trial there is
-   no mention of payment (except a quiet note in the last 7 days). After 30
-   days the rota becomes view-only and a subscribe banner appears.
-   Paid accounts are activated manually: set status='active' (and optionally
-   paid_until) on their row in the Supabase subscriptions table.            */
-const TRIAL_DAYS = 30;
+   Access is decided by the database, not here. The my_subscription() RPC
+   returns the SAME can_write value that the row-level security policies use
+   to allow or block a save. Reading it here means the paywall banner and the
+   actual security can never disagree — no matter how a row was edited.
+
+   Paid accounts are activated by the payment webhook or, for now, manually
+   via activate_manually() in the Supabase SQL editor.                      */
 const WHATSAPP = '9607666261'; // +960 Maldives
 const WA_LINK = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(
   "Hi! My DutyRota free trial has ended and I'd like to subscribe."
@@ -37,37 +38,25 @@ const WA_LINK_EARLY = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(
   "Hi! My DutyRota free trial is ending soon and I'd like to subscribe."
 )}`;
 
-const fetchSubscription = async (userId) => {
+// Ask the database for this user's subscription state. my_subscription()
+// runs as the logged-in user and returns can_write, state, and days_remaining
+// — the exact same logic RLS enforces on every write.
+const fetchSubscription = async () => {
   try {
-    const { data: row } = await supabase
-      .from('subscriptions')
-      .select('trial_start, status, paid_until')
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (row) return row;
-    // First login: start the 30-day trial. trial_start is set by the
-    // database itself, so it can't be tampered with from the browser.
-    await supabase.from('subscriptions').insert({ user_id: userId });
-    const { data: fresh } = await supabase
-      .from('subscriptions')
-      .select('trial_start, status, paid_until')
-      .eq('user_id', userId)
-      .maybeSingle();
-    return fresh;
+    const { data, error } = await supabase.rpc('my_subscription');
+    if (error || !data) {
+      // Fail open: a Supabase hiccup must never lock a paying user out.
+      return { locked: false, daysLeft: null, active: false };
+    }
+    return {
+      locked:   !data.can_write,                        // blocked -> show paywall
+      active:   data.state === 'active',
+      daysLeft: data.state === 'trialing' ? data.days_remaining : null,
+    };
   } catch (e) {
     console.error('Subscription check failed:', e);
-    return null; // fail open — a Supabase hiccup must never lock a paying user out
+    return { locked: false, daysLeft: null, active: false }; // fail open
   }
-};
-
-const subscriptionState = (row) => {
-  if (!row) return { locked: false, daysLeft: null, active: false }; // fail open
-  const today = new Date();
-  const paidOk = !row.paid_until || today <= new Date(row.paid_until + 'T23:59:59');
-  if (row.status === 'active' && paidOk) return { locked: false, daysLeft: null, active: true };
-  const elapsed = Math.floor((Date.now() - new Date(row.trial_start).getTime()) / 86400000);
-  const daysLeft = TRIAL_DAYS - elapsed;
-  return { locked: daysLeft <= 0, daysLeft: Math.max(0, daysLeft), active: false };
 };
 
 /* ─────────────── Banners ─────────────── */
@@ -168,12 +157,13 @@ export default function App() {
     };
   }, []);
 
-  // Check trial/subscription whenever someone is logged in
+  // Check trial/subscription whenever someone is logged in. Asks the database
+  // directly, so this matches exactly what the app will let them save.
   useEffect(() => {
     if (!session?.user?.id) return;
     let cancelled = false;
-    fetchSubscription(session.user.id).then((row) => {
-      if (!cancelled) setSub(subscriptionState(row));
+    fetchSubscription().then((state) => {
+      if (!cancelled) setSub(state);
     });
     return () => { cancelled = true; };
   }, [session?.user?.id]);
