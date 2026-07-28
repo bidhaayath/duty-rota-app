@@ -68,7 +68,6 @@ const saveUserRota = async (rotaData) => {
    One login can own several departments, each with its own rota row.
    Everyone currently trialing gets the Plus-level limit; the paywall
    tiers will feed this number later.                                 */
-const DEPT_LIMIT = 6;
 
 // Lists this user's departments, and self-heals accounts that predate the
 // department system (or signed up between migration and deploy): any rota
