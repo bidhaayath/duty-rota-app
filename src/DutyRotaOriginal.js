@@ -611,8 +611,8 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   };
 
   const addDepartment = async () => {
-    if (departments.length >= DEPT_LIMIT) {
-      window.alert(`Your plan allows up to ${DEPT_LIMIT} departments.`);
+    if (departmentLimit != null && departments.length >= departmentLimit) {
+      window.alert(`Your plan includes up to ${departmentLimit} department${departmentLimit === 1 ? "" : "s"}. Upgrade to add more.`);
       return;
     }
     const name = window.prompt("Name for the new department:", `Department ${departments.length + 1}`);
@@ -701,6 +701,21 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const deptEditable = (id) =>
     editableDeptIds == null || id == null || editableDeptIds.has(id);
   const currentDeptLocked = !deptEditable(deptId);
+
+  // Staff allowance. On a tier with a staff limit, the first N ACTIVE staff
+  // (in list order) stay editable; active staff beyond N are read-only —
+  // their profile can't be edited and their rota cells can't be changed.
+  // Former staff are excluded from the count (they're already frozen).
+  // null = unlimited. Data is never deleted; upgrading restores full editing.
+  const readonlyStaffIds = (() => {
+    if (staffLimit == null || !data || !Array.isArray(data.staff)) return null;
+    const active = data.staff.filter((s) => !isFormer(s));
+    if (active.length <= staffLimit) return new Set(); // within limit, none locked
+    const lockedActive = active.slice(staffLimit).map((s) => s.id);
+    return new Set(lockedActive);
+  })();
+  const staffEditable = (staffId) =>
+    readonlyStaffIds == null || !readonlyStaffIds.has(staffId);
 
   const globalCss = `
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
@@ -890,11 +905,11 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           </div>
         )}
         <WelcomeGuide data={data} update={update} setTab={setTab} />
-        {tab === "rota" && <WeekRota data={data} update={update} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} />}
+        {tab === "rota" && <WeekRota data={data} update={update} staffEditable={staffEditable} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
-        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} />}
+        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} />}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
@@ -1071,7 +1086,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 }
 
 /* ─────────────────── Weekly rota grid ─────────────────── */
-function WeekRota({ data, update, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport }) {
+function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport }) {
   const codeById = codeByIdOf(data);
 
   const spanOf = (a, b) => {
@@ -1106,21 +1121,33 @@ function WeekRota({ data, update, weekStart, setWeekStart, days, rotaView, setRo
     border: `1px solid ${T.line}`, borderRadius: 8, background: "#fff", color: T.ink,
   };
 
-  const setCell = (date, staffId, codeId) => update((d) => {
-    if (!d.cells[date]) d.cells[date] = {};
-    if (codeId) d.cells[date][staffId] = codeId; else delete d.cells[date][staffId];
-    return d;
-  });
+  const setCell = (date, staffId, codeId) => {
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to assign or change their duties.");
+      return;
+    }
+    update((d) => {
+      if (!d.cells[date]) d.cells[date] = {};
+      if (codeId) d.cells[date][staffId] = codeId; else delete d.cells[date][staffId];
+      return d;
+    });
+  };
 
-  const setCellNote = (date, staffId, note) => update((d) => {
-    if (!d.cellMeta) d.cellMeta = {};
-    if (!d.cellMeta[date]) d.cellMeta[date] = {};
-    if (!d.cellMeta[date][staffId]) d.cellMeta[date][staffId] = {};
-    const t = (note || "").trim();
-    if (t) d.cellMeta[date][staffId].note = t;
-    else delete d.cellMeta[date][staffId];
-    return d;
-  });
+  const setCellNote = (date, staffId, note) => {
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their duties.");
+      return;
+    }
+    update((d) => {
+      if (!d.cellMeta) d.cellMeta = {};
+      if (!d.cellMeta[date]) d.cellMeta[date] = {};
+      if (!d.cellMeta[date][staffId]) d.cellMeta[date][staffId] = {};
+      const t = (note || "").trim();
+      if (t) d.cellMeta[date][staffId].note = t;
+      else delete d.cellMeta[date][staffId];
+      return d;
+    });
+  };
 
   const addCode = (codeObj) => {
     const created = { ...codeObj, id: uid() };
@@ -1921,7 +1948,7 @@ function StatsPrint({ data, from, to }) {
 }
 
 /* ─────────────────── Staff tab ─────────────────── */
-function StaffTab({ data, update, staffLimit = null }) {
+function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true }) {
   const empty = { name: "", contact: "", recc: "", licence: "", startDate: "", endDate: "", leavePeriods: [] };
   const [form, setForm] = useState(null);
   const [showFormer, setShowFormer] = useState(false);
@@ -1930,6 +1957,10 @@ function StaffTab({ data, update, staffLimit = null }) {
 
   const save = () => {
     if (!form.name.trim()) return;
+    if (form.id && !staffEditable(form.id)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their details.");
+      return;
+    }
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       alert("Last working day cannot be before the joining date.");
       return;
@@ -2010,8 +2041,27 @@ function StaffTab({ data, update, staffLimit = null }) {
   // Keep original array order so the up/down arrows behave predictably
   const visibleStaff = showFormer ? data.staff : activeStaff;
 
+  const lockedCount = readonlyStaffIds ? readonlyStaffIds.size : 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {lockedCount > 0 && (
+        <div style={{
+          background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 10,
+          padding: "12px 16px", fontSize: 13.5, color: "#7A6320",
+          display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+        }}>
+          <span style={{ flex: "1 1 260px" }}>
+            🔒 <strong>{lockedCount}</strong> staff member{lockedCount === 1 ? " is" : "s are"} view-only
+            on your current plan (includes {staffLimit} staff). They still appear in the rota and exports,
+            but can't be edited or reassigned. Upgrade to edit everyone again.
+          </span>
+          <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan for more staff.")}`}
+             target="_blank" rel="noreferrer"
+             style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12.5, padding: "8px 15px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
+            Upgrade on WhatsApp
+          </a>
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 18 }}>Staff ({activeStaff.length})</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -2179,15 +2229,17 @@ function StaffTab({ data, update, staffLimit = null }) {
                   </td>
                   <td style={td}>{gone
                     ? <span style={{ fontSize: 11.5, background: "#ECEFF0", color: "#5A6B72", borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>Former staff</span>
+                    : !staffEditable(s.id)
+                    ? <span title="View-only on your current plan" style={{ fontSize: 11.5, background: "#FBF1DC", color: "#A5731B", border: "1px solid #E7D9B8", borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>🔒 View only</span>
                     : today
                     ? <LeaveChip period={today} />
                     : <span style={{ fontSize: 11.5, background: "#E8F5EC", color: T.leaf, borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>Active</span>}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>
-                    <Btn kind="ghost" small onClick={() => setForm(s)} style={{ marginRight: 6 }}><Pencil size={13} /></Btn>
+                    <Btn kind="ghost" small disabled={!staffEditable(s.id)} onClick={() => { if (staffEditable(s.id)) setForm(s); }} style={{ marginRight: 6 }}><Pencil size={13} /></Btn>
                     {gone
                       ? <Btn kind="ghost" small onClick={() => reactivate(s.id)} style={{ marginRight: 6 }}>Reactivate</Btn>
-                      : <Btn kind="ghost" small onClick={() => markLeft(s.id)} style={{ marginRight: 6 }}>Mark left</Btn>}
-                    <Btn kind="danger" small onClick={() => remove(s.id)}><Trash2 size={13} /></Btn>
+                      : <Btn kind="ghost" small disabled={!staffEditable(s.id)} onClick={() => markLeft(s.id)} style={{ marginRight: 6 }}>Mark left</Btn>}
+                    <Btn kind="danger" small disabled={!staffEditable(s.id)} onClick={() => remove(s.id)}><Trash2 size={13} /></Btn>
                   </td>
                 </tr>
               );
