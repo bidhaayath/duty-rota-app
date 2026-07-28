@@ -46,16 +46,19 @@ const fetchSubscription = async () => {
     const { data, error } = await supabase.rpc('my_subscription');
     if (error || !data) {
       // Fail open: a Supabase hiccup must never lock a paying user out.
-      return { locked: false, daysLeft: null, active: false };
+      // On failure we also grant all features rather than block them.
+      return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null };
     }
     return {
-      locked:   !data.can_write,                        // blocked -> show paywall
-      active:   data.state === 'active',
-      daysLeft: data.state === 'trialing' ? data.days_remaining : null,
+      locked:     !data.can_write,                        // blocked -> show paywall
+      active:     data.state === 'active',
+      daysLeft:   data.state === 'trialing' ? data.days_remaining : null,
+      features:   data.features || null,                  // { insights, company_logo, priority_support }
+      staffLimit: data.staff_limit,                       // number, or null = unlimited
     };
   } catch (e) {
     console.error('Subscription check failed:', e);
-    return { locked: false, daysLeft: null, active: false }; // fail open
+    return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null }; // fail open
   }
 };
 
@@ -111,7 +114,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [recovering, setRecovering] = useState(recoveryPending());
-  const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false });
+  const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false, features: null, staffLimit: null });
 
   useEffect(() => {
     if (isRecoveryUrl()) {
@@ -196,7 +199,7 @@ export default function App() {
           </button>
         </div>
       </div>
-      <DutyRota locked={sub.locked} />
+      <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit} />
     </div>
   );
 }

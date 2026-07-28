@@ -536,7 +536,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false }) {
+export default function DutyRota({ locked = false, features = null, staffLimit = null }) {
   const [data, setData] = useState(null);
   const [departments, setDepartments] = useState([]);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
@@ -679,6 +679,13 @@ export default function DutyRota({ locked = false }) {
 
   if (!data) return <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
 
+  // Company logo is a paid feature. When the current tier doesn't include it,
+  // the app behaves as if there is NO logo — header, every PDF/image export,
+  // and Settings all hide it. The saved logo is NOT deleted; it stays in
+  // rota_data and reappears automatically when the user upgrades.
+  const canUseLogo = features ? features.company_logo : true;
+  const viewData = canUseLogo ? data : { ...data, logo: "" };
+
   const globalCss = `
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
     * { box-sizing: border-box; }
@@ -747,10 +754,10 @@ export default function DutyRota({ locked = false }) {
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
         <div ref={printBodyRef}>
-        {printView.kind === "rota" && <RotaPrint data={data} days={rotaDays} />}
-        {printView.kind === "records" && <RecordsPrint data={data} from={range.from} to={range.to} />}
-        {printView.kind === "stats" && <StatsPrint data={data} from={statRange.from} to={statRange.to} />}
-        {printView.kind === "insights" && <InsightsPrint data={data} cfg={printView.cfg} />}
+        {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} />}
+        {printView.kind === "records" && <RecordsPrint data={viewData} from={range.from} to={range.to} />}
+        {printView.kind === "stats" && <StatsPrint data={viewData} from={statRange.from} to={statRange.to} />}
+        {printView.kind === "insights" && <InsightsPrint data={viewData} cfg={printView.cfg} />}
         </div>
       </div>
     );
@@ -830,7 +837,7 @@ export default function DutyRota({ locked = false }) {
             <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
             <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
           </div>
-          {data.logo && <img src={data.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
+          {viewData.logo && <img src={viewData.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
         </div>
         <nav style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto" }}>
           {tabs.map(({ id, label, icon: Icon }) => (
@@ -850,8 +857,8 @@ export default function DutyRota({ locked = false }) {
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
-        {tab === "staff" && <StaffTab data={data} update={update} />}
-        {tab === "settings" && <SettingsTab data={data} update={update} />}
+        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} />}
+        {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
     </div>
@@ -1877,7 +1884,7 @@ function StatsPrint({ data, from, to }) {
 }
 
 /* ─────────────────── Staff tab ─────────────────── */
-function StaffTab({ data, update }) {
+function StaffTab({ data, update, staffLimit = null }) {
   const empty = { name: "", contact: "", recc: "", licence: "", startDate: "", endDate: "", leavePeriods: [] };
   const [form, setForm] = useState(null);
   const [showFormer, setShowFormer] = useState(false);
@@ -1981,7 +1988,23 @@ function StaffTab({ data, update }) {
           {data.staff.length > 1 && (
             <Btn kind="ghost" small onClick={sortAZ}><ArrowDownAZ size={14} /> Sort A–Z</Btn>
           )}
-          <Btn onClick={() => setForm(empty)}><Plus size={15} /> Add staff</Btn>
+          {(() => {
+            const atLimit = staffLimit != null && activeStaff.length >= staffLimit;
+            return atLimit ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12.5, color: "#7A6320", background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 7, padding: "6px 11px", fontWeight: 600 }}>
+                  🔒 {staffLimit}-staff limit reached
+                </span>
+                <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan for more staff.")}`}
+                   target="_blank" rel="noreferrer"
+                   style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12, padding: "7px 13px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
+                  Upgrade
+                </a>
+              </div>
+            ) : (
+              <Btn onClick={() => setForm(empty)}><Plus size={15} /> Add staff</Btn>
+            );
+          })()}
         </div>
       </div>
 
@@ -2596,7 +2619,7 @@ function HelpTab({ data }) {
   );
 }
 
-function SettingsTab({ data, update }) {
+function SettingsTab({ data, update, canUseLogo = true }) {
   const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
   const [form, setForm] = useState(null);
   const [nd, setNd] = useState({ from: "", to: "" });
@@ -2652,8 +2675,22 @@ function SettingsTab({ data, update }) {
 
       <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Logo</h2>
       <Card>
-        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          {data.logo ? (
+        {!canUseLogo && (
+          <div style={{
+            background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 8,
+            padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#7A6320",
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          }}>
+            <span>🔒 Adding your own logo is a <strong>Plus</strong> feature.</span>
+            <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan to add a company logo.")}`}
+               target="_blank" rel="noreferrer"
+               style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12, padding: "6px 13px", borderRadius: 6, textDecoration: "none", whiteSpace: "nowrap" }}>
+              Upgrade on WhatsApp
+            </a>
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", opacity: canUseLogo ? 1 : 0.55, pointerEvents: canUseLogo ? "auto" : "none" }}>
+          {canUseLogo && data.logo ? (
             <img src={data.logo} alt="Logo" style={{ height: 76, maxWidth: 240, objectFit: "contain", border: `1px solid ${T.line}`, borderRadius: 8, padding: 8, background: "#fff" }} />
           ) : (
             <div style={{ height: 76, width: 140, border: `1px dashed ${T.line}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: T.inkSoft }}>No logo</div>
@@ -2664,8 +2701,9 @@ function SettingsTab({ data, update }) {
               background: T.lagoon, color: "#fff", padding: "9px 15px", borderRadius: 8,
               display: "inline-flex", alignItems: "center", gap: 7,
             }}>
-              <Image size={14} /> {data.logo ? "Replace logo" : "Upload logo"}
+              <Image size={14} /> {canUseLogo && data.logo ? "Replace logo" : "Upload logo"}
               <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }}
+                disabled={!canUseLogo}
                 onChange={(e) => {
                   const file = e.target.files && e.target.files[0];
                   e.target.value = "";
@@ -2695,7 +2733,7 @@ function SettingsTab({ data, update }) {
                   reader.readAsDataURL(file);
                 }} />
             </label>
-            {data.logo && (
+            {canUseLogo && data.logo && (
               <Btn kind="danger" small onClick={() => { if (window.confirm("Remove the logo?")) update((d) => { d.logo = ""; return d; }); }}>
                 <Trash2 size={14} /> Remove
               </Btn>
