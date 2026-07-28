@@ -47,7 +47,7 @@ const fetchSubscription = async () => {
     if (error || !data) {
       // Fail open: a Supabase hiccup must never lock a paying user out.
       // On failure we also grant all features rather than block them.
-      return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null };
+      return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null };
     }
     return {
       locked:     !data.can_write,                        // blocked -> show paywall
@@ -55,10 +55,11 @@ const fetchSubscription = async () => {
       daysLeft:   data.state === 'trialing' ? data.days_remaining : null,
       features:   data.features || null,                  // { insights, company_logo, priority_support }
       staffLimit: data.staff_limit,                       // number, or null = unlimited
+      departmentLimit: data.department_limit,             // number, or null = unlimited
     };
   } catch (e) {
     console.error('Subscription check failed:', e);
-    return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null }; // fail open
+    return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null }; // fail open
   }
 };
 
@@ -114,7 +115,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [recovering, setRecovering] = useState(recoveryPending());
-  const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false, features: null, staffLimit: null });
+  const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null });
 
   useEffect(() => {
     if (isRecoveryUrl()) {
@@ -199,7 +200,7 @@ export default function App() {
           </button>
         </div>
       </div>
-      <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit} />
+      <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit} departmentLimit={sub.departmentLimit} />
     </div>
   );
 }

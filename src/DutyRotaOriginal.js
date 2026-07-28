@@ -536,7 +536,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false, features = null, staffLimit = null }) {
+export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null }) {
   const [data, setData] = useState(null);
   const [departments, setDepartments] = useState([]);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
@@ -674,6 +674,10 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       alert("Your free trial has ended, so the rota is view-only for now.\n\nYou can still view everything and export PDFs. To keep editing, use the Subscribe button at the top.");
       return;
     }
+    if (currentDeptLocked) {
+      alert("This department is view-only on your current plan.\n\nYour plan includes " + departmentLimit + " department" + (departmentLimit === 1 ? "" : "s") + ". You can still view and export this one — upgrade to edit it again.");
+      return;
+    }
     setData((d) => fn(structuredClone(d)));
   };
 
@@ -685,6 +689,18 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   // rota_data and reappears automatically when the user upgrades.
   const canUseLogo = features ? features.company_logo : true;
   const viewData = canUseLogo ? data : { ...data, logo: "" };
+
+  // Department allowance. Departments are held oldest-first, so the first
+  // `departmentLimit` of them stay editable and anything beyond that is
+  // read-only until the user upgrades. null = unlimited. Deleting an editable
+  // one promotes the next in line automatically, since this is purely
+  // positional. The saved data is never touched.
+  const editableDeptIds = (departmentLimit == null)
+    ? null // unlimited — every department editable
+    : new Set(departments.slice(0, departmentLimit).map((d) => d.id));
+  const deptEditable = (id) =>
+    editableDeptIds == null || id == null || editableDeptIds.has(id);
+  const currentDeptLocked = !deptEditable(deptId);
 
   const globalCss = `
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
@@ -796,16 +812,19 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                   background: "#fff", color: T.ink, borderRadius: 12, border: `1px solid ${T.line}`,
                   boxShadow: "0 12px 30px rgba(15,30,28,0.18)", overflow: "hidden",
                 }}>
-                  {departments.map((d) => (
+                  {departments.map((d) => {
+                    const ro = !deptEditable(d.id);
+                    return (
                     <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
                       fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                       padding: "10px 14px", border: "none", background: d.id === deptId ? T.mist : "#fff",
                       fontSize: 13.5, fontWeight: d.id === deptId ? 700 : 500, cursor: "pointer", textAlign: "left",
                     }}>
                       {d.id === deptId ? <Check size={14} color={T.lagoon} /> : <span style={{ width: 14 }} />}
-                      {d.name}
+                      <span style={{ flex: 1 }}>{d.name}</span>
+                      {ro && <span title="View-only on your current plan" style={{ fontSize: 11, color: "#A5731B", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 999, padding: "1px 7px", fontWeight: 700 }}>🔒 View only</span>}
                     </button>
-                  ))}
+                  );})}
                   <div style={{ borderTop: `1px solid ${T.line}` }}>
                     {!locked && (
                       <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
@@ -852,6 +871,24 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       </header>
 
       <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
+        {currentDeptLocked && (
+          <div style={{
+            background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 10,
+            padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: "#7A6320",
+            display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          }}>
+            <span style={{ flex: "1 1 260px" }}>
+              🔒 This department is <strong>view-only</strong> on your current plan
+              (includes {departmentLimit} department{departmentLimit === 1 ? "" : "s"}).
+              You can still view and export it. Upgrade to edit it again.
+            </span>
+            <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan for more departments.")}`}
+               target="_blank" rel="noreferrer"
+               style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12.5, padding: "8px 15px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
+              Upgrade on WhatsApp
+            </a>
+          </div>
+        )}
         <WelcomeGuide data={data} update={update} setTab={setTab} />
         {tab === "rota" && <WeekRota data={data} update={update} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
