@@ -94,18 +94,12 @@ function Paywall() {
             but editing is paused. Subscribe to continue right where you left off.
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, lineHeight: 1.6, textAlign: 'right' }}>
-            <div><strong>MVR 231</strong> / month <span style={{ opacity: 0.85 }}>($14.99)</span></div>
-            <div><strong>MVR 154</strong> / month billed annually <span style={{ opacity: 0.85 }}>($9.99)</span></div>
-          </div>
-          <a href={WA_LINK} target="_blank" rel="noreferrer" style={{
-            background: '#fff', color: '#0B6A60', fontWeight: 800, fontSize: 14,
-            padding: '11px 18px', borderRadius: 8, textDecoration: 'none', whiteSpace: 'nowrap',
-          }}>
-            Subscribe on WhatsApp
-          </a>
-        </div>
+        <a href={WA_LINK} target="_blank" rel="noreferrer" style={{
+          background: '#fff', color: '#0B6A60', fontWeight: 800, fontSize: 14,
+          padding: '11px 18px', borderRadius: 8, textDecoration: 'none', whiteSpace: 'nowrap',
+        }}>
+          Subscribe on WhatsApp
+        </a>
       </div>
     </div>
   );
