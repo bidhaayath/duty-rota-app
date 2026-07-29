@@ -217,6 +217,11 @@ const luminance = (hex) => {
 };
 const textOn = (bg) => (luminance(bg) > 0.6 ? "#142B33" : "#FFFFFF");
 const shortName = (name) => name.replace(/^(SRN|RN|EN)\s+/i, "").split(" ")[0];
+// Designation is a separate, optional field. Compact views (rota grid,
+// exports, dropdowns) show "Name — Designation" when set, or just the
+// name when it is not — so existing staff entered before this feature
+// display exactly as they always have.
+const displayName = (staff) => (staff.designation ? `${staff.name} — ${staff.designation}` : staff.name);
 
 /* ─────────────────── Data helpers ─────────────────── */
 const isNonOff = (data, date) =>
@@ -370,6 +375,10 @@ const migrate = (d) => {
     // Employment dates: blank means "always employed" / "still employed"
     if (s.startDate === undefined) s.startDate = "";
     if (s.endDate === undefined) s.endDate = "";
+    // Designation is new and optional. Existing staff (entered before this
+    // feature) get a blank designation — their name stays exactly as typed,
+    // nothing is auto-split or guessed.
+    if (s.designation === undefined) s.designation = "";
   });
   if (d.welcomeDismissed === undefined) d.welcomeDismissed = false;
   if (!d.cellMeta) d.cellMeta = {};
@@ -1252,7 +1261,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
               const t = weekTotalsFor(data, s, days);
               return (
                 <tr key={s.id}>
-                  <td style={{ ...td, position: "sticky", left: 0, background: "#fff", zIndex: 1, fontWeight: 600 }}>{s.name}</td>
+                  <td style={{ ...td, position: "sticky", left: 0, background: "#fff", zIndex: 1, fontWeight: 600 }}>{displayName(s)}</td>
                   {segs.map((seg, i) => {
                     if (seg.kind === "notEmployed") {
                       return (
@@ -1361,7 +1370,7 @@ function Records({ data, range, setRange, onExport }) {
                 <React.Fragment key={r.staff.id}>
                   <tr>
                     <td style={{ ...td, fontWeight: 600 }}>
-                      {r.staff.name}
+                      {displayName(r.staff)}
                       {r.staff.endDate && (
                         <span style={{ marginLeft: 8, fontSize: 11.5, background: "#ECEFF0", color: "#5A6B72", borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>
                           left {shortDate(r.staff.endDate)}
@@ -1650,7 +1659,7 @@ function RotaPrint({ data, days }) {
             const t = weekTotalsFor(data, s, days);
             return (
               <tr key={s.id}>
-                <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{s.name}</td>
+                <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(s)}</td>
                 {segs.map((seg, i) => {
                   if (seg.kind === "notEmployed") {
                     return (
@@ -1748,7 +1757,7 @@ function RecordsPrint({ data, from, to }) {
         <tbody>
           {rows.map((r) => (
             <tr key={r.staff.id}>
-              <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{r.staff.name}{r.staff.endDate ? ` (left ${shortDate(r.staff.endDate)})` : ""}{r.maternityDays > 0 ? " (Maternity)" : ""}</td>
+              <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(r.staff)}{r.staff.endDate ? ` (left ${shortDate(r.staff.endDate)})` : ""}{r.maternityDays > 0 ? " (Maternity)" : ""}</td>
               <td style={ptd}>{r.morning}</td>
               <td style={ptd}>{r.afternoon}</td>
               {data.eveningEnabled && <td style={ptd}>{r.evening}</td>}
@@ -1783,7 +1792,7 @@ function RecordsPrint({ data, from, to }) {
             <tbody>
               {rows.filter((r) => r.nonOfficialDates.length > 0).map((r) => (
                 <tr key={r.staff.id}>
-                  <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{r.staff.name}</td>
+                  <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(r.staff)}</td>
                   <td style={{ ...ptd, textAlign: "left", whiteSpace: "normal" }}>
                     {r.nonOfficialDates.map((x) => `${niceDate(x.date)} (${x.code}${parseD(x.date).getDay() === FRIDAY ? ", Fri" : ""})`).join(" · ")}
                   </td>
@@ -1948,7 +1957,7 @@ function StatsPrint({ data, from, to }) {
 
 /* ─────────────────── Staff tab ─────────────────── */
 function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true }) {
-  const empty = { name: "", contact: "", recc: "", licence: "", startDate: "", endDate: "", leavePeriods: [] };
+  const empty = { name: "", designation: "", contact: "", recc: "", licence: "", startDate: "", endDate: "", leavePeriods: [] };
   const [form, setForm] = useState(null);
   const [showFormer, setShowFormer] = useState(false);
   const npEmpty = { type: "annual", label: "", start: "", end: "" };
@@ -2097,7 +2106,8 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       {form && (
         <Card>
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
-            <Field label="Name & designation"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. RN AMINATH…" /></Field>
+            <Field label="Name"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aminath Ali" /></Field>
+            <Field label="Designation (optional)"><input style={inputStyle} value={form.designation || ""} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="e.g. Staff Nurse" /></Field>
             <Field label="Contact no."><input style={inputStyle} value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></Field>
             <Field label="RECC no."><input style={inputStyle} value={form.recc} onChange={(e) => setForm({ ...form, recc: e.target.value })} /></Field>
             <Field label="Licence expiry"><input type="date" style={inputStyle} value={form.licence} onChange={(e) => setForm({ ...form, licence: e.target.value })} /></Field>
@@ -2176,7 +2186,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
           <thead>
-            <tr>{["#", "Name & designation", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+            <tr>{["#", "Name", "Designation", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {visibleStaff.map((s, idx) => {
@@ -2206,6 +2216,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                     </div>
                   </td>
                   <td style={{ ...td, fontWeight: 600 }}>{s.name}</td>
+                  <td style={{ ...td, color: s.designation ? T.ink : T.inkSoft }}>{s.designation || "—"}</td>
                   <td style={td}>{s.contact}</td>
                   <td style={td}>{s.recc}</td>
                   <td style={{ ...td, color: gone ? T.inkSoft : licenceSoon(s) ? T.coral : T.ink, fontWeight: !gone && licenceSoon(s) ? 700 : 400 }}>
@@ -2243,7 +2254,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                 </tr>
               );
             })}
-            {visibleStaff.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
+            {visibleStaff.length === 0 && <tr><td colSpan={10} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
           </tbody>
         </table>
       </Card>
@@ -2377,13 +2388,13 @@ function InsightsTab({ data, onExport }) {
           <H>Staff breakdown</H>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <select style={selStyle} value={staffId} onChange={(e) => setStaffId(e.target.value)}>
-              {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}{isFormer(s) ? " (former)" : ""}</option>)}
+              {data.staff.map((s) => <option key={s.id} value={s.id}>{displayName(s)}{isFormer(s) ? " (former)" : ""}</option>)}
             </select>
             {staff && <Btn kind="ghost" small onClick={() => onExport({ view: "staff", staffId, range })}><Printer size={13} /> PDF</Btn>}
           </div>
         </div>
         {!staff ? <div style={{ color: T.inkSoft, fontSize: 13 }}>No staff yet.</div> : rows.length === 0 ? (
-          <div style={{ color: T.inkSoft, fontSize: 13, padding: "20px 0", textAlign: "center" }}>No duties recorded for {staff.name} in this range.</div>
+          <div style={{ color: T.inkSoft, fontSize: 13, padding: "20px 0", textAlign: "center" }}>No duties recorded for {displayName(staff)} in this range.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
@@ -2418,7 +2429,7 @@ function InsightsTab({ data, onExport }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 14 }}>
           <span>How many times did</span>
           <select style={selStyle} value={staffId} onChange={(e) => setStaffId(e.target.value)}>
-            {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {data.staff.map((s) => <option key={s.id} value={s.id}>{displayName(s)}</option>)}
           </select>
           <span>do</span>
           <select style={{ ...selStyle, minWidth: 90 }} value={comboCode} onChange={(e) => setComboCode(e.target.value)}>
@@ -2432,7 +2443,7 @@ function InsightsTab({ data, onExport }) {
           <span>?</span>
         </div>
         <div style={{ marginTop: 16, fontSize: 15 }}>
-          {staff && <span><strong style={{ fontSize: 22, color: T.lagoon }}>{combo}</strong> time{combo === 1 ? "" : "s"} — {staff.name} did <strong>{codeById(comboCode)?.code}</strong> on {comboDow === -1 ? "any day" : dowFull[comboDow] + "s"} in this range.</span>}
+          {staff && <span><strong style={{ fontSize: 22, color: T.lagoon }}>{combo}</strong> time{combo === 1 ? "" : "s"} — {displayName(staff)} did <strong>{codeById(comboCode)?.code}</strong> on {comboDow === -1 ? "any day" : dowFull[comboDow] + "s"} in this range.</span>}
         </div>
       </Card>
 
@@ -2453,7 +2464,7 @@ function InsightsTab({ data, onExport }) {
               return (
                 <div key={r.staff.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ width: 20, textAlign: "right", fontSize: 12, color: T.inkSoft, fontWeight: 700 }}>{i + 1}</span>
-                  <span style={{ width: 160, fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.staff.name}</span>
+                  <span style={{ width: 160, fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName(r.staff)}</span>
                   <div style={{ flex: 1, background: T.mist, borderRadius: 6, height: 22, position: "relative", minWidth: 60 }}>
                     <div style={{ width: `${(r.count / max) * 100}%`, background: codeById(codeId)?.color || T.lagoon, height: "100%", borderRadius: 6, minWidth: 24 }} />
                     <span style={{ position: "absolute", right: 8, top: 0, lineHeight: "22px", fontSize: 12, fontWeight: 700, color: T.ink }}>{r.count}</span>
@@ -2471,11 +2482,11 @@ function InsightsTab({ data, onExport }) {
           <H>Compare two staff</H>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <select style={{ ...selStyle, minWidth: 130 }} value={cmpA} onChange={(e) => setCmpA(e.target.value)}>
-              {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {data.staff.map((s) => <option key={s.id} value={s.id}>{displayName(s)}</option>)}
             </select>
             <ArrowLeftRight size={16} color={T.inkSoft} />
             <select style={{ ...selStyle, minWidth: 130 }} value={cmpB} onChange={(e) => setCmpB(e.target.value)}>
-              {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {data.staff.map((s) => <option key={s.id} value={s.id}>{displayName(s)}</option>)}
             </select>
           </div>
         </div>
@@ -2485,8 +2496,8 @@ function InsightsTab({ data, onExport }) {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
               <th style={{ ...th, textAlign: "left" }}>Duty code</th>
-              <th style={{ ...th, textAlign: "center" }}>{staffA.name}</th>
-              <th style={{ ...th, textAlign: "center" }}>{staffB.name}</th>
+              <th style={{ ...th, textAlign: "center" }}>{displayName(staffA)}</th>
+              <th style={{ ...th, textAlign: "center" }}>{displayName(staffB)}</th>
             </tr></thead>
             <tbody>
               {cmpCodes.map((c) => {
@@ -2524,7 +2535,7 @@ function InsightsPrint({ data, cfg }) {
         {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
-        Duty breakdown — {staff.name} · {niceDate(cfg.range.from)} – {niceDate(cfg.range.to)}
+        Duty breakdown — {displayName(staff)} · {niceDate(cfg.range.from)} – {niceDate(cfg.range.to)}
       </div>
       {rows.length === 0 ? (
         <div style={{ textAlign: "center", fontSize: 12, color: "#666", padding: "20px 0" }}>No duties recorded in this range.</div>
