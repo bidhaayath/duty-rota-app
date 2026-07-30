@@ -1214,8 +1214,9 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
                   : `Records that this duty differs from what was originally rostered. The current duty (${current ? current.code : "—"}) is kept as the original.`}
               </div>
               {!exchange && (
-                <div style={{ fontSize: 11, color: "#A5731B", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 6, padding: "6px 8px", marginBottom: 8, lineHeight: 1.45 }}>
-                  Mark first, then change the duty — that way the original is saved correctly.
+                <div style={{ fontSize: 12.5, color: "#8A5A0F", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 6, padding: "8px 9px", marginBottom: 8, lineHeight: 1.5, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span style={{ minWidth: 0 }}><strong>Mark first, then change the duty</strong> — that way the original is saved correctly.</span>
                 </div>
               )}
               {["staff", "manager"].map((who) => {
