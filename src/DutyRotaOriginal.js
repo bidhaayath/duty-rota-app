@@ -1112,6 +1112,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
         fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
         padding: "7px 4px", borderRadius: 7, border: `1px solid ${hasCode ? "transparent" : T.line}`,
         background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none", position: "relative",
+        boxShadow: open ? `0 0 0 2px ${T.lagoon}` : "none",
       }}>
         {current ? current.code : "—"}
         {/* small blue dot marks a cell that has a note */}
