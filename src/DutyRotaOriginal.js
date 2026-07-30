@@ -40,11 +40,14 @@ const loadUserRota = async () => {
 
 // Save the rota to a local backup (instant) and Supabase (cross-device).
 // Both are wrapped so a failure never breaks the app.
+// Returns true on success, false on failure. The caller uses this to warn
+// the person on screen — a save that silently fails is worse than one that
+// visibly fails, because the person keeps working believing it's safe.
 const saveUserRota = async (rotaData) => {
   // Local backup dropped: it was a global per-browser key and could cross accounts.
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) return true; // nobody logged in yet — nothing to report as failed
     // Update-by-id (or insert if none) rather than upsert on user_id: the
     // upsert needed the one-rota-per-user uniqueness rule, which
     // multi-department removes. This path works with or without it.
@@ -55,13 +58,17 @@ const saveUserRota = async (rotaData) => {
       .order("created_at", { ascending: true })
       .limit(1);
     const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
+    let error;
     if (existing && existing[0]) {
-      await supabase.from("rotas").update(payload).eq("id", existing[0].id);
+      ({ error } = await supabase.from("rotas").update(payload).eq("id", existing[0].id));
     } else {
-      await supabase.from("rotas").insert({ user_id: user.id, ...payload });
+      ({ error } = await supabase.from("rotas").insert({ user_id: user.id, ...payload }));
     }
+    if (error) { console.error("Supabase save failed:", error); return false; }
+    return true;
   } catch (e) {
-    console.error("Supabase save failed (local backup kept):", e);
+    console.error("Supabase save failed:", e);
+    return false;
   }
 };
 
@@ -126,23 +133,28 @@ const loadRotaFor = async (deptId) => {
   return null;
 };
 
+// Returns true on success, false on failure — see note on saveUserRota above.
 const saveRotaFor = async (deptId, rotaData) => {
   try {
     localStorage.setItem("rota:v2:" + deptId, JSON.stringify(rotaData));
   } catch (e) { /* ignore */ }
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !deptId) return;
+    if (!user || !deptId) return true; // nothing to save yet — not a failure
     const { data: existing } = await supabase
       .from("rotas").select("id").eq("department_id", deptId).limit(1);
     const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
+    let error;
     if (existing && existing[0]) {
-      await supabase.from("rotas").update(payload).eq("id", existing[0].id);
+      ({ error } = await supabase.from("rotas").update(payload).eq("id", existing[0].id));
     } else {
-      await supabase.from("rotas").insert({ user_id: user.id, department_id: deptId, ...payload });
+      ({ error } = await supabase.from("rotas").insert({ user_id: user.id, department_id: deptId, ...payload }));
     }
+    if (error) { console.error("Supabase save failed:", error); return false; }
+    return true;
   } catch (e) {
-    console.error("Supabase save failed (local backup kept):", e);
+    console.error("Supabase save failed:", e);
+    return false;
   }
 };
 
@@ -587,6 +599,11 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const [statRange, setStatRange] = useState({ from: monthStart(), to: monthEnd() });
   const [printView, setPrintView] = useState(null);
   const printBodyRef = useRef(null);
+  // Tracks whether the last save to the server succeeded, so a failure is
+  // shown on screen instead of only appearing in the browser console where
+  // nobody using the app will ever see it.
+  const [saveStatus, setSaveStatus] = useState("idle"); // "idle" | "saving" | "saved" | "error"
+  const saveAttempt = useRef(0); // lets a stale save's result be ignored if a newer one has started
 
   useEffect(() => {
     // Retire the pre-multi-department localStorage key. It was a global,
@@ -617,9 +634,23 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
 
   useEffect(() => {
     if (!data || switchingDept.current) return;
-    if (deptId) saveRotaFor(deptId, data);
-    else saveUserRota(data);
+    const myAttempt = ++saveAttempt.current;
+    setSaveStatus("saving");
+    const run = deptId ? saveRotaFor(deptId, data) : saveUserRota(data);
+    run.then((ok) => {
+      // If another save started while this one was in flight, its result
+      // is the one that matters — ignore this older, now-stale result.
+      if (saveAttempt.current !== myAttempt) return;
+      setSaveStatus(ok ? "saved" : "error");
+    });
   }, [data, deptId]);
+
+  // Lets the warning banner's "Try saving again" button re-run the same save
+  // without requiring the person to make another edit first.
+  const retrySave = () => {
+    if (!data) return;
+    setData((d) => structuredClone(d));
+  };
 
   const switchDept = async (id) => {
     if (id === deptId) return;
@@ -922,6 +953,8 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
             <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
+            {saveStatus === "saving" && <span style={{ fontSize: 12, color: "#9FC3BD" }}>Saving…</span>}
+            {saveStatus === "saved" && <span style={{ fontSize: 12, color: T.leaf }}>✓ Saved</span>}
           </div>
           {viewData.logo && <img src={viewData.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
         </div>
@@ -938,6 +971,25 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       </header>
 
       <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
+        {saveStatus === "error" && (
+          <div style={{
+            background: "#FBEAE7", border: "1px solid #F1B8AE", borderRadius: 10,
+            padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: "#8A2E1E",
+            display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          }}>
+            <span style={{ flex: "1 1 260px" }}>
+              ⚠ <strong>Your last change did not save.</strong> Check your internet connection —
+              your edits are still shown here, but they have not reached the server yet.
+              Please don't close this tab until it saves.
+            </span>
+            <button onClick={retrySave} style={{
+              background: T.coral, color: "#fff", fontWeight: 700, fontSize: 12.5,
+              padding: "8px 15px", borderRadius: 7, border: "none", cursor: "pointer", whiteSpace: "nowrap",
+            }}>
+              Try saving again
+            </button>
+          </div>
+        )}
         {currentDeptLocked && (
           <div style={{
             background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 10,
