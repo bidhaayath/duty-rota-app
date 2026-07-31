@@ -3,7 +3,8 @@ import { toPng } from "html-to-image";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
-  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image
+  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
+  User, Briefcase, Eye, RotateCcw
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -39,11 +40,14 @@ const loadUserRota = async () => {
 
 // Save the rota to a local backup (instant) and Supabase (cross-device).
 // Both are wrapped so a failure never breaks the app.
+// Returns true on success, false on failure. The caller uses this to warn
+// the person on screen — a save that silently fails is worse than one that
+// visibly fails, because the person keeps working believing it's safe.
 const saveUserRota = async (rotaData) => {
   // Local backup dropped: it was a global per-browser key and could cross accounts.
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) return true; // nobody logged in yet — nothing to report as failed
     // Update-by-id (or insert if none) rather than upsert on user_id: the
     // upsert needed the one-rota-per-user uniqueness rule, which
     // multi-department removes. This path works with or without it.
@@ -54,13 +58,17 @@ const saveUserRota = async (rotaData) => {
       .order("created_at", { ascending: true })
       .limit(1);
     const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
+    let error;
     if (existing && existing[0]) {
-      await supabase.from("rotas").update(payload).eq("id", existing[0].id);
+      ({ error } = await supabase.from("rotas").update(payload).eq("id", existing[0].id));
     } else {
-      await supabase.from("rotas").insert({ user_id: user.id, ...payload });
+      ({ error } = await supabase.from("rotas").insert({ user_id: user.id, ...payload }));
     }
+    if (error) { console.error("Supabase save failed:", error); return false; }
+    return true;
   } catch (e) {
-    console.error("Supabase save failed (local backup kept):", e);
+    console.error("Supabase save failed:", e);
+    return false;
   }
 };
 
@@ -125,23 +133,28 @@ const loadRotaFor = async (deptId) => {
   return null;
 };
 
+// Returns true on success, false on failure — see note on saveUserRota above.
 const saveRotaFor = async (deptId, rotaData) => {
   try {
     localStorage.setItem("rota:v2:" + deptId, JSON.stringify(rotaData));
   } catch (e) { /* ignore */ }
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !deptId) return;
+    if (!user || !deptId) return true; // nothing to save yet — not a failure
     const { data: existing } = await supabase
       .from("rotas").select("id").eq("department_id", deptId).limit(1);
     const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
+    let error;
     if (existing && existing[0]) {
-      await supabase.from("rotas").update(payload).eq("id", existing[0].id);
+      ({ error } = await supabase.from("rotas").update(payload).eq("id", existing[0].id));
     } else {
-      await supabase.from("rotas").insert({ user_id: user.id, department_id: deptId, ...payload });
+      ({ error } = await supabase.from("rotas").insert({ user_id: user.id, department_id: deptId, ...payload }));
     }
+    if (error) { console.error("Supabase save failed:", error); return false; }
+    return true;
   } catch (e) {
-    console.error("Supabase save failed (local backup kept):", e);
+    console.error("Supabase save failed:", e);
+    return false;
   }
 };
 
@@ -236,6 +249,18 @@ const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
    reads cells[date][staffId] as a plain code id, keeps working unchanged.
    data.cellMeta[date][staffId] = { note?: string }                        */
 const cellMetaOf = (data, date, staffId) => (data.cellMeta?.[date]?.[staffId]) || null;
+
+/* Duty exchanges. When a duty is changed from what was originally rostered,
+   the cell remembers what it WAS and who asked for the change:
+     cellMeta[date][staffId].exchange = { originalCode: "<code id>", requestedBy: "staff"|"manager" }
+   originalCode "" means the cell was originally empty. Marking is manual and
+   is never cleared automatically — changing the duty back to the original
+   code leaves the mark in place until the user clears it. */
+const exchangeOf = (data, date, staffId) => cellMetaOf(data, date, staffId)?.exchange || null;
+const EXCHANGE_BY = {
+  staff:   { label: "Requested by staff",  short: "Staff",   icon: User,      color: "#2F6DB5", bg: "#E7F0FA" },
+  manager: { label: "Changed by manager",  short: "Manager", icon: Briefcase, color: "#A5731B", bg: "#FBF1DC" },
+};
 
 /* ── Employment window (start/end dates are INCLUSIVE) ────────────────
    startDate empty = always employed from the beginning.
@@ -574,6 +599,11 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const [statRange, setStatRange] = useState({ from: monthStart(), to: monthEnd() });
   const [printView, setPrintView] = useState(null);
   const printBodyRef = useRef(null);
+  // Tracks whether the last save to the server succeeded, so a failure is
+  // shown on screen instead of only appearing in the browser console where
+  // nobody using the app will ever see it.
+  const [saveStatus, setSaveStatus] = useState("idle"); // "idle" | "saving" | "saved" | "error"
+  const saveAttempt = useRef(0); // lets a stale save's result be ignored if a newer one has started
 
   useEffect(() => {
     // Retire the pre-multi-department localStorage key. It was a global,
@@ -604,9 +634,23 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
 
   useEffect(() => {
     if (!data || switchingDept.current) return;
-    if (deptId) saveRotaFor(deptId, data);
-    else saveUserRota(data);
+    const myAttempt = ++saveAttempt.current;
+    setSaveStatus("saving");
+    const run = deptId ? saveRotaFor(deptId, data) : saveUserRota(data);
+    run.then((ok) => {
+      // If another save started while this one was in flight, its result
+      // is the one that matters — ignore this older, now-stale result.
+      if (saveAttempt.current !== myAttempt) return;
+      setSaveStatus(ok ? "saved" : "error");
+    });
   }, [data, deptId]);
+
+  // Lets the warning banner's "Try saving again" button re-run the same save
+  // without requiring the person to make another edit first.
+  const retrySave = () => {
+    if (!data) return;
+    setData((d) => structuredClone(d));
+  };
 
   const switchDept = async (id) => {
     if (id === deptId) return;
@@ -750,6 +794,37 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     /* Landscape for wide rota ranges only; the per-print page override
        below wins for narrower ones (weekly, records, stats). */
     @page { size: A4 landscape; margin: 10mm; }
+
+    /* ── Frozen row-number + name columns on the rota grid ──────────────
+       These have to be classes, not inline styles, because the widths
+       change on a phone. On a laptop the name column is roomy; on a
+       narrow screen the two frozen columns together would swallow almost
+       the whole viewport and leave no room for the days, so on mobile the
+       number shrinks, the name wraps to two lines inside a fixed 108px,
+       and the designation hides (it is still on every export). */
+    .rota-num {
+      position: sticky; left: 0; z-index: 3; background: #fff;
+      width: 32px; min-width: 32px; max-width: 32px;
+      padding-left: 4px; padding-right: 4px; text-align: center;
+    }
+    .rota-name {
+      position: sticky; left: 32px; z-index: 2; background: #fff;
+      min-width: 168px; box-shadow: 1px 0 0 ${T.line};
+    }
+    .rota-foot-label { position: sticky; left: 0; z-index: 2; }
+    @media screen and (max-width: 760px) {
+      .rota-num {
+        width: 22px; min-width: 22px; max-width: 22px;
+        padding-left: 1px; padding-right: 1px; font-size: 11px;
+      }
+      .rota-name {
+        left: 22px; width: 108px; min-width: 108px; max-width: 108px;
+        white-space: normal; word-break: break-word;
+        font-size: 11.5px; line-height: 1.25;
+        padding-left: 6px; padding-right: 6px;
+      }
+      .rota-desig { display: none; }
+    }
   `;
 
   if (printView) {
@@ -878,6 +953,8 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
             <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
+            {saveStatus === "saving" && <span style={{ fontSize: 12, color: "#9FC3BD" }}>Saving…</span>}
+            {saveStatus === "saved" && <span style={{ fontSize: 12, color: T.leaf }}>✓ Saved</span>}
           </div>
           {viewData.logo && <img src={viewData.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
         </div>
@@ -894,6 +971,25 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       </header>
 
       <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
+        {saveStatus === "error" && (
+          <div style={{
+            background: "#FBEAE7", border: "1px solid #F1B8AE", borderRadius: 10,
+            padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: "#8A2E1E",
+            display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          }}>
+            <span style={{ flex: "1 1 260px" }}>
+              ⚠ <strong>Your last change did not save.</strong> Check your internet connection —
+              your edits are still shown here, but they have not reached the server yet.
+              Please don't close this tab until it saves.
+            </span>
+            <button onClick={retrySave} style={{
+              background: T.coral, color: "#fff", fontWeight: 700, fontSize: 12.5,
+              padding: "8px 15px", borderRadius: 7, border: "none", cursor: "pointer", whiteSpace: "nowrap",
+            }}>
+              Try saving again
+            </button>
+          </div>
+        )}
         {currentDeptLocked && (
           <div style={{
             background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 10,
@@ -926,15 +1022,14 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
 }
 
 /* ─────────────────── Duty code picker ───────────────────
-   Click a cell to open a panel: filter/pick a code, add a note, see the
    Click a cell to open a panel: filter/pick a code, add a note, or add a
    brand-new code without leaving the rota. Chips are finger-sized.       */
 const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", "#4DB6AC", "#F06292", "#A1887F", "#9575CD", "#4DD0E1"];
 
-function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled }) {
+function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled, exchange, onExchange }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState("pick"); // 'pick' | 'note' | 'add'
+  const [mode, setMode] = useState("pick"); // 'pick' | 'note' | 'add' | 'swap'
   const [noteText, setNoteText] = useState(note || "");
   const [nc, setNc] = useState({ code: "", label: "", color: NEW_CODE_COLORS[0], counts: "morning" });
   const wrapRef = useRef(null);
@@ -1017,17 +1112,31 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
         fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
         padding: "7px 4px", borderRadius: 7, border: `1px solid ${hasCode ? "transparent" : T.line}`,
         background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none", position: "relative",
+        boxShadow: open ? `0 0 0 2px ${T.lagoon}` : "none",
       }}>
         {current ? current.code : "—"}
         {/* small blue dot marks a cell that has a note */}
         {note && <span title="Has a note" style={{ position: "absolute", top: 2, right: 2, width: 7, height: 7, borderRadius: "50%", background: "#2F6DB5", border: "1px solid #fff" }} />}
+        {/* icon marks a duty changed from the original: person = staff asked,
+            briefcase = manager changed it */}
+        {exchange && (() => {
+          const cfg = EXCHANGE_BY[exchange.requestedBy];
+          const Icon = cfg.icon;
+          return (
+            <span title={cfg.label} style={{
+              position: "absolute", bottom: 1, left: 2, width: 14, height: 14, borderRadius: "50%",
+              background: "#fff", border: `1px solid ${cfg.color}`, color: cfg.color,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}><Icon size={9} /></span>
+          );
+        })()}
       </button>
 
       {open && pos && (
         <div style={{
           position: "fixed", zIndex: 40, left: pos.left, top: pos.top, bottom: pos.bottom,
-          width: PANEL_W, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
-          boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8,
+          width: PANEL_W, boxSizing: "border-box", background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
+          boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8, overflowWrap: "break-word", wordBreak: "break-word",
         }}>
           {mode === "pick" && (
             <>
@@ -1046,6 +1155,15 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
                 </button>
                 <button onClick={() => setMode("add")} style={{ ...btnMini, flex: 1, background: T.mist, color: T.ink, border: `1px solid ${T.line}` }}>+ New code</button>
               </div>
+              <button onClick={() => setMode("swap")} style={{
+                ...btnMini, width: "100%", marginTop: 6,
+                background: exchange ? EXCHANGE_BY[exchange.requestedBy].bg : T.mist,
+                color: exchange ? EXCHANGE_BY[exchange.requestedBy].color : T.ink,
+                border: `1px solid ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              }}>
+                <ArrowLeftRight size={12} />
+                {exchange ? `Changed · ${EXCHANGE_BY[exchange.requestedBy].short}` : "Mark as changed"}
+              </button>
             </>
           )}
 
@@ -1087,6 +1205,46 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
               <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 7 }}>You can rename or recolour it later in Settings.</div>
             </div>
           )}
+
+          {mode === "swap" && (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>Duty changed from original</div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>
+                {exchange
+                  ? `Currently marked as: ${EXCHANGE_BY[exchange.requestedBy].label}. Original duty was ${codes.find((c) => c.id === exchange.originalCode)?.code || "—"}.`
+                  : `Records that this duty differs from what was originally rostered. The current duty (${current ? current.code : "—"}) is kept as the original.`}
+              </div>
+              {!exchange && (
+                <div style={{ fontSize: 12.5, color: "#8A5A0F", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 6, padding: "8px 9px", marginBottom: 8, lineHeight: 1.5, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span style={{ minWidth: 0 }}><strong>Mark first, then change the duty</strong> — that way the original is saved correctly.</span>
+                </div>
+              )}
+              {["staff", "manager"].map((who) => {
+                const cfg = EXCHANGE_BY[who];
+                const Icon = cfg.icon;
+                const on = exchange?.requestedBy === who;
+                return (
+                  <button key={who} onClick={() => { onExchange(who); close(); }} style={{
+                    ...btnMini, width: "100%", marginBottom: 6, padding: "9px 10px",
+                    background: on ? cfg.bg : "#fff", color: on ? cfg.color : T.ink,
+                    border: on ? `2px solid ${cfg.color}` : `1px solid ${T.line}`,
+                    display: "flex", alignItems: "center", gap: 8,
+                  }}>
+                    <Icon size={14} /> {cfg.label}{on ? " ✓" : ""}
+                  </button>
+                );
+              })}
+              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                <button onClick={() => setMode("pick")} style={{ ...btnMini, flex: 1, background: "#fff", color: T.inkSoft, border: `1px solid ${T.line}` }}>Back</button>
+                {exchange && (
+                  <button onClick={() => { onExchange(null); close(); }} style={{ ...btnMini, flex: 1, background: "#FBEAE7", color: T.coral, border: `1px solid ${T.line}` }}>
+                    Clear mark
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1096,6 +1254,32 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 /* ─────────────────── Weekly rota grid ─────────────────── */
 function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport }) {
   const codeById = codeByIdOf(data);
+  // "See original rota" shows what each changed cell was BEFORE it was
+  // exchanged. The whole rota is view-only while this is on, so nobody
+  // edits the past by accident.
+  const [showOriginal, setShowOriginal] = useState(false);
+  const anyExchanges = days.some((date) =>
+    data.staff.some((s) => exchangeOf(data, date, s.id)));
+
+  // While "see original" is on, the summary columns and coverage rows must
+  // count the ORIGINAL duties too — otherwise the cells show the old rota
+  // while the totals beside them still describe the current one.
+  const viewRota = useMemo(() => {
+    if (!showOriginal) return data;
+    const cells = { ...data.cells };
+    Object.entries(data.cellMeta || {}).forEach(([date, dayMeta]) => {
+      let day = null;
+      Object.entries(dayMeta || {}).forEach(([sid, meta]) => {
+        const ex = meta && meta.exchange;
+        if (!ex) return;
+        if (!day) day = { ...(cells[date] || {}) };
+        if (ex.originalCode) day[sid] = ex.originalCode;
+        else delete day[sid];
+      });
+      if (day) cells[date] = day;
+    });
+    return { ...data, cells };
+  }, [data, showOriginal]);
 
   const spanOf = (a, b) => {
     let n = 0, d = a;
@@ -1152,7 +1336,39 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
       if (!d.cellMeta[date][staffId]) d.cellMeta[date][staffId] = {};
       const t = (note || "").trim();
       if (t) d.cellMeta[date][staffId].note = t;
-      else delete d.cellMeta[date][staffId];
+      else delete d.cellMeta[date][staffId].note;
+      // Only drop the whole entry once nothing is left in it — otherwise
+      // clearing a note would also wipe an exchange mark on the same cell.
+      if (Object.keys(d.cellMeta[date][staffId]).length === 0) delete d.cellMeta[date][staffId];
+      return d;
+    });
+  };
+
+  // Mark / unmark this duty as changed from the original.
+  //   who = "staff" | "manager" -> mark it (remembering the current code)
+  //   who = null                -> clear the mark
+  // The original code is only captured the FIRST time a cell is marked, so
+  // switching between staff/manager later never loses the true original.
+  const setExchange = (date, staffId, who) => {
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their duties.");
+      return;
+    }
+    update((d) => {
+      if (!d.cellMeta) d.cellMeta = {};
+      if (!d.cellMeta[date]) d.cellMeta[date] = {};
+      if (!d.cellMeta[date][staffId]) d.cellMeta[date][staffId] = {};
+      const entry = d.cellMeta[date][staffId];
+      if (!who) {
+        delete entry.exchange;
+      } else {
+        const existing = entry.exchange;
+        entry.exchange = {
+          originalCode: existing ? existing.originalCode : ((d.cells[date] || {})[staffId] || ""),
+          requestedBy: who,
+        };
+      }
+      if (Object.keys(entry).length === 0) delete d.cellMeta[date][staffId];
       return d;
     });
   };
@@ -1174,6 +1390,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
   };
 
   const range = `${niceDate(days[0])} – ${niceDate(days[days.length - 1])}`;
+  const shownStaff = staffForDays(data, days);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1213,7 +1430,18 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
             </>
           )}
         </div>
-        <Btn kind="ghost" small onClick={onExport}><Printer size={14} /> Export PDF</Btn>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Kept visible while the toggle is ON even if this range has no
+              exchanges — otherwise navigating to a clean week would hide the
+              only way back out of view-only mode. */}
+          {(anyExchanges || showOriginal) && (
+            <Btn kind="ghost" small onClick={() => setShowOriginal((v) => !v)}
+              style={showOriginal ? { background: "#E7F0FA", color: "#2F6DB5", border: "1px solid #B9D3EE" } : undefined}>
+              {showOriginal ? <><RotateCcw size={14} /> Back to current</> : <><Eye size={14} /> See original rota</>}
+            </Btn>
+          )}
+          <Btn kind="ghost" small onClick={onExport}><Printer size={14} /> Export PDF</Btn>
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
@@ -1225,16 +1453,37 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         ))}
       </div>
 
-      <div style={{ fontSize: 12.5, color: T.inkSoft, display: "flex", alignItems: "center", gap: 6 }}>
-        <Coins size={13} color={T.sand} />
-        Gold headers are <strong>non-official days</strong>{data.fridayRule ? " (all Fridays, plus any date you tap to toggle)" : " (tap a day header to toggle)"}. Duty on those days counts for payment.
+      {showOriginal && (
+        <div style={{
+          background: "#E7F0FA", border: "1px solid #B9D3EE", borderRadius: 10,
+          padding: "10px 14px", fontSize: 13, color: "#2F6DB5",
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <Eye size={15} />
+          <span style={{ flex: 1 }}>
+            Showing the <strong>original rota</strong> — duties as they were before any exchange.
+            Changed cells are outlined, and the totals and coverage rows count the original duties too.
+            Editing is paused while this view is on.
+          </span>
+        </div>
+      )}
+
+      {/* The text is wrapped in one span so it stays a single sentence. Without
+          it, each text node becomes its own flex column and gets squeezed into
+          a narrow, unreadable stack on a phone. */}
+      <div style={{ fontSize: 12.5, color: T.inkSoft, display: "flex", alignItems: "flex-start", gap: 6, lineHeight: 1.5 }}>
+        <Coins size={13} color={T.sand} style={{ flexShrink: 0, marginTop: 2 }} />
+        <span style={{ minWidth: 0 }}>
+          Gold headers are <strong>non-official days</strong>{data.fridayRule ? " (all Fridays, plus any date you tap to toggle)" : " (tap a day header to toggle)"}. Duty on those days counts for payment.
+        </span>
       </div>
 
       <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1080 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1120 }}>
           <thead>
             <tr>
-              <th style={{ ...th, position: "sticky", left: 0, background: "#fff", zIndex: 2, minWidth: 180 }}>NAME & DESIGNATION</th>
+              <th className="rota-num" style={th}>#</th>
+              <th className="rota-name" style={th}>NAME</th>
               {days.map((date) => {
                 const d = parseD(date);
                 const nonOff = isNonOff(data, date);
@@ -1256,16 +1505,22 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
             </tr>
           </thead>
           <tbody>
-            {staffForDays(data, days).map((s) => {
+            {shownStaff.map((s, i) => {
               const segs = weekSegments(s, days);
-              const t = weekTotalsFor(data, s, days);
+              const t = weekTotalsFor(viewRota, s, days);
               return (
                 <tr key={s.id}>
-                  <td style={{ ...td, position: "sticky", left: 0, background: "#fff", zIndex: 1, fontWeight: 600 }}>{displayName(s)}</td>
-                  {segs.map((seg, i) => {
+                  <td className="rota-num" style={{ ...td, fontWeight: 700, fontSize: 12, color: T.inkSoft }}>{i + 1}</td>
+                  <td className="rota-name" style={{ ...td, fontWeight: 600 }}>
+                    {s.name}
+                    {s.designation && (
+                      <span className="rota-desig" style={{ color: T.inkSoft, fontWeight: 500 }}> — {s.designation}</span>
+                    )}
+                  </td>
+                  {segs.map((seg, i2) => {
                     if (seg.kind === "notEmployed") {
                       return (
-                        <td key={`ne${i}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: "#F2F4F5", color: "#9AA5AB", fontSize: 11.5, fontStyle: "italic" }}>
+                        <td key={`ne${i2}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: "#F2F4F5", color: "#9AA5AB", fontSize: 11.5, fontStyle: "italic" }}>
                           {seg.span >= 2 ? (seg.before ? "Not yet joined" : "Left") : "—"}
                         </td>
                       );
@@ -1273,7 +1528,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     if (seg.kind === "leave") {
                       const st = styleFor(seg.period);
                       return (
-                        <td key={`l${i}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: st.bg, color: st.fg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
+                        <td key={`l${i2}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: st.bg, color: st.fg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
                           {seg.span >= 3 ? st.label : st.abbrev}
                           {seg.span >= 5 && (
                             <span style={{ fontWeight: 500, letterSpacing: 0, marginLeft: 8, fontSize: 11.5 }}>
@@ -1284,10 +1539,27 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                       );
                     }
                     const date = seg.date;
-                    const codeId = (data.cells[date] || {})[s.id] || "";
+                    const meta = cellMetaOf(data, date, s.id);
+                    const ex = meta?.exchange || null;
+                    // In "see original" mode a changed cell shows what it was
+                    // before the exchange; unchanged cells look the same.
+                    const liveCodeId = (data.cells[date] || {})[s.id] || "";
+                    const codeId = showOriginal && ex ? (ex.originalCode || "") : liveCodeId;
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
-                    const meta = cellMetaOf(data, date, s.id);
+                    if (showOriginal) {
+                      // Read-only rendering: no picker, so the past can't be edited.
+                      return (
+                        <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
+                          <div title={ex ? `Original duty (${EXCHANGE_BY[ex.requestedBy].label})` : ""} style={{
+                            fontSize: 12.5, fontWeight: 700, minWidth: 74, padding: "7px 4px", borderRadius: 7,
+                            border: ex ? "1px dashed #2F6DB5" : `1px solid ${code ? "transparent" : T.line}`,
+                            background: bg, color: code ? textOn(code.color) : T.inkSoft,
+                            opacity: ex ? 1 : 0.55,
+                          }}>{code ? code.code : "—"}</div>
+                        </td>
+                      );
+                    }
                     return (
                       <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
                         <CodePicker
@@ -1301,6 +1573,8 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                           note={meta?.note || ""}
                           onNote={(txt) => setCellNote(date, s.id, txt)}
                           onAddCode={addCode}
+                          exchange={ex}
+                          onExchange={(who) => setExchange(date, s.id, who)}
                         />
                       </td>
                     );
@@ -1322,16 +1596,19 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
               ...(data.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []), ["NIGHT", "night", "#6FA8DC"],
               ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color]) => (
               <tr key={cat}>
-                <td style={{ ...td, position: "sticky", left: 0, zIndex: 1, background: color, color: textOn(color), fontWeight: 800, fontSize: 12 }}>{label}</td>
+                <td colSpan={2} className="rota-foot-label" style={{ ...td, background: color, color: textOn(color), fontWeight: 800, fontSize: 12 }}>{label}</td>
                 {days.map((date) => (
-                  <td key={date} style={{ ...td, textAlign: "center", fontWeight: 700, background: color + "33" }}>{dayCountFor(data, date, cat)}</td>
+                  <td key={date} style={{ ...td, textAlign: "center", fontWeight: 700, background: color + "33" }}>{dayCountFor(viewRota, date, cat)}</td>
                 ))}
-                <td colSpan={7} style={{ ...td, background: "#fff" }} />
+                <td colSpan={data.eveningEnabled ? 8 : 7} style={{ ...td, background: "#fff" }} />
               </tr>
             ))}
           </tfoot>
         </table>
       </Card>
+      <div style={{ fontSize: 12.5, color: T.inkSoft }}>
+        Showing <strong>{shownStaff.length}</strong> staff for this range. The numbers down the left match the printed rota, so you can refer to a row by its number. On a phone the designation is hidden to leave room for the days — it still appears on every PDF and image export.
+      </div>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
         RD (release duty) counts as duty for the staff member — including for non-official day payment — but not in this unit's shift coverage rows. Annual leave and maternity are set in the <strong>Staff</strong> tab and appear as merged bands.
       </div>
@@ -1345,7 +1622,7 @@ function Records({ data, range, setRange, onExport }) {
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
-  const cols = ["Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1357,18 +1634,19 @@ function Records({ data, range, setRange, onExport }) {
 
       {valid && (
         <Card style={{ padding: 0, overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1020 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1060 }}>
             <thead>
               <tr>
-                {cols.map((h) => (
-                  <th key={h} style={{ ...th, textAlign: h === "Staff" ? "left" : "center", background: h === "Non-off duty" ? "#FBF1DC" : undefined, color: h === "Non-off duty" ? "#A5731B" : th.color }}>{h}</th>
+                {cols.map((h, i) => (
+                  <th key={h + i} style={{ ...th, textAlign: h === "Staff" ? "left" : "center", background: h === "Non-off duty" ? "#FBF1DC" : undefined, color: h === "Non-off duty" ? "#A5731B" : th.color }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {rows.map((r, i) => (
                 <React.Fragment key={r.staff.id}>
                   <tr>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 700, fontSize: 12, color: T.inkSoft }}>{i + 1}</td>
                     <td style={{ ...td, fontWeight: 600 }}>
                       {displayName(r.staff)}
                       {r.staff.endDate && (
@@ -1614,6 +1892,7 @@ const ptd = { border: "1px solid #999", padding: "5px 7px", fontSize: 11, textAl
 
 function RotaPrint({ data, days }) {
   const codeById = codeByIdOf(data);
+  const shownStaff = staffForDays(data, days);
   // Collect notes shown this week, numbered, to list under the rota
   const noteList = [];
   const noteNum = (date, staffId) => {
@@ -1633,12 +1912,13 @@ function RotaPrint({ data, days }) {
         {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
-        {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])}
+        {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])} · {shownStaff.length} staff
       </div>
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
-            <th style={{ ...pth, textAlign: "left" }}>NAME & DESIGNATION</th>
+            <th style={{ ...pth, width: 24 }}>#</th>
+            <th style={{ ...pth, textAlign: "left" }}>NAME &amp; DESIGNATION</th>
             {days.map((date) => {
               const d = parseD(date);
               const nonOff = isNonOff(data, date);
@@ -1654,16 +1934,17 @@ function RotaPrint({ data, days }) {
           </tr>
         </thead>
         <tbody>
-          {staffForDays(data, days).map((s) => {
+          {shownStaff.map((s, i) => {
             const segs = weekSegments(s, days);
             const t = weekTotalsFor(data, s, days);
             return (
               <tr key={s.id}>
+                <td style={{ ...ptd, fontWeight: 700, color: "#666" }}>{i + 1}</td>
                 <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(s)}</td>
-                {segs.map((seg, i) => {
+                {segs.map((seg, i2) => {
                   if (seg.kind === "notEmployed") {
                     return (
-                      <td key={`ne${i}`} colSpan={seg.span} style={{ ...ptd, background: "#F2F4F5", color: "#888", fontStyle: "italic" }}>
+                      <td key={`ne${i2}`} colSpan={seg.span} style={{ ...ptd, background: "#F2F4F5", color: "#888", fontStyle: "italic" }}>
                         {seg.span >= 2 ? (seg.before ? "Not yet joined" : "Left") : "—"}
                       </td>
                     );
@@ -1671,7 +1952,7 @@ function RotaPrint({ data, days }) {
                   if (seg.kind === "leave") {
                     const st = styleFor(seg.period);
                     return (
-                      <td key={`l${i}`} colSpan={seg.span} style={{ ...ptd, background: st.bg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
+                      <td key={`l${i2}`} colSpan={seg.span} style={{ ...ptd, background: st.bg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
                         {seg.span >= 3 ? st.label : st.abbrev}
                         {seg.span >= 3 && (
                           <span style={{ fontWeight: 500, letterSpacing: 0, marginLeft: 6, fontSize: 8.5 }}>
@@ -1683,10 +1964,13 @@ function RotaPrint({ data, days }) {
                   }
                   const code = codeById((data.cells[seg.date] || {})[s.id]);
                   const num = noteNum(seg.date, s.id);
+                  const ex = exchangeOf(data, seg.date, s.id);
                   return (
                     <td key={seg.date} style={{ ...ptd, background: code ? code.color : "#fff", color: code ? textOn(code.color) : "#999", fontWeight: 700, position: "relative" }}>
                       {code ? code.code : ""}
                       {num && <sup style={{ fontSize: 8 }}>{num}</sup>}
+                      {/* S = staff asked for the change, M = manager changed it */}
+                      {ex && <sup style={{ fontSize: 8, marginLeft: 1 }}>{ex.requestedBy === "manager" ? "M" : "S"}</sup>}
                     </td>
                   );
                 })}
@@ -1707,15 +1991,16 @@ function RotaPrint({ data, days }) {
             ...(data.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []), ["NIGHT", "night", "#6FA8DC"],
             ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color]) => (
             <tr key={cat}>
-              <td style={{ ...ptd, textAlign: "left", background: color, color: textOn(color), fontWeight: 800 }}>{label}</td>
+              <td colSpan={2} style={{ ...ptd, textAlign: "left", background: color, color: textOn(color), fontWeight: 800 }}>{label}</td>
               {days.map((date) => <td key={date} style={ptd}>{dayCountFor(data, date, cat)}</td>)}
-              <td colSpan={7} style={{ border: "none" }} />
+              <td colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
             </tr>
           ))}
         </tfoot>
       </table>
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
         Legend: {data.codes.map((c) => `${c.code} = ${c.label}`).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave
+        <br />Superscript <strong>S</strong> = duty changed at staff request · <strong>M</strong> = duty changed by manager
       </div>
       {noteList.length > 0 && (
         <div style={{ marginTop: 10, border: "1px solid #ccc", borderRadius: 6, padding: "8px 10px" }}>
@@ -1727,16 +2012,18 @@ function RotaPrint({ data, days }) {
           ))}
         </div>
       )}
-      <div style={{ fontSize: 9.5, color: "#888", marginTop: 6 }}>
-        Superscript numbers refer to the notes above.
-      </div>
+      {noteList.length > 0 && (
+        <div style={{ fontSize: 9.5, color: "#888", marginTop: 6 }}>
+          Superscript numbers refer to the notes above.
+        </div>
+      )}
     </div>
   );
 }
 
 function RecordsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
-  const cols = ["Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
       <div className="rp-head">
@@ -1744,7 +2031,7 @@ function RecordsPrint({ data, from, to }) {
         {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
-        Staff Duty & Leave Record · {niceDate(from)} – {niceDate(to)}
+        Staff Duty &amp; Leave Record · {niceDate(from)} – {niceDate(to)} · {rows.length} staff
       </div>
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
@@ -1755,8 +2042,9 @@ function RecordsPrint({ data, from, to }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {rows.map((r, i) => (
             <tr key={r.staff.id}>
+              <td style={{ ...ptd, fontWeight: 700, color: "#666" }}>{i + 1}</td>
               <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(r.staff)}{r.staff.endDate ? ` (left ${shortDate(r.staff.endDate)})` : ""}{r.maternityDays > 0 ? " (Maternity)" : ""}</td>
               <td style={ptd}>{r.morning}</td>
               <td style={ptd}>{r.afternoon}</td>
@@ -1785,7 +2073,7 @@ function RecordsPrint({ data, from, to }) {
             <thead>
               <tr>
                 <th style={{ ...pth, textAlign: "left" }}>Staff</th>
-                <th style={{ ...pth, textAlign: "left" }}>Dates & duties</th>
+                <th style={{ ...pth, textAlign: "left" }}>Dates &amp; duties</th>
                 <th style={pth}>Total</th>
               </tr>
             </thead>
@@ -1991,6 +2279,9 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
     update((d) => {
       d.staff = d.staff.filter((x) => x.id !== id);
       Object.values(d.cells).forEach((day) => delete day[id]);
+      // Notes and exchange marks live in a parallel map — clear those too, or
+      // they linger in the saved data forever with no owner.
+      Object.values(d.cellMeta || {}).forEach((day) => delete day[id]);
       return d;
     });
   };
@@ -2332,6 +2623,26 @@ const codeLeaderboard = (data, codeId, from, to) => {
     .sort((a, b) => b.count - a.count);
 };
 
+// Duty exchanges per staff member in a date range, split by who asked for
+// the change. Counts marks that are CURRENTLY set (clearing a mark removes
+// it from these totals), matching how the rest of the app reports.
+const exchangesFor = (data, from, to) => {
+  const dates = datesBetween(from, to);
+  return data.staff
+    .filter((s) => employedInRange(s, from, to))
+    .map((s) => {
+      let staffReq = 0, managerReq = 0;
+      dates.forEach((date) => {
+        const ex = exchangeOf(data, date, s.id);
+        if (!ex) return;
+        if (ex.requestedBy === "manager") managerReq++; else staffReq++;
+      });
+      return { staff: s, staffReq, managerReq, total: staffReq + managerReq };
+    })
+    .filter((r) => r.total > 0)
+    .sort((a, b) => b.total - a.total);
+};
+
 function InsightsTab({ data, onExport }) {
   const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
   const [staffId, setStaffId] = useState(data.staff[0]?.id || "");
@@ -2352,6 +2663,7 @@ function InsightsTab({ data, onExport }) {
     : [];
 
   const leaderboard = codeLeaderboard(data, codeId, range.from, range.to);
+  const exchanges = exchangesFor(data, range.from, range.to);
   const combo = data.staff.find((s) => s.id === staffId)
     ? comboCount(data, staff, comboCode, comboDow, range.from, range.to)
     : 0;
@@ -2472,6 +2784,50 @@ function InsightsTab({ data, onExport }) {
                 </div>
               );
             })}
+          </div>
+        )}
+      </Card>
+
+      {/* Duty exchanges */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <H>Duty exchanges</H>
+          <div style={{ display: "flex", gap: 12, fontSize: 12, color: T.inkSoft, flexWrap: "wrap" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <User size={13} color={EXCHANGE_BY.staff.color} /> Requested by staff
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <Briefcase size={13} color={EXCHANGE_BY.manager.color} /> Changed by manager
+            </span>
+          </div>
+        </div>
+        {exchanges.length === 0 ? (
+          <div style={{ color: T.inkSoft, fontSize: 13, padding: "16px 0", textAlign: "center" }}>
+            No duty exchanges marked in this range.
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+              <thead><tr>
+                <th style={{ ...th, textAlign: "left" }}>Staff</th>
+                <th style={{ ...th, textAlign: "center" }}>By staff</th>
+                <th style={{ ...th, textAlign: "center" }}>By manager</th>
+                <th style={{ ...th, textAlign: "center" }}>Total</th>
+              </tr></thead>
+              <tbody>
+                {exchanges.map((r) => (
+                  <tr key={r.staff.id}>
+                    <td style={{ ...td, fontWeight: 600 }}>{displayName(r.staff)}</td>
+                    <td style={{ ...td, textAlign: "center", color: r.staffReq ? EXCHANGE_BY.staff.color : T.inkSoft, fontWeight: r.staffReq ? 700 : 400 }}>{r.staffReq}</td>
+                    <td style={{ ...td, textAlign: "center", color: r.managerReq ? EXCHANGE_BY.manager.color : T.inkSoft, fontWeight: r.managerReq ? 700 : 400 }}>{r.managerReq}</td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{r.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 8 }}>
+              Counts duties currently marked as changed from the original. Clearing a mark removes it from these totals.
+            </div>
           </div>
         )}
       </Card>
@@ -2615,6 +2971,7 @@ function HelpTab({ data }) {
         </ul>
         <p style={{ marginBottom: 4 }}><strong>Add a note to any duty.</strong> In the picker, tap <strong>+ Note</strong> to jot something like "left after 4 hours" or "swapped with Mariyam". A small blue dot marks cells that have a note, and all notes appear on the printed rota. Notes are just for your record — they don't change any counts.</p>
         <p style={{ marginBottom: 10 }}><strong>Need a code that doesn't exist yet?</strong> Tap <strong>+ New code</strong> right in the picker — give it a name, colour, and what it counts as (morning, night, off, etc.), and it's added and applied straight away. No need to leave the rota. You can rename or recolour it later in Settings.</p>
+        <p style={{ marginBottom: 10 }}><strong>Row numbers.</strong> Every staff row is numbered down the left, and the same numbers appear on the printed rota, so you can tell at a glance how many staff are on the rota and refer to a row by its number in a handover or on WhatsApp.</p>
         <p>Your current duty codes (change these any time in Settings):</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
           {data.codes.map((c) => (
@@ -2644,7 +3001,34 @@ function HelpTab({ data }) {
         <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. Each code’s <strong>Counts as</strong> setting decides which category it adds to, so a code like <Code>N/FRL</Code> can count as FRL.</p>
       </Section>
 
-      <Section title="5. When someone joins or leaves">
+      <Section title="5. Recording a changed duty (duty exchanges)">
+        <p style={{ marginTop: 0 }}>When a duty ends up different from what you originally rostered — a nurse asked to swap, or you moved her yourself — you can mark that on the cell, so the rota keeps a record of both the change and who asked for it.</p>
+        <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>Mark it first, then change the duty</p>
+        <p style={{ marginTop: 0 }}>
+          This order matters. When you mark a cell, DutyRota saves whatever duty is
+          in it <em>at that moment</em> as the original. So:
+        </p>
+        <ol style={{ margin: "6px 0 10px", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}>Click the cell that is about to change.</li>
+          <li style={{ marginBottom: 5 }}>Tap <strong>Mark as changed</strong>, then choose <strong>Requested by staff</strong> or <strong>Changed by manager</strong>.</li>
+          <li>Now set the new duty code.</li>
+        </ol>
+        <p style={{ marginBottom: 10 }}>
+          If you change the duty first and mark it afterwards, the new duty gets saved as the
+          "original" — which isn't what you want. If that happens, clear the mark, put the old
+          code back, mark it, then set the new code again.
+        </p>
+        <p style={{ marginBottom: 4 }}><strong>What you'll see</strong></p>
+        <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}>A small round icon in the corner of the cell — a <strong>person</strong> for staff-requested, a <strong>briefcase</strong> for manager-changed.</li>
+          <li style={{ marginBottom: 5 }}><strong>See original rota</strong> button at the top right — turn it on to view the rota as it was before any exchanges. Changed cells are outlined, the totals and coverage rows follow the original duties too, and editing is paused while you're in this view.</li>
+          <li style={{ marginBottom: 5 }}>On the printed rota, a small <strong>S</strong> or <strong>M</strong> next to the duty, explained in the legend.</li>
+          <li>In the <strong>Insights</strong> tab, a <strong>Duty exchanges</strong> table showing per staff member how many changes were at their request and how many you made.</li>
+        </ul>
+        <p style={{ marginBottom: 0 }}>The mark stays until you clear it — changing the duty back to the original code does not remove it. To clear it, open the cell, tap the <strong>Changed</strong> button, then <strong>Clear mark</strong>.</p>
+      </Section>
+
+      <Section title="6. When someone joins or leaves">
         <p style={{ marginTop: 0 }}>When a staff member resigns or moves to another department, <strong>do not delete them</strong> — that would erase their past duties and make old rotas and statistics wrong.</p>
         <p>Instead, in the <strong>Staff</strong> tab, open that person and set a <strong>Last working day</strong> (or use the <strong>Mark left</strong> button for today). They will:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
@@ -2655,11 +3039,11 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>For a new joiner, set a <strong>Joining date</strong> so they don't show on rotas before they started. If someone comes back, use <strong>Reactivate</strong>.</p>
       </Section>
 
-      <Section title="6. Ordering your staff list">
-        <p style={{ margin: 0 }}>In the <strong>Staff</strong> tab, use the up and down arrows next to each name to set the order staff appear in. This order is used everywhere — the weekly rota, records, statistics, and printed PDFs. The <strong>Sort A–Z</strong> button arranges everyone alphabetically in one click.</p>
+      <Section title="7. Ordering your staff list">
+        <p style={{ margin: 0 }}>In the <strong>Staff</strong> tab, use the up and down arrows next to each name to set the order staff appear in. This order is used everywhere — the weekly rota, records, statistics, and printed PDFs, including the row numbers. The <strong>Sort A–Z</strong> button arranges everyone alphabetically in one click.</p>
       </Section>
 
-      <Section title="7. Reports & printing">
+      <Section title="8. Reports & printing">
         <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many leave days were taken in each category (SL, FRL, ML, Other leave).</p>
         <p>On any of these, the <strong>Export PDF</strong> button opens an export view with two choices:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
@@ -2669,7 +3053,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Your logo, if you have set one, appears on both.</p>
       </Section>
 
-      <Section title="8. Managing more than one department">
+      <Section title="9. Managing more than one department">
         <p style={{ marginTop: 0 }}>If you run more than one ward or unit, you don&rsquo;t need a separate login for each. Use the department button at the top left — the one showing your current department name.</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 5 }}><strong>Switch</strong> — tap any department in the list to open its rota.</li>
@@ -2680,18 +3064,19 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Departments are completely separate: staff, duty codes, statistics and exports never mix between them.</p>
       </Section>
 
-      <Section title="9. Digging into the details (Insights tab)">
+      <Section title="10. Digging into the details (Insights tab)">
         <p style={{ marginTop: 0 }}>The <strong>Insights</strong> tab answers specific questions about who did what. Pick a date range at the top, then use any of these:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>Staff breakdown</strong> — choose a nurse to see every duty code she worked, split by day of the week, with Fridays, Saturdays, and non-official days shown separately.</li>
           <li style={{ marginBottom: 6 }}><strong>Quick question</strong> — build a sentence like "How many times did Aminath do M on a Friday?" and get an instant answer.</li>
           <li style={{ marginBottom: 6 }}><strong>Who did a code the most</strong> — pick a code and see which staff did it most often, ranked.</li>
+          <li style={{ marginBottom: 6 }}><strong>Duty exchanges</strong> — how many duties were changed for each staff member, split by staff-requested and manager-changed.</li>
           <li><strong>Compare two staff</strong> — see two nurses' duty counts side by side.</li>
         </ul>
         <p style={{ marginBottom: 0 }}>Leave days are never counted as duty here, and you can export the staff breakdown to PDF.</p>
       </Section>
 
-      <Section title="10. Your account & data">
+      <Section title="11. Your account & data">
         <ul style={{ margin: 0, paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>It saves automatically.</strong> There's no save button — every change is kept.</li>
           <li style={{ marginBottom: 6 }}><strong>It works across devices.</strong> Log in on your laptop and your phone with the same email, and you'll see the same rota.</li>
