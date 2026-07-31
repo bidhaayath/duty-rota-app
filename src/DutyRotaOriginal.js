@@ -1135,8 +1135,8 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
       {open && pos && (
         <div style={{
           position: "fixed", zIndex: 40, left: pos.left, top: pos.top, bottom: pos.bottom,
-          width: PANEL_W, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
-          boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8,
+          width: PANEL_W, boxSizing: "border-box", background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
+          boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8, overflowWrap: "break-word", wordBreak: "break-word",
         }}>
           {mode === "pick" && (
             <>
