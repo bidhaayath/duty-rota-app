@@ -1468,9 +1468,14 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         </div>
       )}
 
-      <div style={{ fontSize: 12.5, color: T.inkSoft, display: "flex", alignItems: "center", gap: 6 }}>
-        <Coins size={13} color={T.sand} />
-        Gold headers are <strong>non-official days</strong>{data.fridayRule ? " (all Fridays, plus any date you tap to toggle)" : " (tap a day header to toggle)"}. Duty on those days counts for payment.
+      {/* The text is wrapped in one span so it stays a single sentence. Without
+          it, each text node becomes its own flex column and gets squeezed into
+          a narrow, unreadable stack on a phone. */}
+      <div style={{ fontSize: 12.5, color: T.inkSoft, display: "flex", alignItems: "flex-start", gap: 6, lineHeight: 1.5 }}>
+        <Coins size={13} color={T.sand} style={{ flexShrink: 0, marginTop: 2 }} />
+        <span style={{ minWidth: 0 }}>
+          Gold headers are <strong>non-official days</strong>{data.fridayRule ? " (all Fridays, plus any date you tap to toggle)" : " (tap a day header to toggle)"}. Duty on those days counts for payment.
+        </span>
       </div>
 
       <Card style={{ padding: 0, overflowX: "auto" }}>
