@@ -684,6 +684,13 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     switchingDept.current = false;
   };
 
+  // The database refuses two departments with the same name for one person
+  // (unique index on owner_user_id + name). Postgres reports that as code
+  // 23505. Without this, the person just sees a generic "could not create"
+  // and has no idea the name was the problem.
+  const isDuplicateNameError = (error) =>
+    error && (error.code === "23505" || /duplicate key|unique constraint/i.test(error.message || ""));
+
   const addDepartment = async () => {
     if (departmentLimit != null && departments.length >= departmentLimit) {
       window.alert(`Your plan includes up to ${departmentLimit} department${departmentLimit === 1 ? "" : "s"}. Upgrade to add more.`);
@@ -691,12 +698,25 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     }
     const name = window.prompt("Name for the new department:", `Department ${departments.length + 1}`);
     if (!name || !name.trim()) return;
+    const clean = name.trim();
+    // Catch it here first so the person gets a clear answer straight away,
+    // rather than a database error. Compared case-insensitively so "ICU" and
+    // "icu" are treated as the same name to a human reading the list.
+    if (departments.some((x) => (x.name || "").trim().toLowerCase() === clean.toLowerCase())) {
+      window.alert(`You already have a department called "${clean}".\n\nPlease choose a different name.`);
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     const { data: d, error } = await supabase
       .from("departments")
-      .insert({ owner_user_id: user.id, name: name.trim() })
+      .insert({ owner_user_id: user.id, name: clean })
       .select("id, name, created_at").single();
-    if (error || !d) { window.alert("Could not create the department. Please try again."); return; }
+    if (error || !d) {
+      window.alert(isDuplicateNameError(error)
+        ? `You already have a department called "${clean}".\n\nPlease choose a different name.`
+        : "Could not create the department. Please try again.");
+      return;
+    }
     setDepartments((prev) => [...prev, d]);
     switchingDept.current = true;
     setData(null);
@@ -710,9 +730,20 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     if (!cur) return;
     const name = window.prompt("Rename department:", cur.name);
     if (!name || !name.trim() || name.trim() === cur.name) return;
-    const { error } = await supabase.from("departments").update({ name: name.trim() }).eq("id", deptId);
-    if (error) { window.alert("Could not rename the department. Please try again."); return; }
-    setDepartments((prev) => prev.map((x) => (x.id === deptId ? { ...x, name: name.trim() } : x)));
+    const clean = name.trim();
+    // Same check as adding — a rename can collide with an existing name too.
+    if (departments.some((x) => x.id !== deptId && (x.name || "").trim().toLowerCase() === clean.toLowerCase())) {
+      window.alert(`You already have a department called "${clean}".\n\nPlease choose a different name.`);
+      return;
+    }
+    const { error } = await supabase.from("departments").update({ name: clean }).eq("id", deptId);
+    if (error) {
+      window.alert(isDuplicateNameError(error)
+        ? `You already have a department called "${clean}".\n\nPlease choose a different name.`
+        : "Could not rename the department. Please try again.");
+      return;
+    }
+    setDepartments((prev) => prev.map((x) => (x.id === deptId ? { ...x, name: clean } : x)));
   };
 
   const deleteDepartment = async () => {
