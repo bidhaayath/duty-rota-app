@@ -369,7 +369,11 @@ const DEFAULT_CODES = [
 
 const seed = () => ({
   staff: [],
-  codes: DEFAULT_CODES,
+  // Copy, not the shared DEFAULT_CODES array itself — otherwise editing or
+  // deleting a code in one rota would mutate the app's master default list.
+  codes: DEFAULT_CODES.map((c) => ({ ...c })),
+  // These defaults have now been offered, so they are never re-added later.
+  seededCodes: DEFAULT_CODES.map((c) => c.code.toUpperCase()),
   cells: {},
   cellMeta: {},
   nonOfficial: [],
@@ -413,9 +417,27 @@ const migrate = (d) => {
   // exists for rotas that turn it on (e.g. 4-shift Ramadan rosters).
   if (d.eveningEnabled === undefined) d.eveningEnabled = false;
   if (d.logo === undefined) d.logo = "";
-  // add newer default codes if missing (match by code string)
+  // Default codes are seeded ONCE, not re-added on every load. seededCodes
+  // records every default that has already been offered to this rota, so a
+  // code the user deliberately deleted stays deleted instead of reappearing
+  // at the next login. A default that has never been seeded (i.e. one added
+  // to the app after this rota was created) is still delivered normally.
+  //
+  // Existing rotas have no seededCodes list yet. They are treated as having
+  // already been offered every current default — which is true, because the
+  // old code force-added all of them on every load.
+  if (!Array.isArray(d.seededCodes)) {
+    d.seededCodes = DEFAULT_CODES.map((c) => c.code.toUpperCase());
+  }
   const have = new Set(d.codes.map((c) => c.code.toUpperCase()));
-  DEFAULT_CODES.forEach((c) => { if (!have.has(c.code.toUpperCase())) d.codes.push({ ...c }); });
+  const seeded = new Set(d.seededCodes.map((c) => String(c).toUpperCase()));
+  DEFAULT_CODES.forEach((c) => {
+    const key = c.code.toUpperCase();
+    if (!seeded.has(key)) {
+      if (!have.has(key)) d.codes.push({ ...c });
+      d.seededCodes.push(key);
+    }
+  });
   const mr = d.codes.find((c) => c.code.toUpperCase() === "M(R)");
   if (mr && /relief/i.test(mr.label)) mr.label = "Morning request";
   // The SL/FRL/ML default codes used to count as the generic "leave". Now each
