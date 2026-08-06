@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import supabase from './supabaseClient';
 import Auth from './Auth';
 import DutyRota from './DutyRotaOriginal';
+import Admin from './Admin';
+import Billing from './Billing';
 
 // A password-reset link signs the user in automatically. Without this check,
 // App.js would see a valid session and jump straight to the rota, never giving
@@ -28,15 +30,8 @@ const recoveryPending = () => {
    to allow or block a save. Reading it here means the paywall banner and the
    actual security can never disagree — no matter how a row was edited.
 
-   Paid accounts are activated by the payment webhook or, for now, manually
-   via activate_manually() in the Supabase SQL editor.                      */
-const WHATSAPP = '9607666261'; // +960 Maldives
-const WA_LINK = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(
-  "Hi! My DutyRota free trial has ended and I'd like to subscribe."
-)}`;
-const WA_LINK_EARLY = `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(
-  "Hi! My DutyRota free trial is ending soon and I'd like to subscribe."
-)}`;
+   Paid accounts are activated by the payment webhook or, for now, by hand
+   from the admin dashboard.                                              */
 
 // Ask the database for this user's subscription state. my_subscription()
 // runs as the logged-in user and returns can_write, state, and days_remaining
@@ -65,25 +60,26 @@ const fetchSubscription = async () => {
 
 /* ─────────────── Banners ─────────────── */
 
-function TrialEndingNote({ daysLeft }) {
-  // Heads-up in the last 7 days, with a subscribe link so people can act
-  // before the view-only switch rather than after it.
+function TrialEndingNote({ daysLeft, onSeePlans }) {
+  // Heads-up in the last 7 days, with a link to the plans page so people can
+  // act before the view-only switch rather than after it.
   return (
     <div style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '10px 20px', fontSize: 13, color: '#7A6320', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
       <span>
         Your free trial ends in <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>.
       </span>
-      <a href={WA_LINK_EARLY} target="_blank" rel="noreferrer" style={{
+      <button onClick={onSeePlans} style={{
         background: '#0F8B7E', color: '#fff', fontWeight: 700, fontSize: 12,
-        padding: '6px 14px', borderRadius: 6, textDecoration: 'none', whiteSpace: 'nowrap',
+        padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+        whiteSpace: 'nowrap', fontFamily: 'inherit',
       }}>
-        Subscribe on WhatsApp
-      </a>
+        See plans
+      </button>
     </div>
   );
 }
 
-function Paywall() {
+function Paywall({ onSeePlans }) {
   return (
     <div style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
@@ -94,12 +90,13 @@ function Paywall() {
             but editing is paused. Subscribe to continue right where you left off.
           </div>
         </div>
-        <a href={WA_LINK} target="_blank" rel="noreferrer" style={{
+        <button onClick={onSeePlans} style={{
           background: '#fff', color: '#0B6A60', fontWeight: 800, fontSize: 14,
-          padding: '11px 18px', borderRadius: 8, textDecoration: 'none', whiteSpace: 'nowrap',
+          padding: '11px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
+          whiteSpace: 'nowrap', fontFamily: 'inherit',
         }}>
-          Subscribe on WhatsApp
-        </a>
+          See plans
+        </button>
       </div>
     </div>
   );
@@ -110,6 +107,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [recovering, setRecovering] = useState(recoveryPending());
   const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null });
+  // Whether this account may open the admin screen. The database decides —
+  // is_admin() reads the admins table. Showing or hiding the button here is
+  // only tidiness: admin_list_users() and activate_manually() check for
+  // themselves and refuse anyone who is not on the list.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [showBilling, setShowBilling] = useState(false);
 
   useEffect(() => {
     if (isRecoveryUrl()) {
@@ -166,6 +170,15 @@ export default function App() {
     return () => { cancelled = true; };
   }, [session?.user?.id]);
 
+  useEffect(() => {
+    if (!session?.user?.id) { setIsAdmin(false); setShowAdmin(false); return; }
+    let cancelled = false;
+    supabase.rpc('is_admin').then(({ data, error }) => {
+      if (!cancelled) setIsAdmin(!error && data === true);
+    });
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
@@ -176,16 +189,46 @@ export default function App() {
 
   if (!session || recovering) return <Auth />;
 
+  if (showAdmin && isAdmin) return <Admin onExit={() => setShowAdmin(false)} />;
+
+  if (showBilling) {
+    return (
+      <Billing
+        email={session.user.email}
+        onExit={() => {
+          setShowBilling(false);
+          // They may have just been activated, so ask the database again
+          // rather than leaving a stale paywall on screen.
+          fetchSubscription().then(setSub);
+        }}
+      />
+    );
+  }
+
   const showEndingNote = !sub.active && !sub.locked && sub.daysLeft !== null && sub.daysLeft <= 7;
 
   return (
     <div>
-      {sub.locked && <Paywall />}
-      {showEndingNote && <TrialEndingNote daysLeft={sub.daysLeft} />}
+      {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} />}
+      {showEndingNote && <TrialEndingNote daysLeft={sub.daysLeft} onSeePlans={() => setShowBilling(true)} />}
       <div style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '20px' }}>📋 DutyRota</h1>
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
           <span style={{ fontSize: '13px', color: '#666' }}>{session.user.email}</span>
+          <button
+            onClick={() => setShowBilling(true)}
+            style={{ padding: '8px 16px', background: 'white', color: '#0F8B7E', border: '1px solid #0F8B7E', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            My plan
+          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setShowAdmin(true)}
+              style={{ padding: '8px 16px', background: '#0B6A60', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              Admin
+            </button>
+          )}
           <button
             onClick={() => supabase.auth.signOut()}
             style={{ padding: '8px 16px', background: '#E4604E', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
