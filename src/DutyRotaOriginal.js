@@ -4,13 +4,16 @@ import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
   AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
-  User, Briefcase, Eye, RotateCcw
+  User, Briefcase, Eye, RotateCcw, Wand2
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   Cell, CartesianGrid, LineChart, Line
 } from "recharts";
 import supabase from "./supabaseClient";
+import RequestsTab from "./RequestsTab";
+import SmartRosterTab from "./SmartRosterTab";
+import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 
 // Load this user's saved rota. Tries Supabase first, then a local backup,
 // and finally falls back to a fresh empty rota so the app ALWAYS loads.
@@ -212,7 +215,14 @@ const pad = (n) => String(n).padStart(2, "0");
 const dstr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parseD = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 const addDays = (s, n) => { const d = parseD(s); d.setDate(d.getDate() + n); return dstr(d); };
-const startOfWeek = (s) => { const d = parseD(s); return addDays(s, -d.getDay()); };
+/* Back to the start of whatever this ward calls a week. 0 is Sunday, 1 is
+   Monday, matching JavaScript's own day numbering so nothing has to be
+   translated on the way through. Sunday unless the rota says otherwise,
+   which is what every rota created before this setting existed assumes. */
+const startOfWeek = (s, firstDay = 0) => {
+  const d = parseD(s);
+  return addDays(s, -((((d.getDay() - firstDay) % 7) + 7) % 7));
+};
 const niceDate = (s) => parseD(s).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const shortDate = (s) => parseD(s).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 const spanDays = (a, b) => Math.round((parseD(b) - parseD(a)) / 86400000) + 1;
@@ -378,6 +388,8 @@ const seed = () => ({
   cellMeta: {},
   nonOfficial: [],
   fridayRule: true,
+  // 0 = Sunday, 1 = Monday. Sunday in the Maldives; Europe mostly runs Monday.
+  weekStartsOn: 0,
   eveningEnabled: false,
   logo: "",
   title: "ENTER AREA NAME",
@@ -413,6 +425,9 @@ const migrate = (d) => {
   if (!d.cellMeta) d.cellMeta = {};
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
   if (d.fridayRule === undefined) d.fridayRule = true;
+  // Rotas saved before the week could be set began on Sunday, so that is
+  // what they keep. Nobody's view shifts underneath them on upgrade.
+  if (d.weekStartsOn === undefined) d.weekStartsOn = 0;
   // Evening shift is opt-in: most units run 3 shifts, so the row/column only
   // exists for rotas that turn it on (e.g. 4-shift Ramadan rosters).
   if (d.eveningEnabled === undefined) d.eveningEnabled = false;
@@ -598,6 +613,10 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const [deptMenuOpen, setDeptMenuOpen] = useState(false);
   const switchingDept = useRef(false); // guards the autosave while a switch loads
   const [tab, setTab] = useState("rota");
+  /* Sunday to begin with, because the rota has not loaded yet and its
+     setting is not known. The effect further down realigns this the moment
+     it is, so a Monday ward sees a Monday without ever seeing a flicker of
+     the wrong week. */
   const [weekStart, setWeekStart] = useState(startOfWeek(dstr(new Date())));
   const [rotaView, setRotaView] = useState("weekly");
   const [monthRange, setMonthRange] = useState(() => {
@@ -786,6 +805,26 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     setData((d) => fn(structuredClone(d)));
   };
 
+  /* Changing the setting would otherwise leave the rota sitting on a date
+     that is no longer the start of a week — showing Wednesday to Tuesday
+     until the next click. */
+  const firstDay = data?.weekStartsOn ?? 0;
+  useEffect(() => { setWeekStart((w) => startOfWeek(w, firstDay)); }, [firstDay]);
+
+  /* ── Undo / redo ──
+     Watches the rota itself rather than hooking into each edit, so every
+     change anywhere in the app is undoable — including in tabs that do not
+     know this exists. It has to sit ABOVE the early return below, because a
+     hook cannot come after one.
+
+     The department lock is worked out again here rather than reused from
+     further down for the same reason: currentDeptLocked is defined after
+     the return, and undo writes to the rota directly, so it needs its own
+     gate or a view-only department could be edited through it. */
+  const deptIsLocked = departmentLimit != null && deptId != null &&
+    !departments.slice(0, departmentLimit).some((x) => x.id === deptId);
+  const history = useRotaHistory(data, setData, deptId, { disabled: locked || deptIsLocked });
+
   if (!data) return <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
 
   // Company logo is a paid feature. When the current tier doesn't include it,
@@ -865,6 +904,31 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       min-width: 168px; box-shadow: 1px 0 0 ${T.line};
     }
     .rota-foot-label { position: sticky; left: 0; z-index: 2; }
+
+    /* ── The header on a phone ──
+       On a laptop there is room for the tagline, a full-size logo and a
+       labelled Undo button. On a 380px screen those three things cost about
+       150 vertical pixels before the rota starts, and the rota is the reason
+       anyone opened the app. So on a narrow screen the tagline goes, the
+       logo shrinks to something that fits beside the title, and Undo keeps
+       its arrow but loses its word. */
+    .dr-legend-toggle { display: none; }
+    @media screen and (max-width: 760px) {
+      .dr-header { padding: 12px 14px 0 !important; }
+      .dr-tagline { display: none; }
+      .dr-logo { height: 34px !important; max-width: 104px !important; }
+      .dr-undo-text { display: none; }
+      /* Without the word, the button should not keep the width of one. */
+      .dr-undo { padding: 4px 7px !important; }
+      /* Twenty duty codes wrap to five lines and push the grid off the
+         screen. Collapsed to one line, with a tap to see the rest. */
+      .dr-legend:not(.dr-open) { max-height: 19px; overflow: hidden; }
+      .dr-legend-toggle {
+        display: inline-flex; align-items: center; gap: 4px;
+        font-family: inherit; font-size: 12px; font-weight: 600;
+        background: none; border: none; padding: 0; cursor: pointer;
+      }
+    }
     @media screen and (max-width: 760px) {
       .rota-num {
         width: 22px; min-width: 22px; max-width: 22px;
@@ -935,6 +999,8 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     { id: "records", label: "Staff Records", icon: LayoutDashboard },
     { id: "stats", label: "Statistics", icon: BarChart3 },
     { id: "staff", label: "Staff", icon: Users },
+    { id: "requests", label: "Duty Requests", icon: MessageCircle },
+    { id: "smart", label: "Smart Roster", icon: Wand2 },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "insights", label: "Insights", icon: Search },
     { id: "help", label: "Help", icon: HelpCircle },
@@ -944,7 +1010,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     <div style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
       <style>{globalCss}</style>
 
-      <header style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
+      <header className="dr-header" style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
         {departments.length > 0 && (
           <div style={{ position: "relative", display: "inline-block", marginBottom: 8 }}>
             <button onClick={() => setDeptMenuOpen((o) => !o)} style={{
@@ -1005,11 +1071,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
-            <span style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota & non-official day tracker</span>
+            <span className="dr-tagline" style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota &amp; non-official day tracker</span>
             {saveStatus === "saving" && <span style={{ fontSize: 12, color: "#9FC3BD" }}>Saving…</span>}
             {saveStatus === "saved" && <span style={{ fontSize: 12, color: T.leaf }}>✓ Saved</span>}
+            <UndoRedoButtons history={history} style={{ alignSelf: "center" }} />
           </div>
-          {viewData.logo && <img src={viewData.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
+          {viewData.logo && <img className="dr-logo" src={viewData.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
         </div>
         <nav style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto" }}>
           {tabs.map(({ id, label, icon: Icon }) => (
@@ -1067,6 +1134,21 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
         {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} />}
+        {tab === "requests" && (
+          <RequestsTab
+            data={data} update={update} staffEditable={staffEditable}
+            T={T} Card={Card} Btn={Btn} Field={Field}
+            inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
+          />
+        )}
+        {tab === "smart" && (
+          <SmartRosterTab
+            data={data} update={update} staffEditable={staffEditable}
+            T={T} Card={Card} Btn={Btn} Field={Field}
+            inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
+            onApplied={(sunday) => { setWeekStart(sunday); setRotaView("weekly"); setTab("rota"); }}
+          />
+        )}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
@@ -1311,6 +1393,8 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
   // exchanged. The whole rota is view-only while this is on, so nobody
   // edits the past by accident.
   const [showOriginal, setShowOriginal] = useState(false);
+  // The duty-code legend is collapsed on a phone; this opens it.
+  const [legendOpen, setLegendOpen] = useState(false);
   const anyExchanges = days.some((date) =>
     data.staff.some((s) => exchangeOf(data, date, s.id)));
 
@@ -1453,7 +1537,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
             {["weekly", "monthly"].map((v) => (
               <button key={v} onClick={() => {
                 if (v === rotaView) return;
-                if (v === "weekly") setWeekStart(startOfWeek(dstr(new Date())));
+                if (v === "weekly") setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0));
                 setRotaView(v);
               }} style={{
                 fontFamily: "inherit", padding: "6px 13px", fontSize: 12.5, fontWeight: 700,
@@ -1468,7 +1552,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
               <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={15} /></Btn>
               <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
               <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={15} /></Btn>
-              <Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date())))}>Today</Btn>
+              <Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0))}>Today</Btn>
             </>
           ) : (
             <>
@@ -1497,13 +1581,22 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
-        {data.codes.map((c) => (
-          <span key={c.id} style={{ display: "flex", alignItems: "center", gap: 4, color: T.inkSoft }}>
-            <span style={{ width: 12, height: 12, borderRadius: 3, background: c.color, border: `1px solid ${T.line}` }} />
-            {c.code}
-          </span>
-        ))}
+      <div>
+        <div className={`dr-legend${legendOpen ? " dr-open" : ""}`}
+          style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+          {data.codes.map((c) => (
+            <span key={c.id} style={{ display: "flex", alignItems: "center", gap: 4, color: T.inkSoft }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: c.color, border: `1px solid ${T.line}` }} />
+              {c.code}
+            </span>
+          ))}
+        </div>
+        {/* Only rendered at all on a narrow screen — see .dr-legend-toggle. */}
+        <button className="dr-legend-toggle" onClick={() => setLegendOpen((v) => !v)}
+          style={{ color: T.lagoon, marginTop: 4 }}>
+          {legendOpen ? "Hide codes" : `All ${data.codes.length} codes`}
+          {legendOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </button>
       </div>
 
       {showOriginal && (
@@ -3015,13 +3108,16 @@ function HelpTab({ data }) {
 
       <Section title="2. Filling in the rota">
         <p style={{ marginTop: 0 }}>In the <strong>Weekly Rota</strong> tab, each staff member has a row and each day has a cell. Click a cell to open the code picker. Use the arrows at the top to move between weeks.</p>
-        <p style={{ marginBottom: 10 }}><strong>Weekly or Monthly view.</strong> Use the <strong>Weekly</strong> / <strong>Monthly</strong> buttons at the top left. Weekly shows seven days. Monthly lets you pick any date range up to 45 days — handy for a pay period that runs, say, the 15th to the 15th rather than a calendar month. Use <strong>This month</strong> for the current calendar month, and the arrows to step forward or back by the same length of range. You can edit duties in either view.</p>
+        <p style={{ marginBottom: 10 }}><strong>Weekly or Monthly view.</strong> Use the <strong>Weekly</strong> / <strong>Monthly</strong> buttons at the top left. Weekly shows seven days,
+          beginning on whichever day you have set in <strong>Settings</strong> — Sunday by default, or Monday
+          if that is how your week runs. Monthly lets you pick any date range up to 45 days — handy for a pay period that runs, say, the 15th to the 15th rather than a calendar month. Use <strong>This month</strong> for the current calendar month, and the arrows to step forward or back by the same length of range. You can edit duties in either view.</p>
         <p style={{ marginBottom: 4 }}><strong>Three fast ways to enter a duty:</strong></p>
         <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
           <li style={{ marginBottom: 5 }}><strong>Tap a colour chip</strong> — quickest on a phone.</li>
           <li style={{ marginBottom: 5 }}><strong>Type and press Enter</strong> — type a letter or two (like <Code>m</Code> or <Code>sl</Code>) and press Enter to pick the top match. Fastest on a laptop.</li>
           <li>Tap <strong>—</strong> to clear a cell.</li>
         </ul>
+        <p style={{ marginBottom: 4 }}><strong>Made a mistake?</strong> Use the <strong>Undo</strong> button at the top of the page, or press Ctrl+Z (⌘Z on a Mac). It works for every change anywhere in the app — a duty you overwrote, a deleted code, a staff member you removed, a whole generated week. Hover over the button and it tells you what it will undo. Redo is the arrow beside it.</p>
         <p style={{ marginBottom: 4 }}><strong>Add a note to any duty.</strong> In the picker, tap <strong>+ Note</strong> to jot something like "left after 4 hours" or "swapped with Mariyam". A small blue dot marks cells that have a note, and all notes appear on the printed rota. Notes are just for your record — they don't change any counts.</p>
         <p style={{ marginBottom: 10 }}><strong>Need a code that doesn't exist yet?</strong> Tap <strong>+ New code</strong> right in the picker — give it a name, colour, and what it counts as (morning, night, off, etc.), and it's added and applied straight away. No need to leave the rota. You can rename or recolour it later in Settings.</p>
         <p style={{ marginBottom: 10 }}><strong>Row numbers.</strong> Every staff row is numbered down the left, and the same numbers appear on the printed rota, so you can tell at a glance how many staff are on the rota and refer to a row by its number in a handover or on WhatsApp.</p>
@@ -3078,7 +3174,7 @@ function HelpTab({ data }) {
           <li style={{ marginBottom: 5 }}>On the printed rota, a small <strong>S</strong> or <strong>M</strong> next to the duty, explained in the legend.</li>
           <li>In the <strong>Insights</strong> tab, a <strong>Duty exchanges</strong> table showing per staff member how many changes were at their request and how many you made.</li>
         </ul>
-        <p style={{ marginBottom: 0 }}>The mark stays until you clear it — changing the duty back to the original code does not remove it. To clear it, open the cell, tap the <strong>Changed</strong> button, then <strong>Clear mark</strong>.</p>
+        <p style={{ marginBottom: 0 }}>The mark stays until you clear it — changing the duty back to the original code does not remove it. To clear it, open the cell, tap the <strong>Changed</strong> button, then <strong>Clear mark</strong>. Applying a generated week over those dates also clears the marks on the cells it rewrites, and tells you how many before it does.</p>
       </Section>
 
       <Section title="6. When someone joins or leaves">
@@ -3114,7 +3210,7 @@ function HelpTab({ data }) {
           <li style={{ marginBottom: 5 }}><strong>Rename this department</strong> — change its name in the list.</li>
           <li><strong>Delete this department</strong> — removes it and all of its rota data. This cannot be undone, and you always keep at least one department.</li>
         </ul>
-        <p style={{ marginBottom: 0 }}>Departments are completely separate: staff, duty codes, statistics and exports never mix between them.</p>
+        <p style={{ marginBottom: 0 }}>Departments are completely separate: staff, duty codes, statistics and exports never mix between them. Undo works within one department — switching to another starts a fresh trail, so you can never undo one ward's change into another's.</p>
       </Section>
 
       <Section title="10. Digging into the details (Insights tab)">
@@ -3134,8 +3230,58 @@ function HelpTab({ data }) {
           <li style={{ marginBottom: 6 }}><strong>It saves automatically.</strong> There's no save button — every change is kept.</li>
           <li style={{ marginBottom: 6 }}><strong>It works across devices.</strong> Log in on your laptop and your phone with the same email, and you'll see the same rota.</li>
           <li style={{ marginBottom: 6 }}><strong>Your rota is private to your account.</strong> Only you can see it.</li>
+          <li style={{ marginBottom: 6 }}><strong>Undo lasts for the session.</strong> It remembers your last 20 changes while the page is open. Closing or reloading the page starts it fresh, so anything you want reversed, reverse before you leave.</li>
           <li><strong>Forgot your password?</strong> Use the "Forgot password?" link on the login screen. You'll get an email with a link — open it on the same device and choose a new password.</li>
         </ul>
+      </Section>
+
+      <Section title="12. Smart Roster (beta)">
+        <p style={{ marginTop: 0 }}>
+          Smart Roster generates a full week automatically. It is a <strong>Plus feature</strong>{" "}
+          and is currently in <strong>beta</strong> — it works well for most wards, but always
+          check the result before applying it and use Undo if anything looks wrong.
+        </p>
+        <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>Before you generate</p>
+        <p style={{ marginTop: 0 }}>
+          The generator needs three things to be set up first: your staff (on the <strong>Staff</strong>{" "}
+          tab), your duty codes (in <strong>Settings</strong>), and your coverage rules (in the{" "}
+          <strong>Smart Roster</strong> tab itself — how many staff per shift, how many off days, and
+          so on). It checks whether a week is possible before generating and tells you if something
+          would make it impossible.
+        </p>
+        <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>What the settings mean</p>
+        <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 6 }}><strong>How many staff on each shift</strong> — the fewest and most you want on Morning, Afternoon, Evening and Night. Set a shift to 0 if your ward doesn't run it.</li>
+          <li style={{ marginBottom: 6 }}><strong>…of whom senior / in-charge / team leader</strong> — how many of the people on that shift must be able to take charge. Set to 0 if it doesn't matter. The word is yours to choose in Staff exceptions.</li>
+          <li style={{ marginBottom: 6 }}><strong>What one person gets in a week</strong> — how many of each shift, how many off days, and how many duties in total. "Fewest" is a goal; "Most" is a firm limit.</li>
+          <li style={{ marginBottom: 6 }}><strong>In a row</strong> — how many of the same shift can come together before a change. Two nights together is normal; keeping the others to about three stops someone from getting a whole week of afternoons.</li>
+          <li style={{ marginBottom: 6 }}><strong>Staff exceptions</strong> — tick a shift for anyone who only ever does that one. Tick <strong>Senior</strong> (or whatever your ward calls it) for anyone who can take charge. Use <strong>Skip</strong> for anyone whose duties you enter by hand.</li>
+          <li style={{ marginBottom: 6 }}><strong>Duty rules</strong> — which shifts may or may not follow each other. The usual ones are already set: no morning, afternoon or evening straight after a night.</li>
+          <li><strong>Which code to write</strong> — if you have more than one code for the same duty type, pick the one the generator should use. The rest day after nights is the most important one to check.</li>
+        </ul>
+        <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>Generating</p>
+        <Step n="1">Pick the week. It defaults to next week, which is almost always the one being planned. The label says which day a week begins on — change that in <strong>Settings → The week</strong>.</Step>
+        <Step n="2">Press <strong>Generate this week</strong>. It builds the week quickly several times over, then improves it by rearrangement — about a second for a week, a few seconds for a month.</Step>
+        <Step n="3">Read the result before pressing Apply. The banner tells you if any shift is uncovered (with the exact numbers), if a setting couldn't be fully met, or if a shift has no one in charge. Check the grid looks right.</Step>
+        <Step n="4">Press <strong>Apply to rota</strong>. It asks you to confirm, writes the duties, and takes you straight to that week in the Weekly Rota tab. If anything looks wrong, press <strong>Undo</strong> immediately — it puts the rota back exactly as it was.</Step>
+        <p style={{ marginBottom: 4, marginTop: 10, fontWeight: 700, color: T.ink }}>What it will and won't do</p>
+        <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 6 }}>It <strong>covers every shift first</strong>, then shares the duty types fairly. A fair week shows a mix along each row — not five afternoons in a row.</li>
+          <li style={{ marginBottom: 6 }}>It <strong>respects approved duty requests</strong>. Approve a request on the Duty Requests tab before generating and the generator will honour it.</li>
+          <li style={{ marginBottom: 6 }}>It <strong>skips staff who are on recorded leave</strong> automatically — annual leave, maternity, and any leave period set on the Staff tab.</li>
+          <li style={{ marginBottom: 6 }}>It <strong>only rosters staff employed that week</strong>. Someone who left last month or hasn't joined yet will not appear in the generated week, and it says so.</li>
+          <li style={{ marginBottom: 6 }}>It <strong>carries recent history forward</strong>. Someone who did a lot of nights last week gets fewer this week. Set how far back to look under <strong>More rules → Look back at recent duties</strong>.</li>
+          <li style={{ marginBottom: 6 }}>It <strong>does not move recorded leave</strong> or any cell marked as sick leave, family related leave, or medical leave — those stay exactly as they are.</li>
+          <li>It <strong>cannot guarantee a perfect result every time</strong>. Some combinations of staff numbers and rules are impossible — it tells you with the exact numbers so you know what to change.</li>
+        </ul>
+        <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>The totals table below the preview</p>
+        <p style={{ marginTop: 0, marginBottom: 0 }}>
+          After generating, a table shows each person's totals across a date range you choose —
+          this year, this month, the last three months, or any range you set. The proposed week is
+          counted in when it falls inside the range, replacing whatever is currently on those dates.
+          Non-official duties are shown separately because they carry extra pay — a small gap in one
+          week becomes a large one by December.
+        </p>
       </Section>
 
       <Section title="Still stuck? Message us">
@@ -3177,11 +3323,23 @@ function SettingsTab({ data, update, canUseLogo = true }) {
     });
     setForm(null);
   };
-  const removeCode = (id) => update((d) => {
-    d.codes = d.codes.filter((c) => c.id !== id);
-    Object.values(d.cells).forEach((day) => Object.keys(day).forEach((sid) => { if (day[sid] === id) delete day[sid]; }));
-    return d;
-  });
+  const removeCode = (id) => {
+    // Deleting a code also clears it from every cell that used it, so the
+    // count of what is about to disappear is worth showing first.
+    const c = data.codes.find((x) => x.id === id);
+    const used = Object.values(data.cells || {})
+      .reduce((n, day) => n + Object.values(day || {}).filter((v) => v === id).length, 0);
+    if (!window.confirm(
+      `Delete the ${c ? c.code : ""} code?` +
+      (used ? `\n\nIt is used on ${used} ${used === 1 ? "duty" : "duties"}, and those cells will be emptied.` : "") +
+      `\n\nUndo will bring it back if you change your mind.`
+    )) return;
+    update((d) => {
+      d.codes = d.codes.filter((c2) => c2.id !== id);
+      Object.values(d.cells).forEach((day) => Object.keys(day).forEach((sid) => { if (day[sid] === id) delete day[sid]; }));
+      return d;
+    });
+  };
 
   const addRange = () => {
     const from = nd.from, to = nd.to || nd.from;
@@ -3279,6 +3437,24 @@ function SettingsTab({ data, update, canUseLogo = true }) {
         </div>
         <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 10 }}>
           Appears on the right of the header and on every PDF and image export. PNG with a transparent background looks best. Images are resized automatically.
+        </div>
+      </Card>
+
+      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>The week</h2>
+      <Card>
+        <Field label="A week begins on">
+          <select style={{ ...inputStyle, width: "auto", cursor: "pointer" }}
+            value={data.weekStartsOn ?? 0}
+            onChange={(e) => update((d) => { d.weekStartsOn = Number(e.target.value); return d; })}>
+            <option value={0}>Sunday — Sunday to Saturday</option>
+            <option value={1}>Monday — Monday to Sunday</option>
+          </select>
+        </Field>
+        <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 10, lineHeight: 1.6 }}>
+          Which seven days the Weekly Rota shows, and the seven the Smart Roster plans and counts
+          its weekly limits over — so a "five duties a week" rule is measured across your week, not
+          somebody else's. It changes nothing about the duties themselves: nobody's shift moves, and
+          non-official days are set separately below.
         </div>
       </Card>
 
