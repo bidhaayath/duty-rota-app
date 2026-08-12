@@ -393,6 +393,10 @@ const seed = () => ({
   eveningEnabled: false,
   logo: "",
   title: "ENTER AREA NAME",
+  // Which kind of workplace this is. Stored once at setup so signups can be
+  // grouped by industry. Empty = not answered yet (accounts created before
+  // this field existed keep working exactly as they always have).
+  industry: "",
 });
 
 // The sample staff that earlier versions seeded — removed on load if untouched
@@ -428,6 +432,9 @@ const migrate = (d) => {
   // Rotas saved before the week could be set began on Sunday, so that is
   // what they keep. Nobody's view shifts underneath them on upgrade.
   if (d.weekStartsOn === undefined) d.weekStartsOn = 0;
+  // New accounts answer this at signup; existing accounts get an empty
+  // string and are quietly prompted the first time they open Settings.
+  if (d.industry === undefined) d.industry = "";
   // Evening shift is opt-in: most units run 3 shifts, so the row/column only
   // exists for rotas that turn it on (e.g. 4-shift Ramadan rosters).
   if (d.eveningEnabled === undefined) d.eveningEnabled = false;
@@ -1142,12 +1149,46 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           />
         )}
         {tab === "smart" && (
-          <SmartRosterTab
-            data={data} update={update} staffEditable={staffEditable}
-            T={T} Card={Card} Btn={Btn} Field={Field}
-            inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
-            onApplied={(sunday) => { setWeekStart(sunday); setRotaView("weekly"); setTab("rota"); }}
-          />
+          features?.smart_roster === false ? (
+            /* Trial ended and not on a plan that includes Smart Roster. The
+               data is untouched — they can still see and export everything.
+               If they subscribe, the feature reappears with no migration. */
+            <Card>
+              <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 18, margin: "0 0 8px",
+                           display: "flex", alignItems: "center", gap: 10 }}>
+                Smart Roster
+                <span style={{ fontSize: 11, fontWeight: 700, background: "#E6E4F5",
+                  color: "#4E4A8C", border: "1px solid #C4C0E8",
+                  borderRadius: 999, padding: "2px 9px", letterSpacing: 0.3 }}>BETA</span>
+                <span style={{ fontSize: 11, fontWeight: 700, background: "#FBF1DC",
+                  color: "#8A5A0F", border: "1px solid #E7D9B8",
+                  borderRadius: 999, padding: "2px 9px", letterSpacing: 0.3 }}>Plus</span>
+              </h2>
+              <p style={{ fontSize: 13.5, color: T.inkSoft, margin: "0 0 6px" }}>
+                Smart Roster is available on the <strong>Plus plan</strong> and above. It generates
+                a full week automatically, covers every shift, and improves the result until nothing
+                is left uncovered.
+              </p>
+              <p style={{ fontSize: 13, color: T.inkSoft, margin: "0 0 18px" }}>
+                Your rota data is safe — subscribe any time to keep editing and to unlock Smart Roster.
+              </p>
+              <a href={`https://wa.me/9607666261?text=${encodeURIComponent(
+                "Hi! I'd like to upgrade my DutyRota plan to get Smart Roster.")}`}
+                target="_blank" rel="noreferrer"
+                style={{ background: T.lagoon, color: "#fff", fontWeight: 700, fontSize: 13.5,
+                  padding: "10px 20px", borderRadius: 8, textDecoration: "none",
+                  display: "inline-flex", alignItems: "center", gap: 8 }}>
+                Upgrade on WhatsApp
+              </a>
+            </Card>
+          ) : (
+            <SmartRosterTab
+              data={data} update={update} staffEditable={staffEditable}
+              T={T} Card={Card} Btn={Btn} Field={Field}
+              inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
+              onApplied={(sunday) => { setWeekStart(sunday); setRotaView("weekly"); setTab("rota"); }}
+            />
+          )
         )}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true} />}
         {tab === "help" && <HelpTab data={data} />}
@@ -3439,6 +3480,29 @@ function SettingsTab({ data, update, canUseLogo = true }) {
           Appears on the right of the header and on every PDF and image export. PNG with a transparent background looks best. Images are resized automatically.
         </div>
       </Card>
+
+      <div style={{ marginTop: 10 }}>
+        <Field label="Type of workplace">
+          <select style={{ ...inputStyle, maxWidth: 380, cursor: "pointer" }}
+            value={data.industry || ""}
+            onChange={(e) => update((d) => { d.industry = e.target.value; return d; })}>
+            <option value="">Select your workplace type…</option>
+            <option value="hospital">Hospital or clinic</option>
+            <option value="resort">Resort or hotel</option>
+            <option value="guesthouse">Guesthouse</option>
+            <option value="airport">Airport or airline</option>
+            <option value="security">Security</option>
+            <option value="restaurant">Restaurant or café</option>
+            <option value="factory">Factory or plant</option>
+            <option value="other">Other</option>
+          </select>
+        </Field>
+        {!data.industry && (
+          <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 6 }}>
+            Helps us improve the app for your industry. Takes one second and is never shared.
+          </div>
+        )}
+      </div>
 
       <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>The week</h2>
       <Card>
