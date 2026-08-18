@@ -225,6 +225,11 @@ const startOfWeek = (s, firstDay = 0) => {
 };
 const niceDate = (s) => parseD(s).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const shortDate = (s) => parseD(s).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+// Footer stamp for exports — the moment the PDF/image was generated, not any rota date.
+const exportGeneratedAt = () => {
+  const n = new Date();
+  return `Generated on ${niceDate(dstr(n))}, ${n.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`;
+};
 const spanDays = (a, b) => Math.round((parseD(b) - parseD(a)) / 86400000) + 1;
 const datesBetween = (from, to) => {
   const out = []; let d = from;
@@ -2271,6 +2276,7 @@ function RotaPrint({ data, days }) {
           Superscript numbers refer to the notes above.
         </div>
       )}
+      <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>{exportGeneratedAt()}</div>
     </div>
   );
 }
@@ -2346,8 +2352,9 @@ function RecordsPrint({ data, from, to }) {
         </div>
       )}
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
-        All leave periods count calendar days. Generated {niceDate(dstr(new Date()))}.
+        All leave periods count calendar days.
       </div>
+      <div style={{ fontSize: 10, color: "#666", marginTop: 4 }}>{exportGeneratedAt()}</div>
     </div>
   );
 }
@@ -2492,7 +2499,7 @@ function StatsPrint({ data, from, to }) {
           )}
         </div>
       </div>
-      <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>Generated {niceDate(dstr(new Date()))}.</div>
+      <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>{exportGeneratedAt()}</div>
     </div>
   );
 }
@@ -3229,6 +3236,7 @@ function InsightsPrint({ data, cfg }) {
       <div style={{ fontSize: 11, color: "#666", marginTop: 8 }}>
         Worked {res.workingDays} day(s) · on leave {res.leaveDays} · no duty entered {res.emptyDays}. Leave days are not counted as duty.
       </div>
+      <div style={{ fontSize: 10, color: "#666", marginTop: 4 }}>{exportGeneratedAt()}</div>
     </div>
   );
 }
