@@ -211,7 +211,7 @@ export default function App() {
     <div>
       {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} />}
       {showEndingNote && <TrialEndingNote daysLeft={sub.daysLeft} onSeePlans={() => setShowBilling(true)} />}
-      <div style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="no-print" style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '20px' }}>📋 DutyRota</h1>
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
           <span style={{ fontSize: '13px', color: '#666' }}>{session.user.email}</span>
