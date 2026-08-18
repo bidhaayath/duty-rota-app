@@ -326,7 +326,7 @@ const recordsFor = (data, from, to) => {
   const codeById = codeByIdOf(data);
   const dates = datesBetween(from, to);
   return data.staff.filter((s) => employedInRange(s, from, to)).map((s) => {
-    const t = { morning: 0, afternoon: 0, evening: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {}, leaveByBucket: { sl: 0, frl: 0, ml: 0, other: 0 } };
+    const t = { morning: 0, afternoon: 0, evening: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], onCallDays: 0, leaveByCode: {}, leaveByBucket: { sl: 0, frl: 0, ml: 0, other: 0 } };
     dates.forEach((date) => {
       if (!isEmployedOn(s, date)) return;
       if (leaveOn(s, date)) return;
@@ -342,6 +342,7 @@ const recordsFor = (data, from, to) => {
         if (code.counts === "off" && parseD(date).getDay() === FRIDAY) t.fridayOff++;
         if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) { earnedNonOff = true; nonOffCode = code.code; }
       }
+      if (data.onCall?.[date] === s.id) t.onCallDays++;
       if (data.onCall?.[date] === s.id && isNonOff(data, date)) {
         earnedNonOff = true;
         if (!nonOffCode) nonOffCode = "On-call";
@@ -1872,7 +1873,7 @@ function Records({ data, range, setRange, onExport }) {
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "On-call", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1914,6 +1915,7 @@ function Records({ data, range, setRange, onExport }) {
                     <td style={{ ...td, textAlign: "center" }}>{r.other}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.release}</td>
                     <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{r.totalDuty}</td>
+                    <td style={{ ...td, textAlign: "center" }}>{r.onCallDays}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.off}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.fridayOff}</td>
                     <td style={{ ...td, textAlign: "center", fontWeight: 700, color: r.annualDays ? "#0B6A60" : T.ink }}>{r.annualDays}</td>
@@ -2287,7 +2289,7 @@ function RotaPrint({ data, days }) {
 
 function RecordsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "On-call", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
       <div className="rp-head">
@@ -2317,6 +2319,7 @@ function RecordsPrint({ data, from, to }) {
               <td style={ptd}>{r.other}</td>
               <td style={ptd}>{r.release}</td>
               <td style={{ ...ptd, fontWeight: 700 }}>{r.totalDuty}</td>
+              <td style={ptd}>{r.onCallDays}</td>
               <td style={ptd}>{r.off}</td>
               <td style={ptd}>{r.fridayOff}</td>
               <td style={ptd}>{r.annualDays}</td>
