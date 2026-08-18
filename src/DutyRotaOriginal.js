@@ -3304,7 +3304,13 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>When a staff member works a duty on a non-official day, it's counted toward their non-official day payment in the Staff Records and Statistics.</p>
       </Section>
 
-      <Section title="4. Leave — two different kinds">
+      <Section title="4. Using the On-call row">
+        <p style={{ marginTop: 0 }}>At the bottom of the weekly rota, below your staff, there's an On-call row. For each day, use the dropdown to pick the staff member who is on call. Leave it blank if nobody is on call that day. On-call sits alongside the normal rota, so a person can be on call and also have a shift the same day; it does not replace their duty.</p>
+        <p><strong>A note on payment:</strong> on-call is tracked separately from your non-official-day duty payments. Being on call does not add to a person's non-official-day duty count — that count is only for worked shifts. On-call days are recorded on their own.</p>
+        <p style={{ marginBottom: 0 }}><strong>Where to see it:</strong> The Insights tab shows a breakdown of on-call — how many days each person was on call, and how many of those fell on non-official days. The On-call row also appears on the printed rota and image exports.</p>
+      </Section>
+
+      <Section title="5. Leave — two different kinds">
         <p style={{ marginTop: 0 }}>DutyRota handles leave in two ways, and it helps to know the difference:</p>
         <p style={{ marginBottom: 4 }}><strong>Leave periods</strong> (set in the Staff tab)</p>
         <p style={{ marginTop: 0 }}>For longer, planned leave — <strong>annual, maternity, pre-maternity, emergency,</strong> and <strong>other</strong>. You give a start and end date, and it fills the whole period on the rota automatically. All of these count every calendar day in the period, including Fridays, Saturdays, and non-official days.</p>
@@ -3312,7 +3318,7 @@ function HelpTab({ data }) {
         <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. Each code’s <strong>Counts as</strong> setting decides which category it adds to, so a code like <Code>N/FRL</Code> can count as FRL.</p>
       </Section>
 
-      <Section title="5. Recording a changed duty (duty exchanges)">
+      <Section title="6. Recording a changed duty (duty exchanges)">
         <p style={{ marginTop: 0 }}>When a duty ends up different from what you originally rostered — a nurse asked to swap, or you moved her yourself — you can mark that on the cell, so the rota keeps a record of both the change and who asked for it.</p>
         <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>Mark it first, then change the duty</p>
         <p style={{ marginTop: 0 }}>
@@ -3339,7 +3345,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>The mark stays until you clear it — changing the duty back to the original code does not remove it. To clear it, open the cell, tap the <strong>Changed</strong> button, then <strong>Clear mark</strong>. Applying a generated week over those dates also clears the marks on the cells it rewrites, and tells you how many before it does.</p>
       </Section>
 
-      <Section title="6. When someone joins or leaves">
+      <Section title="7. When someone joins or leaves">
         <p style={{ marginTop: 0 }}>When a staff member resigns or moves to another department, <strong>do not delete them</strong> — that would erase their past duties and make old rotas and statistics wrong.</p>
         <p>Instead, in the <strong>Staff</strong> tab, open that person and set a <strong>Last working day</strong> (or use the <strong>Mark left</strong> button for today). They will:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
@@ -3350,11 +3356,11 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>For a new joiner, set a <strong>Joining date</strong> so they don't show on rotas before they started. If someone comes back, use <strong>Reactivate</strong>.</p>
       </Section>
 
-      <Section title="7. Ordering your staff list">
+      <Section title="8. Ordering your staff list">
         <p style={{ margin: 0 }}>In the <strong>Staff</strong> tab, use the up and down arrows next to each name to set the order staff appear in. This order is used everywhere — the weekly rota, records, statistics, and printed PDFs, including the row numbers. The <strong>Sort A–Z</strong> button arranges everyone alphabetically in one click.</p>
       </Section>
 
-      <Section title="8. Reports & printing">
+      <Section title="9. Reports & printing">
         <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many leave days were taken in each category (SL, FRL, ML, Other leave).</p>
         <p>On any of these, the <strong>Export PDF</strong> button opens an export view with two choices:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
@@ -3364,7 +3370,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Your logo, if you have set one, appears on both.</p>
       </Section>
 
-      <Section title="9. Managing more than one department">
+      <Section title="10. Managing more than one department">
         <p style={{ marginTop: 0 }}>If you run more than one ward or unit, you don&rsquo;t need a separate login for each. Use the department button at the top left — the one showing your current department name.</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 5 }}><strong>Switch</strong> — tap any department in the list to open its rota.</li>
@@ -3375,7 +3381,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Departments are completely separate: staff, duty codes, statistics and exports never mix between them. Undo works within one department — switching to another starts a fresh trail, so you can never undo one ward's change into another's.</p>
       </Section>
 
-      <Section title="10. Digging into the details (Insights tab)">
+      <Section title="11. Digging into the details (Insights tab)">
         <p style={{ marginTop: 0 }}>The <strong>Insights</strong> tab answers specific questions about who did what. Pick a date range at the top, then use any of these:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>Staff breakdown</strong> — choose a nurse to see every duty code she worked, split by day of the week, with Fridays, Saturdays, and non-official days shown separately.</li>
@@ -3387,7 +3393,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Leave days are never counted as duty here, and you can export the staff breakdown to PDF.</p>
       </Section>
 
-      <Section title="11. Your account & data">
+      <Section title="12. Your account & data">
         <ul style={{ margin: 0, paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>It saves automatically.</strong> There's no save button — every change is kept.</li>
           <li style={{ marginBottom: 6 }}><strong>It works across devices.</strong> Log in on your laptop and your phone with the same email, and you'll see the same rota.</li>
@@ -3397,7 +3403,7 @@ function HelpTab({ data }) {
         </ul>
       </Section>
 
-      <Section title="12. Smart Roster (beta)">
+      <Section title="13. Smart Roster (beta)">
         <p style={{ marginTop: 0 }}>
           Smart Roster generates a full week automatically. It is a <strong>Plus feature</strong>{" "}
           and is currently in <strong>beta</strong> — it works well for most wards, but always
