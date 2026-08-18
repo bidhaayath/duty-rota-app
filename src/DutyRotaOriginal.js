@@ -1581,9 +1581,6 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
 
   const range = `${niceDate(days[0])} – ${niceDate(days[days.length - 1])}`;
   const shownStaff = staffForDays(data, days);
-  // Anyone active can be picked on call, regardless of whether they're
-  // rostered on this particular week's rota rows.
-  const onCallStaff = data.staff.filter((s) => !isFormer(s));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1798,6 +1795,8 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
               {days.map((date) => {
                 const picked = data.onCall?.[date] || "";
                 const pickedStaff = picked ? data.staff.find((x) => x.id === picked) : null;
+                // Who was actually employed on this specific date, same as staffForDays.
+                const onCallStaff = data.staff.filter((s) => isEmployedOn(s, date));
                 if (showOriginal) {
                   return (
                     <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
@@ -2537,6 +2536,8 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       // Notes and exchange marks live in a parallel map — clear those too, or
       // they linger in the saved data forever with no owner.
       Object.values(d.cellMeta || {}).forEach((day) => delete day[id]);
+      // On-call picks live in their own map too — same reason.
+      if (d.onCall) Object.keys(d.onCall).forEach((date) => { if (d.onCall[date] === id) delete d.onCall[date]; });
       return d;
     });
   };
@@ -2899,15 +2900,16 @@ const exchangesFor = (data, from, to) => {
 };
 
 // Who was on call, and how much of it fell on a paid (non-official) day, per
-// active staff member in a date range. Only staff with at least one on-call
-// day are returned, matching exchangesFor's pattern above.
+// staff member employed at some point in the range. Only staff with at least
+// one on-call day are returned, matching exchangesFor's pattern above.
 const onCallInsights = (data, from, to) => {
   const dates = datesBetween(from, to);
   return data.staff
-    .filter((s) => !isFormer(s))
+    .filter((s) => employedInRange(s, from, to))
     .map((s) => {
       let days = 0, paidDays = 0;
       dates.forEach((date) => {
+        if (!isEmployedOn(s, date)) return;
         if (data.onCall?.[date] !== s.id) return;
         days++;
         if (isNonOff(data, date)) paidDays++;
