@@ -2907,6 +2907,26 @@ const exchangesFor = (data, from, to) => {
     .sort((a, b) => b.total - a.total);
 };
 
+// Who was on call, and how much of it fell on a paid (non-official) day, per
+// active staff member in a date range. Only staff with at least one on-call
+// day are returned, matching exchangesFor's pattern above.
+const onCallInsights = (data, from, to) => {
+  const dates = datesBetween(from, to);
+  return data.staff
+    .filter((s) => !isFormer(s))
+    .map((s) => {
+      let days = 0, paidDays = 0;
+      dates.forEach((date) => {
+        if (data.onCall?.[date] !== s.id) return;
+        days++;
+        if (isNonOff(data, date)) paidDays++;
+      });
+      return { staff: s, days, paidDays };
+    })
+    .filter((r) => r.days > 0)
+    .sort((a, b) => b.days - a.days);
+};
+
 function InsightsTab({ data, onExport }) {
   const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
   const [staffId, setStaffId] = useState(data.staff[0]?.id || "");
@@ -2928,6 +2948,7 @@ function InsightsTab({ data, onExport }) {
 
   const leaderboard = codeLeaderboard(data, codeId, range.from, range.to);
   const exchanges = exchangesFor(data, range.from, range.to);
+  const onCall = onCallInsights(data, range.from, range.to);
   const combo = data.staff.find((s) => s.id === staffId)
     ? comboCount(data, staff, comboCode, comboDow, range.from, range.to)
     : 0;
@@ -3091,6 +3112,38 @@ function InsightsTab({ data, onExport }) {
             </table>
             <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 8 }}>
               Counts duties currently marked as changed from the original. Clearing a mark removes it from these totals.
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* On-call */}
+      <Card>
+        <H>On-call</H>
+        {onCall.length === 0 ? (
+          <div style={{ color: T.inkSoft, fontSize: 13, padding: "16px 0", textAlign: "center" }}>
+            No on-call assignments in this period.
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+              <thead><tr>
+                <th style={{ ...th, textAlign: "left" }}>Staff</th>
+                <th style={{ ...th, textAlign: "center" }}>On-call days</th>
+                <th style={{ ...th, textAlign: "center" }}>On-call (non-official days)</th>
+              </tr></thead>
+              <tbody>
+                {onCall.map((r) => (
+                  <tr key={r.staff.id}>
+                    <td style={{ ...td, fontWeight: 600 }}>{displayName(r.staff)}</td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{r.days}</td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 600, color: r.paidDays ? "#B3532F" : T.inkSoft }}>{r.paidDays}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 8 }}>
+              "On-call (non-official days)" is the subset of on-call days that fell on a non-official day and earned non-official-day payment.
             </div>
           </div>
         )}
