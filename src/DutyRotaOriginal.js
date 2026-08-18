@@ -299,9 +299,13 @@ const weekTotalsFor = (data, staff, days) => {
     if (!isEmployedOn(staff, date)) return;
     if (leaveOn(staff, date)) return;
     const code = codeById((data.cells[date] || {})[staff.id]);
-    if (!code) return;
-    if (code.counts in t) t[code.counts]++;
-    if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) t.nonOfficialDuty++;
+    let earnedNonOff = false;
+    if (code) {
+      if (code.counts in t) t[code.counts]++;
+      if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) earnedNonOff = true;
+    }
+    if (data.onCall?.[date] === staff.id && isNonOff(data, date)) earnedNonOff = true;
+    if (earnedNonOff) t.nonOfficialDuty++;
   });
   return t;
 };
@@ -327,17 +331,22 @@ const recordsFor = (data, from, to) => {
       if (!isEmployedOn(s, date)) return;
       if (leaveOn(s, date)) return;
       const code = codeById((data.cells[date] || {})[s.id]);
-      if (!code) return;
-      if (DUTY_CATS.includes(code.counts) || code.counts === "off") t[code.counts]++;
-      const bucket = leaveBucket(code);
-      if (bucket) {
-        t.leaveByCode[code.code.toUpperCase()] = (t.leaveByCode[code.code.toUpperCase()] || 0) + 1;
-        t.leaveByBucket[bucket]++;
+      let earnedNonOff = false, nonOffCode = "";
+      if (code) {
+        if (DUTY_CATS.includes(code.counts) || code.counts === "off") t[code.counts]++;
+        const bucket = leaveBucket(code);
+        if (bucket) {
+          t.leaveByCode[code.code.toUpperCase()] = (t.leaveByCode[code.code.toUpperCase()] || 0) + 1;
+          t.leaveByBucket[bucket]++;
+        }
+        if (code.counts === "off" && parseD(date).getDay() === FRIDAY) t.fridayOff++;
+        if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) { earnedNonOff = true; nonOffCode = code.code; }
       }
-      if (code.counts === "off" && parseD(date).getDay() === FRIDAY) t.fridayOff++;
-      if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) {
-        t.nonOfficialDuty++; t.nonOfficialDates.push({ date, code: code.code });
+      if (data.onCall?.[date] === s.id && isNonOff(data, date)) {
+        earnedNonOff = true;
+        if (!nonOffCode) nonOffCode = "On-call";
       }
+      if (earnedNonOff) { t.nonOfficialDuty++; t.nonOfficialDates.push({ date, code: nonOffCode }); }
     });
     // All leave periods count calendar days inside the selected range
     const rawOverlap = (p) => {
@@ -386,6 +395,7 @@ const seed = () => ({
   seededCodes: DEFAULT_CODES.map((c) => c.code.toUpperCase()),
   cells: {},
   cellMeta: {},
+  onCall: {},
   nonOfficial: [],
   fridayRule: true,
   // 0 = Sunday, 1 = Monday. Sunday in the Maldives; Europe mostly runs Monday.
@@ -427,6 +437,7 @@ const migrate = (d) => {
   });
   if (d.welcomeDismissed === undefined) d.welcomeDismissed = false;
   if (!d.cellMeta) d.cellMeta = {};
+  if (!d.onCall) d.onCall = {};
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
   if (d.fridayRule === undefined) d.fridayRule = true;
   // Rotas saved before the week could be set began on Sunday, so that is
@@ -1522,6 +1533,16 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
     });
   };
 
+  // Who is on call this date. Independent of that person's own duty cell —
+  // they can be on call and have a normal shift the same day.
+  const setOnCall = (date, staffId) => {
+    update((d) => {
+      if (!d.onCall) d.onCall = {};
+      if (staffId) d.onCall[date] = staffId; else delete d.onCall[date];
+      return d;
+    });
+  };
+
   // Mark / unmark this duty as changed from the original.
   //   who = "staff" | "manager" -> mark it (remembering the current code)
   //   who = null                -> clear the mark
@@ -1569,6 +1590,9 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
 
   const range = `${niceDate(days[0])} – ${niceDate(days[days.length - 1])}`;
   const shownStaff = staffForDays(data, days);
+  // Anyone active can be picked on call, regardless of whether they're
+  // rostered on this particular week's rota rows.
+  const onCallStaff = data.staff.filter((s) => !isFormer(s));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1777,6 +1801,45 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                 </tr>
               );
             })}
+            <tr>
+              <td className="rota-num" style={{ ...td, fontWeight: 700, fontSize: 12, color: T.inkSoft }} />
+              <td className="rota-name" style={{ ...td, fontWeight: 700, color: "#A5731B" }}>On-call</td>
+              {days.map((date) => {
+                const picked = data.onCall?.[date] || "";
+                const pickedStaff = picked ? data.staff.find((x) => x.id === picked) : null;
+                if (showOriginal) {
+                  return (
+                    <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 700, minWidth: 74, padding: "7px 4px", borderRadius: 7,
+                        border: `1px solid ${T.line}`, background: "#FDF8EE",
+                        color: pickedStaff ? T.ink : T.inkSoft, opacity: pickedStaff ? 1 : 0.55,
+                      }}>{pickedStaff ? shortName(pickedStaff.name) : "—"}</div>
+                    </td>
+                  );
+                }
+                return (
+                  <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
+                    <select
+                      value={picked}
+                      onChange={(e) => setOnCall(date, e.target.value)}
+                      title="On-call for this day"
+                      style={{
+                        fontFamily: "inherit", fontSize: 12, fontWeight: 700, width: "100%", minWidth: 74,
+                        padding: "6px 4px", borderRadius: 7, border: `1px solid ${T.line}`,
+                        background: "#FDF8EE", color: pickedStaff ? T.ink : T.inkSoft, cursor: "pointer",
+                      }}
+                    >
+                      <option value="">—</option>
+                      {onCallStaff.map((s) => (
+                        <option key={s.id} value={s.id}>{shortName(s.name)}</option>
+                      ))}
+                    </select>
+                  </td>
+                );
+              })}
+              <td colSpan={data.eveningEnabled ? 8 : 7} style={{ ...td, background: "#fff" }} />
+            </tr>
           </tbody>
           <tfoot>
             {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
@@ -2172,6 +2235,20 @@ function RotaPrint({ data, days }) {
               </tr>
             );
           })}
+          <tr>
+            <td style={{ ...ptd, fontWeight: 700, color: "#666" }} />
+            <td style={{ ...ptd, textAlign: "left", fontWeight: 700, color: "#8A5E10" }}>ON-CALL</td>
+            {days.map((date) => {
+              const picked = data.onCall?.[date] || "";
+              const pickedStaff = picked ? data.staff.find((x) => x.id === picked) : null;
+              return (
+                <td key={date} style={{ ...ptd, background: "#FDF8EE", fontWeight: 700 }}>
+                  {pickedStaff ? shortName(pickedStaff.name) : ""}
+                </td>
+              );
+            })}
+            <td colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
+          </tr>
         </tbody>
         <tfoot>
           {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
