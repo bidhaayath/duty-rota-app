@@ -119,25 +119,40 @@ const setupDepartments = async () => {
   }
 };
 
+// Last version seen from the server for each department, and the promise
+// chain each department's saves queue through — see saveRotaFor below.
+const rotaVersions = new Map();
+const saveQueues = new Map();
+
 const loadRotaFor = async (deptId) => {
   try {
     const { data: rows } = await supabase
-      .from("rotas").select("rota_data")
+      .from("rotas").select("rota_data, version")
       .eq("department_id", deptId).limit(1);
     const row = rows && rows[0];
-    if (row && row.rota_data) return row.rota_data;
+    if (row && row.rota_data) {
+      rotaVersions.set(deptId, row.version == null ? 1 : row.version);
+      return row.rota_data;
+    }
   } catch (e) {
     console.error("Supabase load failed, using local backup:", e);
   }
   try {
     const local = localStorage.getItem("rota:v2:" + deptId);
-    if (local) return JSON.parse(local);
+    if (local) {
+      // The local copy carries no version, so forget any remembered one —
+      // otherwise the next save could believe it knows the server's state.
+      rotaVersions.delete(deptId);
+      return JSON.parse(local);
+    }
   } catch (e) { /* ignore */ }
   return null;
 };
 
 // Returns true on success, false on failure — see note on saveUserRota above.
-const saveRotaFor = async (deptId, rotaData) => {
+// onConflict, if given, is called when another save reached the server first
+// and this save was discarded rather than overwriting it.
+const doSaveRotaFor = async (deptId, rotaData, onConflict) => {
   try {
     localStorage.setItem("rota:v2:" + deptId, JSON.stringify(rotaData));
   } catch (e) { /* ignore */ }
@@ -145,13 +160,29 @@ const saveRotaFor = async (deptId, rotaData) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || !deptId) return true; // nothing to save yet — not a failure
     const { data: existing } = await supabase
-      .from("rotas").select("id").eq("department_id", deptId).limit(1);
+      .from("rotas").select("id, version").eq("department_id", deptId).limit(1);
     const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
     let error;
     if (existing && existing[0]) {
-      ({ error } = await supabase.from("rotas").update(payload).eq("id", existing[0].id));
+      const row = existing[0];
+      const known = rotaVersions.has(deptId) ? rotaVersions.get(deptId) : row.version;
+      const { data: updated, error: updateError } = await supabase
+        .from("rotas")
+        .update({ ...payload, version: known + 1 })
+        .eq("id", row.id).eq("version", known)
+        .select("id");
+      error = updateError;
+      if (!error && (!updated || updated.length === 0)) {
+        // Someone else saved this department since we last loaded/saved it —
+        // our version no longer matches, so writing now would clobber theirs.
+        console.warn("Rota save conflict: version mismatch, discarding this save.");
+        if (onConflict) onConflict();
+        return false;
+      }
+      if (!error) rotaVersions.set(deptId, known + 1);
     } else {
-      ({ error } = await supabase.from("rotas").insert({ user_id: user.id, department_id: deptId, ...payload }));
+      ({ error } = await supabase.from("rotas").insert({ user_id: user.id, department_id: deptId, version: 1, ...payload }));
+      if (!error) rotaVersions.set(deptId, 1);
     }
     if (error) { console.error("Supabase save failed:", error); return false; }
     return true;
@@ -159,6 +190,16 @@ const saveRotaFor = async (deptId, rotaData) => {
     console.error("Supabase save failed:", e);
     return false;
   }
+};
+
+// Queues saves per department so two saves for the same department never run
+// concurrently — otherwise both could read the same version and one would
+// always lose to the version-conflict check above.
+const saveRotaFor = (deptId, rotaData, onConflict) => {
+  const prior = saveQueues.get(deptId) || Promise.resolve();
+  const next = prior.catch(() => {}).then(() => doSaveRotaFor(deptId, rotaData, onConflict));
+  saveQueues.set(deptId, next);
+  return next;
 };
 
 /* ─────────────────── Design tokens ─────────────────── */
@@ -687,17 +728,35 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     })();
   }, []);
 
+  // Guards against re-entry if several queued saves conflict in quick
+  // succession — only the first should trigger a reload.
+  const reloadingRef = useRef(false);
+  const handleSaveConflict = async () => {
+    if (reloadingRef.current) return;
+    reloadingRef.current = true;
+    window.alert("Someone else updated this rota. Your screen will now load their version.");
+    switchingDept.current = true;
+    setData(null);
+    const fresh = await loadRotaFor(deptId);
+    setData(fresh ? migrate(fresh) : seed());
+    switchingDept.current = false;
+    reloadingRef.current = false;
+  };
+
   useEffect(() => {
     if (!data || switchingDept.current) return;
     const myAttempt = ++saveAttempt.current;
     setSaveStatus("saving");
-    const run = deptId ? saveRotaFor(deptId, data) : saveUserRota(data);
+    const run = deptId ? saveRotaFor(deptId, data, handleSaveConflict) : saveUserRota(data);
     run.then((ok) => {
       // If another save started while this one was in flight, its result
       // is the one that matters — ignore this older, now-stale result.
       if (saveAttempt.current !== myAttempt) return;
       setSaveStatus(ok ? "saved" : "error");
     });
+    // handleSaveConflict is recreated each render but always closes over the
+    // current deptId, so it's intentionally left out of this dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, deptId]);
 
   // Lets the warning banner's "Try saving again" button re-run the same save
