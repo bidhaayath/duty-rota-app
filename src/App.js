@@ -102,6 +102,30 @@ function Paywall({ onSeePlans }) {
   );
 }
 
+/* ─────────────── Legal footer ───────────────
+   The policy pages are static HTML in /public, served outside React, so these
+   are ordinary links rather than routes. They open in a new tab so nobody
+   loses their place in a rota they're mid-way through editing. */
+function LegalFooter() {
+  const link = {
+    color: '#4A6570', textDecoration: 'none', fontSize: 12.5,
+  };
+  return (
+    <div className="no-print" style={{
+      borderTop: '1px solid #DCE8E6', background: '#EEF4F3',
+      padding: '18px 20px', marginTop: 28,
+      display: 'flex', flexWrap: 'wrap', gap: 18,
+      alignItems: 'center', justifyContent: 'center',
+    }}>
+      <a href="/privacy" target="_blank" rel="noopener noreferrer" style={link}>Privacy Policy</a>
+      <a href="/terms" target="_blank" rel="noopener noreferrer" style={link}>Terms of Service</a>
+      <a href="/refunds" target="_blank" rel="noopener noreferrer" style={link}>Refunds &amp; Cancellation</a>
+      <a href="mailto:support@easydutyrota.com" style={link}>support@easydutyrota.com</a>
+      <span style={{ color: '#8AA0A8', fontSize: 12 }}>SHAB INVESTMENT</span>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -238,6 +262,7 @@ export default function App() {
         </div>
       </div>
       <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit} departmentLimit={sub.departmentLimit} />
+      <LegalFooter />
     </div>
   );
 }
