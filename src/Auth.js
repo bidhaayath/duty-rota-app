@@ -304,6 +304,14 @@ export default function Auth() {
           <button type="submit" disabled={loading} style={primaryBtn(loading)}>
             {loading ? 'Please wait…' : buttonText[mode]}
           </button>
+          {mode === 'signup' && (
+            <p style={{ fontSize: '12px', color: '#888', margin: '14px 0 0', lineHeight: 1.55, textAlign: 'center' }}>
+              By creating an account you agree to our{' '}
+              <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: '#0F8B7E' }}>Terms of Service</a>
+              {' '}and{' '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#0F8B7E' }}>Privacy Policy</a>.
+            </p>
+          )}
         </form>
 
         {mode === 'login' && (
