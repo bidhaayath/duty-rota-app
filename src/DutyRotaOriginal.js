@@ -1092,16 +1092,25 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
               borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
             }}>
               <Users size={13} /> {(departments.find((d) => d.id === deptId) || {}).name || "Department"}
-              <ChevronDown size={13} style={{ transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
+              <ChevronDown size={13} className="dr-deptmenu-chevron" style={{ transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
             </button>
-            {deptMenuOpen && (
-              <>
-                <div onClick={() => setDeptMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 59 }} />
-                <div style={{
-                  position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
-                  background: "#fff", color: T.ink, borderRadius: 12, border: `1px solid ${T.line}`,
-                  boxShadow: "0 12px 30px rgba(15,30,28,0.18)", overflow: "hidden",
-                }}>
+            <div
+              onClick={() => setDeptMenuOpen(false)}
+              style={{ position: "fixed", inset: 0, zIndex: 59, pointerEvents: deptMenuOpen ? "auto" : "none" }}
+            />
+            <div
+              className="dr-deptmenu-panel"
+              inert={!deptMenuOpen}
+              style={{
+                position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
+                background: "#fff", color: T.ink, borderRadius: 12, border: `1px solid ${T.line}`,
+                boxShadow: "0 12px 30px rgba(15,30,28,0.18)", overflow: "hidden",
+                transformOrigin: "top left",
+                opacity: deptMenuOpen ? 1 : 0,
+                transform: deptMenuOpen ? "scale(1) translateY(0)" : "scale(0.96) translateY(-4px)",
+                pointerEvents: deptMenuOpen ? "auto" : "none",
+              }}
+            >
                   {departments.map((d) => {
                     const ro = !deptEditable(d.id);
                     return (
@@ -1137,8 +1146,6 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                     )}
                   </div>
                 </div>
-              </>
-            )}
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
