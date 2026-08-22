@@ -523,8 +523,8 @@ const migrate = (d) => {
 };
 
 /* ─────────────────── Shared UI ─────────────────── */
-const Card = ({ children, style }) => (
-  <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
+const Card = ({ children, style, className }) => (
+  <div className={className} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
 );
 const Btn = ({ children, onClick, kind = "primary", small, style, disabled }) => {
   const kinds = {
@@ -898,7 +898,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     !departments.slice(0, departmentLimit).some((x) => x.id === deptId);
   const history = useRotaHistory(data, setData, deptId, { disabled: locked || deptIsLocked });
 
-  if (!data) return <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
+  if (!data) return <div key="dr-loading" style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
 
   // Company logo is a paid feature. When the current tier doesn't include it,
   // the app behaves as if there is NO logo — header, every PDF/image export,
@@ -1080,7 +1080,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   ];
 
   return (
-    <div style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
+    <div key="dr-app" className="dr-fade-in" style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
       <style>{globalCss}</style>
 
       <header className="dr-header" style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
@@ -1092,16 +1092,25 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
               borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
             }}>
               <Users size={13} /> {(departments.find((d) => d.id === deptId) || {}).name || "Department"}
-              <ChevronDown size={13} style={{ transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
+              <ChevronDown size={13} className="dr-deptmenu-chevron" style={{ transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
             </button>
-            {deptMenuOpen && (
-              <>
-                <div onClick={() => setDeptMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 59 }} />
-                <div style={{
-                  position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
-                  background: "#fff", color: T.ink, borderRadius: 12, border: `1px solid ${T.line}`,
-                  boxShadow: "0 12px 30px rgba(15,30,28,0.18)", overflow: "hidden",
-                }}>
+            <div
+              onClick={() => setDeptMenuOpen(false)}
+              style={{ position: "fixed", inset: 0, zIndex: 59, pointerEvents: deptMenuOpen ? "auto" : "none" }}
+            />
+            <div
+              className="dr-deptmenu-panel"
+              inert={!deptMenuOpen}
+              style={{
+                position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
+                background: "#fff", color: T.ink, borderRadius: 12, border: `1px solid ${T.line}`,
+                boxShadow: "0 12px 30px rgba(15,30,28,0.18)", overflow: "hidden",
+                transformOrigin: "top left",
+                opacity: deptMenuOpen ? 1 : 0,
+                transform: deptMenuOpen ? "scale(1) translateY(0)" : "scale(0.96) translateY(-4px)",
+                pointerEvents: deptMenuOpen ? "auto" : "none",
+              }}
+            >
                   {departments.map((d) => {
                     const ro = !deptEditable(d.id);
                     return (
@@ -1137,8 +1146,6 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                     )}
                   </div>
                 </div>
-              </>
-            )}
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -1165,7 +1172,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
 
       <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
         {saveStatus === "error" && (
-          <div style={{
+          <div className="dr-anim-in" style={{
             background: "#FBEAE7", border: "1px solid #F1B8AE", borderRadius: 10,
             padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: "#8A2E1E",
             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
@@ -1184,7 +1191,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           </div>
         )}
         {currentDeptLocked && (
-          <div style={{
+          <div className="dr-anim-in" style={{
             background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 10,
             padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: "#7A6320",
             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
@@ -2717,7 +2724,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       </div>
 
       {form && (
-        <Card>
+        <Card className="dr-anim-in">
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
             <Field label="Name"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aminath Ali" /></Field>
             <Field label="Designation (optional)"><input style={inputStyle} value={form.designation || ""} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="e.g. Staff Nurse" /></Field>
@@ -3788,7 +3795,7 @@ function SettingsTab({ data, update, canUseLogo = true }) {
       </div>
 
       {form && (
-        <Card>
+        <Card className="dr-anim-in">
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
             <Field label="Code (shown in grid)"><input style={inputStyle} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. CL" /></Field>
             <Field label="Full label"><input style={inputStyle} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Casual leave" /></Field>
