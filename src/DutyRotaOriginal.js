@@ -523,8 +523,8 @@ const migrate = (d) => {
 };
 
 /* ─────────────────── Shared UI ─────────────────── */
-const Card = ({ children, style }) => (
-  <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
+const Card = ({ children, style, className }) => (
+  <div className={className} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
 );
 const Btn = ({ children, onClick, kind = "primary", small, style, disabled }) => {
   const kinds = {
@@ -2724,7 +2724,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       </div>
 
       {form && (
-        <Card>
+        <Card className="dr-anim-in">
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
             <Field label="Name"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aminath Ali" /></Field>
             <Field label="Designation (optional)"><input style={inputStyle} value={form.designation || ""} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="e.g. Staff Nurse" /></Field>
@@ -3795,7 +3795,7 @@ function SettingsTab({ data, update, canUseLogo = true }) {
       </div>
 
       {form && (
-        <Card>
+        <Card className="dr-anim-in">
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
             <Field label="Code (shown in grid)"><input style={inputStyle} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. CL" /></Field>
             <Field label="Full label"><input style={inputStyle} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Casual leave" /></Field>
