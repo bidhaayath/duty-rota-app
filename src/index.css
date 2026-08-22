@@ -11,3 +11,16 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+:root {
+  --dr-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --dr-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* Motion convention: every transition/animation/@starting-style rule added
+   for UI polish lives inside this media query, so prefers-reduced-motion:
+   reduce removes the animation entirely (instant state change) instead of
+   just softening it. Rules from plans 002-005 are appended inside this
+   block, not scattered elsewhere. */
+@media (prefers-reduced-motion: no-preference) {
+}
