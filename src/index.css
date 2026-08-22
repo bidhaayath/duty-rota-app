@@ -23,4 +23,27 @@ code {
    just softening it. Rules from plans 002-005 are appended inside this
    block, not scattered elsewhere. */
 @media (prefers-reduced-motion: no-preference) {
+  .dr-deptmenu-panel {
+    transition: transform 200ms var(--dr-ease-out), opacity 200ms var(--dr-ease-out);
+  }
+  .dr-deptmenu-chevron {
+    transition: transform 180ms var(--dr-ease-in-out);
+  }
+  .dr-anim-in {
+    transition: opacity 220ms var(--dr-ease-out), transform 220ms var(--dr-ease-out);
+  }
+  @starting-style {
+    .dr-anim-in {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+  }
+  .dr-fade-in {
+    transition: opacity 200ms var(--dr-ease-out);
+  }
+  @starting-style {
+    .dr-fade-in {
+      opacity: 0;
+    }
+  }
 }

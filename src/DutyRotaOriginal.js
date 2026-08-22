@@ -898,7 +898,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     !departments.slice(0, departmentLimit).some((x) => x.id === deptId);
   const history = useRotaHistory(data, setData, deptId, { disabled: locked || deptIsLocked });
 
-  if (!data) return <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
+  if (!data) return <div key="dr-loading" style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
 
   // Company logo is a paid feature. When the current tier doesn't include it,
   // the app behaves as if there is NO logo — header, every PDF/image export,
@@ -1080,7 +1080,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   ];
 
   return (
-    <div style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
+    <div key="dr-app" className="dr-fade-in" style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
       <style>{globalCss}</style>
 
       <header className="dr-header" style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
