@@ -64,7 +64,7 @@ function TrialEndingNote({ daysLeft, onSeePlans }) {
   // Heads-up in the last 7 days, with a link to the plans page so people can
   // act before the view-only switch rather than after it.
   return (
-    <div style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '10px 20px', fontSize: 13, color: '#7A6320', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+    <div className="dr-anim-in" style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '10px 20px', fontSize: 13, color: '#7A6320', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
       <span>
         Your free trial ends in <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>.
       </span>
@@ -81,7 +81,7 @@ function TrialEndingNote({ daysLeft, onSeePlans }) {
 
 function Paywall({ onSeePlans }) {
   return (
-    <div style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
+    <div className="dr-anim-in" style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
         <div style={{ flex: '1 1 320px' }}>
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Your free trial has ended</div>

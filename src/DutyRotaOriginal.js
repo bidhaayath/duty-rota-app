@@ -1172,7 +1172,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
 
       <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
         {saveStatus === "error" && (
-          <div style={{
+          <div className="dr-anim-in" style={{
             background: "#FBEAE7", border: "1px solid #F1B8AE", borderRadius: 10,
             padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: "#8A2E1E",
             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
@@ -1191,7 +1191,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           </div>
         )}
         {currentDeptLocked && (
-          <div style={{
+          <div className="dr-anim-in" style={{
             background: "#FFF8E7", border: "1px solid #EBDCB2", borderRadius: 10,
             padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: "#7A6320",
             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
