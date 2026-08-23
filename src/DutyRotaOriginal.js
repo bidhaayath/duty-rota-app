@@ -157,10 +157,16 @@ const doSaveRotaFor = async (deptId, rotaData, onConflict) => {
     localStorage.setItem("rota:v2:" + deptId, JSON.stringify(rotaData));
   } catch (e) { /* ignore */ }
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !deptId) return true; // nothing to save yet — not a failure
-    const { data: existing } = await supabase
+    // getSession() reads the session from local storage; getUser() validates
+    // the token over the network, so it fails when offline and can also clear
+    // the session as a side effect.
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session && session.user;
+    if (!deptId) return true; // nothing to save yet — not a failure
+    if (!user) { console.error("Rota save failed: no session."); return false; }
+    const { data: existing, error: selectError } = await supabase
       .from("rotas").select("id, version").eq("department_id", deptId).limit(1);
+    if (selectError) { console.error("Supabase save failed:", selectError); return false; }
     const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
     let error;
     if (existing && existing[0]) {
@@ -183,8 +189,13 @@ const doSaveRotaFor = async (deptId, rotaData, onConflict) => {
           .from("rotas").select("version").eq("id", row.id).limit(1);
         const serverVersion = recheck && recheck[0] ? recheck[0].version : null;
         if (serverVersion === known) {
+          // The database deliberately refused this write (e.g. an RLS policy
+          // blocking it because a trial expired) rather than losing it — the
+          // paywall banner already explains why. Returning false here would
+          // surface the save-status indicator's connection-error banner,
+          // which would be both wrong and alarming on top of that message.
           console.warn("Rota save refused (not a version conflict): write did not apply.");
-          return false;
+          return true;
         }
         console.warn("Rota save conflict: version mismatch, discarding this save.");
         if (onConflict) onConflict();
@@ -211,6 +222,14 @@ const saveRotaFor = (deptId, rotaData, onConflict) => {
   const next = prior.catch(() => {}).then(() => doSaveRotaFor(deptId, rotaData, onConflict));
   saveQueues.set(deptId, next);
   return next;
+};
+
+// Version tracking lives at module level so it survives re-renders — but that
+// also means it survives a sign-out. Clearing it stops a new session from
+// inheriting the previous account's version numbers and seeing false conflicts.
+export const resetRotaVersionTracking = () => {
+  rotaVersions.clear();
+  saveQueues.clear();
 };
 
 /* ─────────────────── Design tokens ─────────────────── */
