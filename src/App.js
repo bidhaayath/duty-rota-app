@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import supabase from './supabaseClient';
 import Auth from './Auth';
-import DutyRota from './DutyRotaOriginal';
+import DutyRota, { resetRotaVersionTracking } from './DutyRotaOriginal';
 import Admin from './Admin';
 import Billing from './Billing';
 
@@ -159,6 +159,7 @@ export default function App() {
       if (event === 'SIGNED_OUT') {
         try { sessionStorage.removeItem(RECOVERY_FLAG); } catch { /* ignore */ }
         setRecovering(false);
+        resetRotaVersionTracking();
       }
       setSession(session);
     });
