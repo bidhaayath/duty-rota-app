@@ -173,8 +173,19 @@ const doSaveRotaFor = async (deptId, rotaData, onConflict) => {
         .select("id");
       error = updateError;
       if (!error && (!updated || updated.length === 0)) {
-        // Someone else saved this department since we last loaded/saved it —
-        // our version no longer matches, so writing now would clobber theirs.
+        // Zero rows with no error means either someone else saved first (our
+        // version no longer matches) or the write was refused for another
+        // reason entirely — e.g. an RLS policy blocking it because a trial
+        // expired. Only a changed server version proves a real conflict, so
+        // re-read it before assuming one and looping the user into repeated
+        // conflict alerts they can never resolve.
+        const { data: recheck } = await supabase
+          .from("rotas").select("version").eq("id", row.id).limit(1);
+        const serverVersion = recheck && recheck[0] ? recheck[0].version : null;
+        if (serverVersion === known) {
+          console.warn("Rota save refused (not a version conflict): write did not apply.");
+          return false;
+        }
         console.warn("Rota save conflict: version mismatch, discarding this save.");
         if (onConflict) onConflict();
         return false;
