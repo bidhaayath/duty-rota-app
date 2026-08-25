@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import supabase from './supabaseClient';
 import Auth from './Auth';
 import DutyRota, { resetRotaVersionTracking } from './DutyRotaOriginal';
@@ -138,6 +138,32 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showBilling, setShowBilling] = useState(false);
+  // When the subscription was last checked. Used to stop rapid tab-switching
+  // from firing the RPC over and over.
+  const lastSubCheck = useRef(0);
+  // Ticket number for the newest subscription request. Every fetch takes a
+  // number on the way out and only applies its answer if that number is still
+  // the newest one. Without it, a slow RPC started before a logout (or before
+  // someone else signed in on the same browser) could land afterwards and
+  // write the PREVIOUS account's plan into state — on a shared computer that
+  // means one person's limits briefly applying to another.
+  const subRequestId = useRef(0);
+
+  // Anything still in flight belongs to the account we just left, so retire
+  // its ticket the moment the signed-in user changes (including on logout).
+  useEffect(() => {
+    subRequestId.current += 1;
+  }, [session?.user?.id]);
+
+  // Single place that asks the database for the plan and applies the result.
+  // Only touches refs and setSub, so it never needs rebuilding.
+  const refreshSub = useCallback(() => {
+    const ticket = (subRequestId.current += 1);
+    lastSubCheck.current = Date.now();
+    fetchSubscription().then((state) => {
+      if (ticket === subRequestId.current) setSub(state);
+    });
+  }, []);
 
   useEffect(() => {
     if (isRecoveryUrl()) {
@@ -188,12 +214,31 @@ export default function App() {
   // directly, so this matches exactly what the app will let them save.
   useEffect(() => {
     if (!session?.user?.id) return;
-    let cancelled = false;
-    fetchSubscription().then((state) => {
-      if (!cancelled) setSub(state);
-    });
-    return () => { cancelled = true; };
-  }, [session?.user?.id]);
+    refreshSub();
+  }, [session?.user?.id, refreshSub]);
+
+  // Ask again when the tab comes back to the foreground. Accounts are
+  // activated by hand from the admin dashboard, so a customer can be sitting
+  // in the app at the very moment their plan changes — they switch away to
+  // send the transfer slip, get activated, and switch back. Without this their
+  // tab keeps the old limits until they happen to reload, which is what caused
+  // the "only one department is editable after upgrading" report. Nothing is
+  // reloaded: the new limits flow down as props and the locks lift on their
+  // own. The 15-second guard keeps quick tab-flicking from spamming the RPC.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    const recheck = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (Date.now() - lastSubCheck.current < 15000) return;
+      refreshSub();
+    };
+    window.addEventListener('focus', recheck);
+    document.addEventListener('visibilitychange', recheck);
+    return () => {
+      window.removeEventListener('focus', recheck);
+      document.removeEventListener('visibilitychange', recheck);
+    };
+  }, [session?.user?.id, refreshSub]);
 
   useEffect(() => {
     if (!session?.user?.id) { setIsAdmin(false); setShowAdmin(false); return; }
@@ -224,7 +269,7 @@ export default function App() {
           setShowBilling(false);
           // They may have just been activated, so ask the database again
           // rather than leaving a stale paywall on screen.
-          fetchSubscription().then(setSub);
+          refreshSub();
         }}
       />
     );
