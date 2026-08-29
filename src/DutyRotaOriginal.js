@@ -106,11 +106,24 @@ const setupDepartments = async () => {
       }
     }
     if (deps.length === 0) {
-      const { data: d } = await supabase
-        .from("departments")
-        .insert({ owner_user_id: user.id, name: "Department 1" })
-        .select("id, name, created_at").single();
-      if (d) deps.push(d);
+      // Only someone who owns this account should get a starter department.
+      // An invited manager or employee who has not been assigned one yet
+      // would otherwise have a department created for them inside the
+      // customer's organisation, owned by the wrong person.
+      // Note: organisation_members has RLS enabled with no policies yet, so
+      // this read returns nothing and the behaviour is unchanged until those
+      // policies exist. It is in place now so the guard is ready when they are.
+      const { data: membership } = await supabase
+        .from("organisation_members")
+        .select("role").eq("user_id", user.id).limit(1);
+      const role = membership && membership[0] ? membership[0].role : null;
+      if (role === null || role === "owner") {
+        const { data: d } = await supabase
+          .from("departments")
+          .insert({ owner_user_id: user.id, name: "Department 1" })
+          .select("id, name, created_at").single();
+        if (d) deps.push(d);
+      }
     }
     return deps;
   } catch (e) {
@@ -128,7 +141,14 @@ const loadRotaFor = async (deptId) => {
   try {
     const { data: rows } = await supabase
       .from("rotas").select("rota_data, version")
-      .eq("department_id", deptId).limit(1);
+      .eq("department_id", deptId)
+      // A department can hold more than one rota row once several people
+      // share it, so pick deliberately rather than letting Postgres choose:
+      // the most-developed row wins, oldest first as a tie-break. Without
+      // this, limit(1) can return a stale copy and the rota looks empty.
+      .order("version", { ascending: false })
+      .order("created_at", { ascending: true })
+      .limit(1);
     const row = rows && rows[0];
     if (row && row.rota_data) {
       rotaVersions.set(deptId, row.version == null ? 1 : row.version);
@@ -165,7 +185,13 @@ const doSaveRotaFor = async (deptId, rotaData, onConflict) => {
     if (!deptId) return true; // nothing to save yet — not a failure
     if (!user) { console.error("Rota save failed: no session."); return false; }
     const { data: existing, error: selectError } = await supabase
-      .from("rotas").select("id, version").eq("department_id", deptId).limit(1);
+      .from("rotas").select("id, version").eq("department_id", deptId)
+      // Must match loadRotaFor's ordering exactly. If this picked a
+      // different row than the one on screen, the save would overwrite a
+      // rota the user never opened.
+      .order("version", { ascending: false })
+      .order("created_at", { ascending: true })
+      .limit(1);
     if (selectError) { console.error("Supabase save failed:", selectError); return false; }
     const payload = { title: rotaData.title || "Duty Rota", rota_data: rotaData };
     let error;
