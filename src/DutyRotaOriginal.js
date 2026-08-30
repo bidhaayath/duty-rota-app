@@ -341,7 +341,29 @@ const luminance = (hex) => {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 };
 const textOn = (bg) => (luminance(bg) > 0.6 ? "#142B33" : "#FFFFFF");
-const shortName = (name) => name.replace(/^(SRN|RN|EN)\s+/i, "").split(" ")[0];
+// Strip a leading title before taking the first name, with or without the
+// full stop. Without this "DR. AHMED" reduces to "DR." — the title rather
+// than the person — and every doctor in a unit looks identical on the rota,
+// in the on-call picker and along the bottom of every chart.
+const NAME_TITLES = /^(dr|prof|mr|mrs|ms|mstr|sr|srn|rn|en)\.?\s+/i;
+const stripTitle = (name) => (name || "").replace(NAME_TITLES, "").trim();
+const shortName = (name) => (stripTitle(name).split(" ")[0] || (name || "").trim());
+// Three people can all be called Ali. shortName keeps only the first word,
+// so they would appear as three identical options in the on-call dropdown
+// and picking the right one becomes guesswork. Show the shortest label that
+// is still unique among the people selectable that day: the first name when
+// nobody else shares it, the full name (with designation, if set) when they do.
+const uniqueLabel = (staff, pool) => {
+  const short = shortName(staff.name);
+  // Compared case-insensitively: "RN AMINATH" and "Aminath Easa" are two
+  // different people who both go by Aminath, however they were typed in.
+  const key = short.toLowerCase();
+  const shared = pool.filter((p) => shortName(p.name).toLowerCase() === key).length > 1;
+  if (!shared) return short;
+  const others = pool.filter((p) => p.id !== staff.id
+    && stripTitle(p.name).toLowerCase() === stripTitle(staff.name).toLowerCase()).length > 0;
+  return others && staff.designation ? `${staff.name} — ${staff.designation}` : staff.name;
+};
 // Designation is a separate, optional field. Compact views (rota grid,
 // exports, dropdowns) show "Name — Designation" when set, or just the
 // name when it is not — so existing staff entered before this feature
@@ -1931,7 +1953,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                         fontSize: 12, fontWeight: 700, minWidth: 74, padding: "7px 4px", borderRadius: 7,
                         border: `1px solid ${T.line}`, background: "#FDF8EE",
                         color: pickedStaff ? T.ink : T.inkSoft, opacity: pickedStaff ? 1 : 0.55,
-                      }}>{pickedStaff ? shortName(pickedStaff.name) : "—"}</div>
+                      }}>{pickedStaff ? uniqueLabel(pickedStaff, onCallStaff) : "—"}</div>
                     </td>
                   );
                 }
@@ -1949,7 +1971,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     >
                       <option value="">—</option>
                       {onCallStaff.map((s) => (
-                        <option key={s.id} value={s.id}>{shortName(s.name)}</option>
+                        <option key={s.id} value={s.id}>{uniqueLabel(s, onCallStaff)}</option>
                       ))}
                     </select>
                   </td>
@@ -2081,11 +2103,14 @@ function Stats({ data, range, setRange, onExport }) {
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
+  // Same rule as the on-call picker: a first name only where it is unique
+  // among the people on this chart, the full name where it is not.
+  const chartPool = rows.map((r) => r.staff);
   const dutyByStaff = rows.map((r) => ({
-    name: shortName(r.staff.name),
+    name: uniqueLabel(r.staff, chartPool),
     Morning: r.morning, Afternoon: r.afternoon, Evening: r.evening, Night: r.night, "Other duty": r.other, Release: r.release,
   }));
-  const nonOffByStaff = rows.map((r) => ({ name: shortName(r.staff.name), days: r.nonOfficialDuty }));
+  const nonOffByStaff = rows.map((r) => ({ name: uniqueLabel(r.staff, chartPool), days: r.nonOfficialDuty }));
   // Chart 1: how many DISTINCT staff have each leave-period type overlapping the range
   const overlaps = (p) => p.start <= range.to && p.end >= range.from;
   const staffOnLeaveType = (type) =>
@@ -2358,9 +2383,12 @@ function RotaPrint({ data, days }) {
             {days.map((date) => {
               const picked = data.onCall?.[date] || "";
               const pickedStaff = picked ? data.staff.find((x) => x.id === picked) : null;
+              // Same pool the dropdown used, so the printed rota names the
+              // person exactly as the screen did.
+              const onCallStaff = data.staff.filter((s) => isEmployedOn(s, date));
               return (
                 <td key={date} style={{ ...ptd, background: "#FDF8EE", fontWeight: 700 }}>
-                  {pickedStaff ? shortName(pickedStaff.name) : ""}
+                  {pickedStaff ? uniqueLabel(pickedStaff, onCallStaff) : ""}
                 </td>
               );
             })}
@@ -2483,11 +2511,14 @@ function RecordsPrint({ data, from, to }) {
 
 function StatsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
+  // Same rule as the on-call picker: a first name only where it is unique
+  // among the people on this chart, the full name where it is not.
+  const chartPool = rows.map((r) => r.staff);
   const dutyByStaff = rows.map((r) => ({
-    name: shortName(r.staff.name),
+    name: uniqueLabel(r.staff, chartPool),
     Morning: r.morning, Afternoon: r.afternoon, Evening: r.evening, Night: r.night, "Other duty": r.other, Release: r.release,
   }));
-  const nonOffByStaff = rows.map((r) => ({ name: shortName(r.staff.name), days: r.nonOfficialDuty }));
+  const nonOffByStaff = rows.map((r) => ({ name: uniqueLabel(r.staff, chartPool), days: r.nonOfficialDuty }));
   const overlaps = (p) => p.start <= to && p.end >= from;
   const staffOnLeaveType = (type) =>
     rows.filter((r) => (r.staff.leavePeriods || []).some((p) => p.type === type && overlaps(p))).length;
