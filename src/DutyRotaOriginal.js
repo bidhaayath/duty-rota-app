@@ -342,6 +342,18 @@ const luminance = (hex) => {
 };
 const textOn = (bg) => (luminance(bg) > 0.6 ? "#142B33" : "#FFFFFF");
 const shortName = (name) => name.replace(/^(SRN|RN|EN)\s+/i, "").split(" ")[0];
+// Three people can all be called Ali. shortName keeps only the first word,
+// so they would appear as three identical options in the on-call dropdown
+// and picking the right one becomes guesswork. Show the shortest label that
+// is still unique among the people selectable that day: the first name when
+// nobody else shares it, the full name (with designation, if set) when they do.
+const uniqueLabel = (staff, pool) => {
+  const short = shortName(staff.name);
+  const shared = pool.filter((p) => shortName(p.name) === short).length > 1;
+  if (!shared) return short;
+  const others = pool.filter((p) => p.id !== staff.id && p.name === staff.name).length > 0;
+  return others && staff.designation ? `${staff.name} — ${staff.designation}` : staff.name;
+};
 // Designation is a separate, optional field. Compact views (rota grid,
 // exports, dropdowns) show "Name — Designation" when set, or just the
 // name when it is not — so existing staff entered before this feature
@@ -1931,7 +1943,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                         fontSize: 12, fontWeight: 700, minWidth: 74, padding: "7px 4px", borderRadius: 7,
                         border: `1px solid ${T.line}`, background: "#FDF8EE",
                         color: pickedStaff ? T.ink : T.inkSoft, opacity: pickedStaff ? 1 : 0.55,
-                      }}>{pickedStaff ? shortName(pickedStaff.name) : "—"}</div>
+                      }}>{pickedStaff ? uniqueLabel(pickedStaff, onCallStaff) : "—"}</div>
                     </td>
                   );
                 }
@@ -1949,7 +1961,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     >
                       <option value="">—</option>
                       {onCallStaff.map((s) => (
-                        <option key={s.id} value={s.id}>{shortName(s.name)}</option>
+                        <option key={s.id} value={s.id}>{uniqueLabel(s, onCallStaff)}</option>
                       ))}
                     </select>
                   </td>
@@ -2358,9 +2370,12 @@ function RotaPrint({ data, days }) {
             {days.map((date) => {
               const picked = data.onCall?.[date] || "";
               const pickedStaff = picked ? data.staff.find((x) => x.id === picked) : null;
+              // Same pool the dropdown used, so the printed rota names the
+              // person exactly as the screen did.
+              const onCallStaff = data.staff.filter((s) => isEmployedOn(s, date));
               return (
                 <td key={date} style={{ ...ptd, background: "#FDF8EE", fontWeight: 700 }}>
-                  {pickedStaff ? shortName(pickedStaff.name) : ""}
+                  {pickedStaff ? uniqueLabel(pickedStaff, onCallStaff) : ""}
                 </td>
               );
             })}
