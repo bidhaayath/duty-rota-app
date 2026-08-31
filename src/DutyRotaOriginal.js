@@ -1150,7 +1150,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
         <div ref={printBodyRef} className={rotaOnly && printView.kind === "rota" ? "rota-only" : undefined}>
-        {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} />}
+        {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} rotaOnly={rotaOnly} />}
         {printView.kind === "records" && <RecordsPrint data={viewData} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={viewData} from={statRange.from} to={statRange.to} />}
         {printView.kind === "insights" && <InsightsPrint data={viewData} cfg={printView.cfg} />}
@@ -2296,7 +2296,7 @@ function Stats({ data, range, setRange, onExport }) {
 const pth = { border: "1px solid #999", padding: "5px 7px", fontSize: 10.5, fontWeight: 700, textAlign: "center", background: "#E8E8E8" };
 const ptd = { border: "1px solid #999", padding: "5px 7px", fontSize: 11, textAlign: "center" };
 
-function RotaPrint({ data, days }) {
+function RotaPrint({ data, days, rotaOnly = false }) {
   const codeById = codeByIdOf(data);
   const shownStaff = staffForDays(data, days);
   // Collect notes shown this week, numbered, to list under the rota
@@ -2320,11 +2320,16 @@ function RotaPrint({ data, days }) {
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
         {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])} · {shownStaff.length} staff
       </div>
-      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+      {/* With the summary columns hidden the table has width to spare. Left
+          alone the browser gives nearly all of it to the names; fixing the
+          layout and pinning the name column sends it to the day cells. These
+          are inline rather than in the stylesheet because the image export
+          clones the node and copies inline styles — a class would be lost. */}
+      <table className="rota-grid" style={{ borderCollapse: "collapse", width: "100%", ...(rotaOnly ? { tableLayout: "fixed" } : null) }}>
         <thead>
           <tr>
             <th style={{ ...pth, width: 24 }}>#</th>
-            <th style={{ ...pth, textAlign: "left" }}>NAME &amp; DESIGNATION</th>
+            <th className="rota-name-col" style={{ ...pth, textAlign: "left", ...(rotaOnly ? { width: 200 } : null) }}>NAME &amp; DESIGNATION</th>
             {days.map((date) => {
               const d = parseD(date);
               const nonOff = isNonOff(data, date);
