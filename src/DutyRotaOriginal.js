@@ -2321,10 +2321,14 @@ function RotaPrint({ data, days, rotaOnly = false }) {
         {days.length === 7 ? "Weekly" : "Monthly"} Duty Rota · {niceDate(days[0])} – {niceDate(days[days.length - 1])} · {shownStaff.length} staff
       </div>
       {/* With the summary columns hidden the table has width to spare. Left
-          alone the browser gives nearly all of it to the names; fixing the
-          layout and pinning the name column sends it to the day cells. These
-          are inline rather than in the stylesheet because the image export
-          clones the node and copies inline styles — a class would be lost. */}
+          alone the browser gives nearly all of it to the names; pinning the
+          name column sends that space to the day cells instead. These are
+          inline rather than in the stylesheet because the image export clones
+          the node and copies inline styles — a class would be lost.
+
+          Note: on a monthly range this makes every day column equal and
+          narrow. That is accepted — the weekly rota is what people print and
+          pin up, and it is the case this option is for. */}
       <table className="rota-grid" style={{ borderCollapse: "collapse", width: "100%", ...(rotaOnly ? { tableLayout: "fixed" } : null) }}>
         <thead>
           <tr>
