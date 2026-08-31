@@ -739,7 +739,12 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null }) {
+export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null, role = null }) {
+  // An employee may read the rota but not change it. The database already
+  // refuses their writes; without this the app would accept the typing and
+  // silently drop it, because a refused save is deliberately quiet. null or
+  // any other role keeps full access, so nothing changes for existing users.
+  const viewOnlyRole = role === "employee";
   const [data, setData] = useState(null);
   const [departments, setDepartments] = useState([]);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
@@ -952,6 +957,10 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       alert("Your free trial has ended, so the rota is view-only for now.\n\nYou can still view everything and export PDFs. To keep editing, use the Subscribe button at the top.");
       return;
     }
+    if (viewOnlyRole) {
+      alert("You have view-only access to this rota.\n\nYou can see everything and export PDFs. Ask the owner or a manager if a change needs making.");
+      return;
+    }
     if (currentDeptLocked) {
       alert("This department is view-only on your current plan.\n\nYour plan includes " + departmentLimit + " department" + (departmentLimit === 1 ? "" : "s") + ". You can still view and export this one — upgrade to edit it again.");
       return;
@@ -977,9 +986,26 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
      gate or a view-only department could be edited through it. */
   const deptIsLocked = departmentLimit != null && deptId != null &&
     !departments.slice(0, departmentLimit).some((x) => x.id === deptId);
-  const history = useRotaHistory(data, setData, deptId, { disabled: locked || deptIsLocked });
+  const history = useRotaHistory(data, setData, deptId, { disabled: locked || deptIsLocked || viewOnlyRole });
 
   if (!data) return <div key="dr-loading" style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
+
+  // An employee who has not been given a department yet would otherwise land
+  // on a seeded blank rota — one that is not theirs, cannot be saved, and
+  // looks like their data has vanished. Say what is actually going on instead.
+  if (viewOnlyRole && departments.length === 0) {
+    return (
+      <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft, maxWidth: 520, margin: "0 auto" }}>
+        <div style={{ fontSize: 34, marginBottom: 12 }}>👋</div>
+        <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 19, color: T.ink, margin: "0 0 10px" }}>No rota shared with you yet</h2>
+        <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>
+          Your account is set up, but nobody has given you access to a department yet.
+          Ask the person who invited you to share one with you — it will appear here
+          as soon as they do.
+        </p>
+      </div>
+    );
+  }
 
   // Company logo is a paid feature. When the current tier doesn't include it,
   // the app behaves as if there is NO logo — header, every PDF/image export,
@@ -1217,19 +1243,21 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                     </button>
                   );})}
                   <div style={{ borderTop: `1px solid ${T.line}` }}>
-                    {!locked && (
+                    {!locked && !viewOnlyRole && (
                       <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
                         fontWeight: 600, color: T.lagoon, cursor: "pointer", textAlign: "left",
                       }}><Plus size={14} /> Add department</button>
                     )}
-                    <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
-                      fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                      padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
-                      fontWeight: 600, cursor: "pointer", textAlign: "left",
-                    }}><Pencil size={14} /> Rename this department</button>
-                    {!locked && departments.length > 1 && (
+                    {!viewOnlyRole && (
+                      <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
+                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
+                        fontWeight: 600, cursor: "pointer", textAlign: "left",
+                      }}><Pencil size={14} /> Rename this department</button>
+                    )}
+                    {!locked && !viewOnlyRole && departments.length > 1 && (
                       <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -1280,6 +1308,18 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
             }}>
               Try saving again
             </button>
+          </div>
+        )}
+        {viewOnlyRole && (
+          <div className="dr-anim-in" style={{
+            background: "#EEF4F3", border: `1px solid ${T.line}`, borderRadius: 10,
+            padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: T.inkSoft,
+            display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          }}>
+            <span style={{ flex: "1 1 260px" }}>
+              👁 You have <strong>view-only</strong> access to this rota. You can see everything
+              and export PDFs. Ask the owner or a manager if a change needs making.
+            </span>
           </div>
         )}
         {currentDeptLocked && (

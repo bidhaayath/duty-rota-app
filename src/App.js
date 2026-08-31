@@ -138,6 +138,10 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showBilling, setShowBilling] = useState(false);
+  // Owner, manager or employee. null means this account has no membership
+  // row, which is every account created before invites existed — those get
+  // full access, exactly as they always have.
+  const [role, setRole] = useState(null);
   // When the subscription was last checked. Used to stop rapid tab-switching
   // from firing the RPC over and over.
   const lastSubCheck = useRef(0);
@@ -240,6 +244,21 @@ export default function App() {
     };
   }, [session?.user?.id, refreshSub]);
 
+  // What this person is allowed to do inside their organisation. The database
+  // enforces it either way — an employee's save is refused by RLS — but the
+  // app needs to know so it can show the rota as view-only rather than let
+  // someone type changes that quietly go nowhere.
+  useEffect(() => {
+    if (!session?.user?.id) { setRole(null); return; }
+    let cancelled = false;
+    supabase.rpc('my_role').then(({ data, error }) => {
+      // Fail open, like the subscription check: a hiccup must never take
+      // editing away from someone who is entitled to it.
+      if (!cancelled) setRole(error ? null : data);
+    });
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
   useEffect(() => {
     if (!session?.user?.id) { setIsAdmin(false); setShowAdmin(false); return; }
     let cancelled = false;
@@ -307,7 +326,7 @@ export default function App() {
           </button>
         </div>
       </div>
-      <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit} departmentLimit={sub.departmentLimit} />
+      <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit} departmentLimit={sub.departmentLimit} role={role} />
       <LegalFooter />
     </div>
   );
