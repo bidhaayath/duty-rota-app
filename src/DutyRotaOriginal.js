@@ -772,6 +772,9 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const [range, setRange] = useState({ from: monthStart(), to: monthEnd() });
   const [statRange, setStatRange] = useState({ from: monthStart(), to: monthEnd() });
   const [printView, setPrintView] = useState(null);
+  // Off by default, so an export looks exactly as it always has unless the
+  // person asks for the plain version.
+  const [rotaOnly, setRotaOnly] = useState(false);
   const printBodyRef = useRef(null);
   // Tracks whether the last save to the server succeeded, so a failure is
   // shown on screen instead of only appearing in the browser console where
@@ -1018,6 +1021,11 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     select:focus, input:focus { border-color: ${T.lagoon} !important; }
     ::-webkit-scrollbar { height: 8px; width: 8px; }
     ::-webkit-scrollbar-thumb { background: ${T.line}; border-radius: 4px; }
+    /* Ticking "Rota only" on the export screen hides the summary columns,
+       the coverage totals and the tables underneath, leaving just the grid
+       people pin on a wall. Everything stays in the app — this only affects
+       what is printed or saved. */
+    .rota-only .rota-stats { display: none !important; }
     @media print {
       .no-print { display: none !important; }
       body { background: #fff !important; }
@@ -1133,9 +1141,15 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           <Btn small onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</Btn>
           <Btn small onClick={saveAsImage} disabled={!canSaveImage} title={canSaveImage ? "" : `Available for ranges up to ${IMG_MAX_DAYS} days — use Print / Save as PDF for wider ranges.`}><Image size={14} /> Save as image</Btn>
           {!canSaveImage && <span style={{ alignSelf: "center", fontSize: 12, color: T.inkSoft }}>Image export supports up to {IMG_MAX_DAYS} days — use PDF for wider ranges.</span>}
+          {printView.kind === "rota" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: T.ink, cursor: "pointer" }}>
+              <input type="checkbox" checked={rotaOnly} onChange={(e) => setRotaOnly(e.target.checked)} style={{ cursor: "pointer" }} />
+              Rota only (hide totals)
+            </label>
+          )}
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
-        <div ref={printBodyRef}>
+        <div ref={printBodyRef} className={rotaOnly && printView.kind === "rota" ? "rota-only" : undefined}>
         {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} />}
         {printView.kind === "records" && <RecordsPrint data={viewData} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={viewData} from={statRange.from} to={statRange.to} />}
@@ -2322,7 +2336,7 @@ function RotaPrint({ data, days }) {
                 </th>
               );
             })}
-            {["M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "OFF", "NON-OFF DUTY"].map((h) => <th key={h} style={pth}>{h}</th>)}
+            {["M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "OFF", "NON-OFF DUTY"].map((h) => <th key={h} className="rota-stats" style={pth}>{h}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -2366,14 +2380,14 @@ function RotaPrint({ data, days }) {
                     </td>
                   );
                 })}
-                <td style={ptd}>{t.morning}</td>
-                <td style={ptd}>{t.afternoon}</td>
-                {data.eveningEnabled && <td style={ptd}>{t.evening}</td>}
-                <td style={ptd}>{t.night}</td>
-                <td style={ptd}>{t.other}</td>
-                <td style={ptd}>{t.release}</td>
-                <td style={ptd}>{t.off}</td>
-                <td style={{ ...ptd, background: "#F6E3B4", fontWeight: 800 }}>{t.nonOfficialDuty}</td>
+                <td className="rota-stats" style={ptd}>{t.morning}</td>
+                <td className="rota-stats" style={ptd}>{t.afternoon}</td>
+                {data.eveningEnabled && <td className="rota-stats" style={ptd}>{t.evening}</td>}
+                <td className="rota-stats" style={ptd}>{t.night}</td>
+                <td className="rota-stats" style={ptd}>{t.other}</td>
+                <td className="rota-stats" style={ptd}>{t.release}</td>
+                <td className="rota-stats" style={ptd}>{t.off}</td>
+                <td className="rota-stats" style={{ ...ptd, background: "#F6E3B4", fontWeight: 800 }}>{t.nonOfficialDuty}</td>
               </tr>
             );
           })}
@@ -2392,17 +2406,17 @@ function RotaPrint({ data, days }) {
                 </td>
               );
             })}
-            <td colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
+            <td className="rota-stats" colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
           </tr>
         </tbody>
-        <tfoot>
+        <tfoot className="rota-stats">
           {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
             ...(data.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []), ["NIGHT", "night", "#6FA8DC"],
             ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color]) => (
             <tr key={cat}>
               <td colSpan={2} style={{ ...ptd, textAlign: "left", background: color, color: textOn(color), fontWeight: 800 }}>{label}</td>
               {days.map((date) => <td key={date} style={ptd}>{dayCountFor(data, date, cat)}</td>)}
-              <td colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
+              <td className="rota-stats" colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
             </tr>
           ))}
         </tfoot>
