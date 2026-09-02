@@ -2722,7 +2722,11 @@ function StatsPrint({ data, from, to }) {
 
 /* ─────────────────── Staff tab ─────────────────── */
 function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true }) {
-  const empty = { name: "", designation: "", contact: "", recc: "", licence: "", startDate: "", endDate: "", leavePeriods: [] };
+  // email and employmentRole are what turn a staff row into an invitation:
+  // the email says who to invite, the role says what they get. Both are
+  // optional, so every staff member entered before this simply has them
+  // blank and nothing about their rota changes.
+  const empty = { name: "", designation: "", contact: "", recc: "", licence: "", email: "", employmentRole: "employee", startDate: "", endDate: "", leavePeriods: [] };
   const [form, setForm] = useState(null);
   const [showFormer, setShowFormer] = useState(false);
   const npEmpty = { type: "annual", label: "", start: "", end: "" };
@@ -2738,9 +2742,32 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       alert("Last working day cannot be before the joining date.");
       return;
     }
+    // A typo here would produce an invitation that silently never arrives,
+    // so catch it while the person is still looking at the form.
+    const addr = (form.email || "").trim();
+    // Checked with plain string tests rather than a regular expression:
+    // this is not trying to be a full RFC validator, only to catch the
+    // typos that would produce an invitation which silently never arrives.
+    if (addr) {
+      const parts = addr.split("@");
+      const domain = parts[1] || "";
+      const looksOk =
+        parts.length === 2 &&
+        parts[0].length > 0 &&
+        domain.includes(".") &&
+        !domain.startsWith(".") &&
+        !domain.endsWith(".") &&
+        domain.split(".").every((bit) => bit.length > 0) &&
+        !addr.includes(" ");
+      if (!looksOk) {
+        alert("That email address doesn't look right.\n\nCheck it, or leave it blank if this person doesn't need their own login.");
+        return;
+      }
+    }
+    const tidied = { ...form, email: addr.toLowerCase() };
     update((d) => {
-      if (form.id) { const i = d.staff.findIndex((s) => s.id === form.id); d.staff[i] = form; }
-      else d.staff.push({ ...form, id: uid() });
+      if (form.id) { const i = d.staff.findIndex((s) => s.id === form.id); d.staff[i] = tidied; }
+      else d.staff.push({ ...tidied, id: uid() });
       return d;
     });
     setForm(null); setNp(npEmpty);
@@ -2884,6 +2911,24 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
           </div>
 
           <div style={{ marginTop: 16, borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Their own login (optional)</div>
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+              <Field label="Email address">
+                <input type="email" style={inputStyle} value={form.email || ""}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  placeholder="e.g. aminath@hospital.mv" />
+              </Field>
+              <Field label="Access level">
+                <select style={inputStyle} value={form.employmentRole || "employee"}
+                  onChange={(e) => setForm({ ...form, employmentRole: e.target.value })}>
+                  <option value="employee">Employee — can view only</option>
+                  <option value="manager">Manager — can edit this department</option>
+                </select>
+              </Field>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16, borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Employment dates</div>
             <div style={{ fontSize: 12, color: T.inkSoft, marginBottom: 10 }}>
               Leave blank if unknown. Both dates are inclusive — they work on their joining day and on their last working day.
@@ -2954,9 +2999,9 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       )}
 
       <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
           <thead>
-            <tr>{["#", "Name", "Designation", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+            <tr>{["#", "Name", "Designation", "Email", "Access", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {visibleStaff.map((s, idx) => {
@@ -2987,6 +3032,13 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                   </td>
                   <td style={{ ...td, fontWeight: 600 }}>{s.name}</td>
                   <td style={{ ...td, color: s.designation ? T.ink : T.inkSoft }}>{s.designation || "—"}</td>
+                  <td style={{ ...td, color: s.email ? T.ink : T.inkSoft, fontSize: 12.5 }}>{s.email || "—"}</td>
+                  <td style={{ ...td, fontSize: 12.5 }}>
+                    {!s.email ? <span style={{ color: T.inkSoft }}>—</span>
+                      : s.employmentRole === "manager"
+                        ? <span style={{ background: "#E7F1EF", color: "#0B6A60", fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>Manager</span>
+                        : <span style={{ background: "#EEF4F3", color: T.inkSoft, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>Employee</span>}
+                  </td>
                   <td style={td}>{s.contact}</td>
                   <td style={td}>{s.recc}</td>
                   <td style={{ ...td, color: gone ? T.inkSoft : licenceSoon(s) ? T.coral : T.ink, fontWeight: !gone && licenceSoon(s) ? 700 : 400 }}>
