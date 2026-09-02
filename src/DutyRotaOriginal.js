@@ -745,6 +745,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   // silently drop it, because a refused save is deliberately quiet. null or
   // any other role keeps full access, so nothing changes for existing users.
   const viewOnlyRole = role === "employee";
+  // Creating and deleting departments is organisation-level: a new one counts
+  // against the owner's plan, and deleting one takes its rota with it. A
+  // manager runs the departments they are given, but does not decide which
+  // departments exist. A null role is an account with no membership row —
+  // every existing customer — so they keep full control as before.
+  const isOwnerLevel = role === null || role === "owner";
   const [data, setData] = useState(null);
   const [departments, setDepartments] = useState([]);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
@@ -1245,7 +1251,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                     </button>
                   );})}
                   <div style={{ borderTop: `1px solid ${T.line}` }}>
-                    {!locked && !viewOnlyRole && (
+                    {!locked && !viewOnlyRole && isOwnerLevel && (
                       <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -1259,7 +1265,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                         fontWeight: 600, cursor: "pointer", textAlign: "left",
                       }}><Pencil size={14} /> Rename this department</button>
                     )}
-                    {!locked && !viewOnlyRole && departments.length > 1 && (
+                    {!locked && !viewOnlyRole && isOwnerLevel && departments.length > 1 && (
                       <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -1347,7 +1353,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
-        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} />}
+        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={role === null || role === "owner"} />}
         {tab === "requests" && (
           <RequestsTab
             data={data} update={update} staffEditable={staffEditable}
@@ -2733,7 +2739,12 @@ function StatsPrint({ data, from, to }) {
 }
 
 /* ─────────────────── Staff tab ─────────────────── */
-function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true }) {
+// canGrantManager: a manager runs their own departments and may give an
+// employee a login, but promoting someone to manager changes who holds power
+// rather than how the department runs — that stays with the owner. A null
+// role means an account with no membership row, i.e. every existing customer,
+// who is effectively the owner of their own organisation.
+function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true, canGrantManager = true }) {
   // email and employmentRole are what turn a staff row into an invitation:
   // the email says who to invite, the role says what they get. Both are
   // optional, so every staff member entered before this simply has them
@@ -2776,6 +2787,18 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
         return;
       }
     }
+    // Belt and braces: the dropdown already hides Manager from a manager, but
+    // an edited existing row could still carry it, so check before saving.
+    // Someone who is already a manager keeps that role — this blocks granting
+    // it, not editing the rest of an existing manager's details.
+    if (!canGrantManager && form.employmentRole === "manager") {
+      const wasManager = form.id && data.staff.find((s) => s.id === form.id)?.employmentRole === "manager";
+      if (!wasManager) {
+        alert("Only the account owner can make someone a manager.\n\nYou can give this person an employee login, and the owner can promote them later.");
+        return;
+      }
+    }
+    // Lower-cased and trimmed so "Ali@X.com " and "ali@x.com" are one person.
     const tidied = { ...form, email: addr.toLowerCase() };
     update((d) => {
       if (form.id) { const i = d.staff.findIndex((s) => s.id === form.id); d.staff[i] = tidied; }
@@ -2934,8 +2957,15 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                 <select style={inputStyle} value={form.employmentRole || "employee"}
                   onChange={(e) => setForm({ ...form, employmentRole: e.target.value })}>
                   <option value="employee">Employee — can view only</option>
-                  <option value="manager">Manager — can edit this department</option>
+                  {(canGrantManager || form.employmentRole === "manager") && (
+                    <option value="manager">Manager — can edit this department</option>
+                  )}
                 </select>
+                {!canGrantManager && (
+                  <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 4 }}>
+                    Only the account owner can make someone a manager.
+                  </div>
+                )}
               </Field>
             </div>
           </div>
