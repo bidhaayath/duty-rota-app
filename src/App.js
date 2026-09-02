@@ -142,6 +142,10 @@ export default function App() {
   // row, which is every account created before invites existed — those get
   // full access, exactly as they always have.
   const [role, setRole] = useState(null);
+  // The organisation this account belongs to. The name is blank for every
+  // account created before this existed, and a blank name renders nothing —
+  // so exports look exactly as they always have until someone fills it in.
+  const [org, setOrg] = useState({ id: null, name: '' });
   // When the subscription was last checked. Used to stop rapid tab-switching
   // from firing the RPC over and over.
   const lastSubCheck = useRef(0);
@@ -259,6 +263,30 @@ export default function App() {
     return () => { cancelled = true; };
   }, [session?.user?.id]);
 
+  // RLS limits this to the caller's own organisation, so no filter is needed.
+  // Failure is quiet: a blank name is harmless, and the rota must load even
+  // if this read fails.
+  useEffect(() => {
+    if (!session?.user?.id) { setOrg({ id: null, name: '' }); return; }
+    let cancelled = false;
+    supabase.from('organisations').select('id, name').limit(1).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error || !data || !data[0]) { setOrg({ id: null, name: '' }); return; }
+      setOrg({ id: data[0].id, name: data[0].name || '' });
+    });
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
+  // Written straight to the organisations table — the name does not live in
+  // rota_data like the rest of the settings, so it cannot go through update().
+  const saveOrgName = useCallback(async (name) => {
+    if (!org.id) return false;
+    const { error } = await supabase.from('organisations').update({ name }).eq('id', org.id);
+    if (error) { console.error('Could not save organisation name:', error); return false; }
+    setOrg((o) => ({ ...o, name }));
+    return true;
+  }, [org.id]);
+
   useEffect(() => {
     if (!session?.user?.id) { setIsAdmin(false); setShowAdmin(false); return; }
     let cancelled = false;
@@ -326,7 +354,10 @@ export default function App() {
           </button>
         </div>
       </div>
-      <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit} departmentLimit={sub.departmentLimit} role={role} />
+      <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit}
+        departmentLimit={sub.departmentLimit} role={role}
+        orgName={org.name} onSaveOrgName={saveOrgName}
+        canEditOrgName={role === null || role === 'owner'} />
       <LegalFooter />
     </div>
   );

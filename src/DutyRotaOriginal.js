@@ -739,7 +739,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null, role = null }) {
+export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null, role = null, orgName = "", onSaveOrgName = null, canEditOrgName = false }) {
   // An employee may read the rota but not change it. The database already
   // refuses their writes; without this the app would accept the typing and
   // silently drop it, because a refused save is deliberately quiet. null or
@@ -1012,7 +1012,9 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   // and Settings all hide it. The saved logo is NOT deleted; it stays in
   // rota_data and reappears automatically when the user upgrades.
   const canUseLogo = features ? features.company_logo : true;
-  const viewData = canUseLogo ? data : { ...data, logo: "" };
+  // All four print views read from viewData, so adding the organisation name
+  // here puts it on every export without touching each one.
+  const viewData = { ...(canUseLogo ? data : { ...data, logo: "" }), orgName };
 
   // Department allowance. Departments are held oldest-first, so the first
   // `departmentLimit` of them stay editable and anything beyond that is
@@ -1395,7 +1397,8 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
             />
           )
         )}
-        {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true} />}
+        {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true}
+          orgName={orgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
     </div>
@@ -2354,7 +2357,10 @@ function RotaPrint({ data, days, rotaOnly = false }) {
         ? "@page { size: A4 landscape; margin: 10mm; }"
         : "@page { size: A4 portrait; margin: 10mm; }"}</style>
       <div className="rp-head">
-        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        <div style={{ textAlign: "center" }}>
+          {data.orgName && <div style={{ fontSize: 11, letterSpacing: 0.6, textTransform: "uppercase", color: "#666", marginBottom: 2 }}>{data.orgName}</div>}
+          <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        </div>
         {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
@@ -2500,7 +2506,10 @@ function RecordsPrint({ data, from, to }) {
   return (
     <div>
       <div className="rp-head">
-        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        <div style={{ textAlign: "center" }}>
+          {data.orgName && <div style={{ fontSize: 11, letterSpacing: 0.6, textTransform: "uppercase", color: "#666", marginBottom: 2 }}>{data.orgName}</div>}
+          <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        </div>
         {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
@@ -2617,7 +2626,10 @@ function StatsPrint({ data, from, to }) {
   return (
     <div>
       <div className="rp-head">
-        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        <div style={{ textAlign: "center" }}>
+          {data.orgName && <div style={{ fontSize: 11, letterSpacing: 0.6, textTransform: "uppercase", color: "#666", marginBottom: 2 }}>{data.orgName}</div>}
+          <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        </div>
         {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 12 }}>
@@ -3472,7 +3484,10 @@ function InsightsPrint({ data, cfg }) {
   return (
     <div>
       <div className="rp-head">
-        <div style={{ textAlign: "center", fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        <div style={{ textAlign: "center" }}>
+          {data.orgName && <div style={{ fontSize: 11, letterSpacing: 0.6, textTransform: "uppercase", color: "#666", marginBottom: 2 }}>{data.orgName}</div>}
+          <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 16 }}>{data.title}</div>
+        </div>
         {data.logo && <img className="rp-logo" src={data.logo} alt="" />}
       </div>
       <div style={{ textAlign: "center", fontSize: 12, color: "#555", marginBottom: 10 }}>
@@ -3748,7 +3763,22 @@ function HelpTab({ data }) {
   );
 }
 
-function SettingsTab({ data, update, canUseLogo = true }) {
+function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgName = null, canEditOrgName = false }) {
+  // Kept in local state with its own Save button because this one field lives
+  // in the organisations table, not in rota_data — it cannot ride along with
+  // the rota's autosave like everything else on this tab.
+  const [orgDraft, setOrgDraft] = useState(orgName);
+  const [orgSaving, setOrgSaving] = useState(false);
+  const [orgSaved, setOrgSaved] = useState(false);
+  useEffect(() => { setOrgDraft(orgName); }, [orgName]);
+  const commitOrgName = async () => {
+    if (!onSaveOrgName) return;
+    setOrgSaving(true); setOrgSaved(false);
+    const ok = await onSaveOrgName(orgDraft.trim());
+    setOrgSaving(false);
+    if (ok) { setOrgSaved(true); setTimeout(() => setOrgSaved(false), 2500); }
+    else alert("Could not save the organisation name. Please check your connection and try again.");
+  };
   const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
   const [form, setForm] = useState(null);
   const [nd, setNd] = useState({ from: "", to: "" });
@@ -3807,6 +3837,26 @@ function SettingsTab({ data, update, canUseLogo = true }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card>
+        <Field label="Organisation name (hospital, resort or company)">
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input style={{ ...inputStyle, maxWidth: 380 }} value={orgDraft}
+              disabled={!canEditOrgName}
+              placeholder="e.g. ADK Hospital"
+              onChange={(e) => { setOrgDraft(e.target.value); setOrgSaved(false); }} />
+            {canEditOrgName && (
+              <Btn small onClick={commitOrgName} disabled={orgSaving || orgDraft.trim() === orgName.trim()}>
+                {orgSaving ? "Saving…" : "Save"}
+              </Btn>
+            )}
+            {orgSaved && <span style={{ fontSize: 12.5, color: T.lagoon, fontWeight: 700 }}>✓ Saved</span>}
+          </div>
+        </Field>
+        <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 6 }}>
+          Appears above the department name on every export. Leave blank to show nothing.
+        </div>
+      </Card>
+
       <Card>
         <Field label="Area / ward name (shown at the top)">
           <input style={{ ...inputStyle, maxWidth: 380 }} value={data.title}
