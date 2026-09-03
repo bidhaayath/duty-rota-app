@@ -42,7 +42,7 @@ const fetchSubscription = async () => {
     if (error || !data) {
       // Fail open: a Supabase hiccup must never lock a paying user out.
       // On failure we also grant all features rather than block them.
-      return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null };
+      return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null, everPaid: false, paidTier: null, paidUntil: null };
     }
     return {
       locked:     !data.can_write,                        // blocked -> show paywall
@@ -51,10 +51,18 @@ const fetchSubscription = async () => {
       features:   data.features || null,                  // { insights, company_logo, priority_support }
       staffLimit: data.staff_limit,                       // number, or null = unlimited
       departmentLimit: data.department_limit,             // number, or null = unlimited
+      // paid_until is only ever set once a payment has been recorded, so its
+      // presence is what separates a customer whose subscription lapsed from
+      // someone whose free trial simply ran out. Telling a person who has been
+      // paying MVR 465 a month that their 'trial has ended' reads as though the
+      // product has forgotten them.
+      everPaid:   !!data.paid_until,
+      paidTier:   data.paid_tier || null,
+      paidUntil:  data.paid_until || null,
     };
   } catch (e) {
     console.error('Subscription check failed:', e);
-    return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null }; // fail open
+    return { locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null, everPaid: false, paidTier: null, paidUntil: null }; // fail open
   }
 };
 
@@ -79,23 +87,36 @@ function TrialEndingNote({ daysLeft, onSeePlans }) {
   );
 }
 
-function Paywall({ onSeePlans }) {
+// Renders one of two messages. Someone whose trial ran out never paid us;
+// someone whose subscription lapsed did, and deserves to be addressed as the
+// customer they were rather than told their trial ended.
+function Paywall({ onSeePlans, everPaid, paidTier, paidUntil }) {
+  const tierName = paidTier ? paidTier.charAt(0).toUpperCase() + paidTier.slice(1) : null;
+  const endedOn = paidUntil
+    ? new Date(paidUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+
+  const heading = everPaid
+    ? (tierName ? `Your ${tierName} plan has ended` : 'Your subscription has ended')
+    : 'Your free trial has ended';
+
+  const body = everPaid
+    ? `Your rota and all your data are safe${endedOn ? ` — your plan ran until ${endedOn}` : ''}. You can still view everything and export PDFs, but editing is paused. Renew to pick up exactly where you left off.`
+    : 'Your rota and all your data are safe — you can still view everything and export PDFs, but editing is paused. Subscribe to continue right where you left off.';
+
   return (
     <div className="dr-anim-in" style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
         <div style={{ flex: '1 1 320px' }}>
-          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Your free trial has ended</div>
-          <div style={{ fontSize: 13, opacity: 0.95, lineHeight: 1.5 }}>
-            Your rota and all your data are safe — you can still view everything and export PDFs,
-            but editing is paused. Subscribe to continue right where you left off.
-          </div>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>{heading}</div>
+          <div style={{ fontSize: 13, opacity: 0.95, lineHeight: 1.5 }}>{body}</div>
         </div>
         <button onClick={onSeePlans} style={{
           background: '#fff', color: '#0B6A60', fontWeight: 800, fontSize: 14,
           padding: '11px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
           whiteSpace: 'nowrap', fontFamily: 'inherit',
         }}>
-          See plans
+          {everPaid ? 'Renew' : 'See plans'}
         </button>
       </div>
     </div>
@@ -130,7 +151,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [recovering, setRecovering] = useState(recoveryPending());
-  const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null });
+  const [sub, setSub] = useState({ locked: false, daysLeft: null, active: false, features: null, staffLimit: null, departmentLimit: null, everPaid: false, paidTier: null, paidUntil: null });
   // Whether this account may open the admin screen. The database decides —
   // is_admin() reads the admins table. Showing or hiding the button here is
   // only tidiness: admin_list_users() and activate_manually() check for
@@ -326,7 +347,7 @@ export default function App() {
 
   return (
     <div>
-      {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} />}
+      {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} />}
       {showEndingNote && <TrialEndingNote daysLeft={sub.daysLeft} onSeePlans={() => setShowBilling(true)} />}
       <div className="no-print" style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '20px' }}>📋 DutyRota</h1>
