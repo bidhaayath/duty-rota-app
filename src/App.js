@@ -47,7 +47,10 @@ const fetchSubscription = async () => {
     return {
       locked:     !data.can_write,                        // blocked -> show paywall
       active:     data.state === 'active',
-      daysLeft:   data.state === 'trialing' ? data.days_remaining : null,
+      // Kept for paying customers as well as trials. Billing here is a manual
+      // bank transfer, not a card that renews itself, so someone who is not
+      // reminded simply stops being able to edit one morning.
+      daysLeft:   data.days_remaining ?? null,
       features:   data.features || null,                  // { insights, company_logo, priority_support }
       staffLimit: data.staff_limit,                       // number, or null = unlimited
       departmentLimit: data.department_limit,             // number, or null = unlimited
@@ -68,20 +71,34 @@ const fetchSubscription = async () => {
 
 /* ─────────────── Banners ─────────────── */
 
-function TrialEndingNote({ daysLeft, onSeePlans }) {
-  // Heads-up in the last 7 days, with a link to the plans page so people can
-  // act before the view-only switch rather than after it.
+// Shown in the final week either way, but a trial and a paid plan need
+// different words: one ends unless you subscribe, the other ends unless you
+// send a transfer. Nothing renews on its own here.
+function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans }) {
+  const tierName = paidTier ? paidTier.charAt(0).toUpperCase() + paidTier.slice(1) : null;
+  const endsOn = paidUntil
+    ? new Date(paidUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })
+    : null;
+  const days = <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>;
+
   return (
     <div className="dr-anim-in" style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '10px 20px', fontSize: 13, color: '#7A6320', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
       <span>
-        Your free trial ends in <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>.
+        {everPaid ? (
+          <>
+            Your {tierName || 'plan'} ends{endsOn ? ` on ${endsOn}` : ''} — {days} left.
+            {' '}Send your transfer to keep editing.
+          </>
+        ) : (
+          <>Your free trial ends in {days}.</>
+        )}
       </span>
       <button onClick={onSeePlans} style={{
         background: '#0F8B7E', color: '#fff', fontWeight: 700, fontSize: 12,
         padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
         whiteSpace: 'nowrap', fontFamily: 'inherit',
       }}>
-        See plans
+        {everPaid ? 'My plan' : 'See plans'}
       </button>
     </div>
   );
@@ -343,12 +360,14 @@ export default function App() {
     );
   }
 
-  const showEndingNote = !sub.active && !sub.locked && sub.daysLeft !== null && sub.daysLeft <= 7;
+  // Not once editing has already stopped — at that point the paywall says it
+  // more plainly, and two banners about the same thing is just noise.
+  const showEndingNote = !sub.locked && sub.daysLeft !== null && sub.daysLeft <= 7;
 
   return (
     <div>
       {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} />}
-      {showEndingNote && <TrialEndingNote daysLeft={sub.daysLeft} onSeePlans={() => setShowBilling(true)} />}
+      {showEndingNote && <EndingSoonNote daysLeft={sub.daysLeft} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} onSeePlans={() => setShowBilling(true)} />}
       <div className="no-print" style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0, fontSize: '20px' }}>📋 DutyRota</h1>
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
