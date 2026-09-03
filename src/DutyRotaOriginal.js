@@ -740,18 +740,14 @@ function WelcomeGuide({ data, update, setTab }) {
 }
 
 export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null, role = null, orgName = "", onSaveOrgName = null, canEditOrgName = false }) {
-  // An employee may read the rota but not change it. The database already
-  // refuses their writes; without this the app would accept the typing and
-  // silently drop it, because a refused save is deliberately quiet. null or
-  // any other role keeps full access, so nothing changes for existing users.
-  const viewOnlyRole = role === "employee";
-  // Creating and deleting departments is organisation-level: a new one counts
-  // against the owner's plan, and deleting one takes its rota with it. A
-  // manager runs the departments they are given, but does not decide which
-  // departments exist. A null role is an account with no membership row —
-  // every existing customer — so they keep full control as before.
-  const isOwnerLevel = role === null || role === "owner";
   const [data, setData] = useState(null);
+  /* Role and editability belong to a person IN A DEPARTMENT, not to a person.
+     Someone can own their own organisation and be a manager in another: at
+     home their own lapsed plan makes them view-only, while in the shared
+     department the paying owner's plan still lets them edit. Asking "is this
+     user locked?" has no single answer, so we ask the database per department
+     and look up whichever one is on screen. */
+  const [deptPerms, setDeptPerms] = useState(null); // null = not loaded yet
   const [departments, setDepartments] = useState([]);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
   const [deptMenuOpen, setDeptMenuOpen] = useState(false);
@@ -959,8 +955,10 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   // single gate makes the entire rota view-only when the trial has ended.
   // Viewing and PDF export still work.
   const update = (fn) => {
-    if (locked) {
-      alert("Your free trial has ended, so the rota is view-only for now.\n\nYou can still view everything and export PDFs. To keep editing, use the Subscribe button at the top.");
+    if (editBlocked && !viewOnlyRole) {
+      alert(currentPerm
+        ? "This department is view-only right now.\n\nThe subscription that covers it has lapsed. Once it is renewed you can edit again — nothing has been lost."
+        : "Your free trial has ended, so the rota is view-only for now.\n\nYou can still view everything and export PDFs. To keep editing, use the Subscribe button at the top.");
       return;
     }
     if (viewOnlyRole) {
@@ -973,6 +971,35 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     }
     setData((d) => fn(structuredClone(d)));
   };
+
+  /* Reloaded whenever the set of departments changes, so a newly created or
+     newly shared department gets its own answer rather than inheriting one.
+     Failure is quiet and leaves deptPerms null, which falls back to the
+     person-level props below — the behaviour before any of this existed. */
+  useEffect(() => {
+    let cancelled = false;
+    supabase.rpc("my_departments").then(({ data: rows, error }) => {
+      if (cancelled || error || !Array.isArray(rows)) return;
+      const m = new Map();
+      rows.forEach((r) => m.set(r.department_id, {
+        role: r.role, canEdit: r.can_edit, isOwner: r.is_owner,
+      }));
+      setDeptPerms(m);
+    });
+    return () => { cancelled = true; };
+  }, [departments]);
+
+  /* The answer for the department currently on screen. Until the lookup
+     lands — or in legacy single-rota mode, where there is no department —
+     fall back to the person-level props so nothing changes for the accounts
+     that have only ever belonged to one organisation. */
+  const currentPerm = (deptPerms && deptId) ? deptPerms.get(deptId) : null;
+  const deptRole = currentPerm ? currentPerm.role : role;
+  const viewOnlyRole = deptRole === "employee";
+  const isOwnerLevel = deptRole == null || deptRole === "owner";
+  // Whether editing is blocked HERE: either this department's organisation is
+  // not paying, or this person's role in it does not allow writing.
+  const editBlocked = currentPerm ? !currentPerm.canEdit : locked;
 
   /* Changing the setting would otherwise leave the rota sitting on a date
      that is no longer the start of a week — showing Wednesday to Tuesday
@@ -992,7 +1019,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
      gate or a view-only department could be edited through it. */
   const deptIsLocked = departmentLimit != null && deptId != null &&
     !departments.slice(0, departmentLimit).some((x) => x.id === deptId);
-  const history = useRotaHistory(data, setData, deptId, { disabled: locked || deptIsLocked || viewOnlyRole });
+  const history = useRotaHistory(data, setData, deptId, { disabled: editBlocked || deptIsLocked || viewOnlyRole });
 
   if (!data) return <div key="dr-loading" style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
 
@@ -1251,7 +1278,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                     </button>
                   );})}
                   <div style={{ borderTop: `1px solid ${T.line}` }}>
-                    {!locked && !viewOnlyRole && isOwnerLevel && (
+                    {!editBlocked && !viewOnlyRole && isOwnerLevel && (
                       <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -1265,7 +1292,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                         fontWeight: 600, cursor: "pointer", textAlign: "left",
                       }}><Pencil size={14} /> Rename this department</button>
                     )}
-                    {!locked && !viewOnlyRole && isOwnerLevel && departments.length > 1 && (
+                    {!editBlocked && !viewOnlyRole && isOwnerLevel && departments.length > 1 && (
                       <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -1353,7 +1380,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
-        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={role === null || role === "owner"} />}
+        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={isOwnerLevel} />}
         {tab === "requests" && (
           <RequestsTab
             data={data} update={update} staffEditable={staffEditable}
