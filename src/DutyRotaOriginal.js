@@ -14,6 +14,7 @@ import supabase from "./supabaseClient";
 import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
+import Dashboard from "./Dashboard";
 
 // Load this user's saved rota. Tries Supabase first, then a local backup,
 // and finally falls back to a fresh empty rota so the app ALWAYS loads.
@@ -1021,6 +1022,20 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     !departments.slice(0, departmentLimit).some((x) => x.id === deptId);
   const history = useRotaHistory(data, setData, deptId, { disabled: editBlocked || deptIsLocked || viewOnlyRole });
 
+  if (tab === "dashboard") {
+    return (
+      <Dashboard
+        departments={departments}
+        deptPerms={deptPerms}
+        orgName={orgName}
+        loadRota={loadRotaFor}
+        canAddDepartment={isOwnerLevel && !editBlocked && !viewOnlyRole}
+        onAddDepartment={addDepartment}
+        onOpenDepartment={(id) => { switchDept(id); setTab("rota"); }}
+      />
+    );
+  }
+
   if (!data) return <div key="dr-loading" style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>Loading rota…</div>;
 
   // An employee who has not been given a department yet would otherwise land
@@ -1264,19 +1279,36 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                 pointerEvents: deptMenuOpen ? "auto" : "none",
               }}
             >
-                  {departments.map((d) => {
-                    const ro = !deptEditable(d.id);
+                  {(() => {
+                    const owned = departments.filter((d) => deptPerms.get(d.id)?.isOwner !== false);
+                    const member = departments.filter((d) => deptPerms.get(d.id)?.isOwner === false);
+                    const renderDept = (d) => {
+                      const ro = !deptEditable(d.id);
+                      return (
+                        <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
+                          fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                          padding: "10px 14px", border: "none", background: d.id === deptId ? T.mist : "#fff",
+                          fontSize: 13.5, fontWeight: d.id === deptId ? 700 : 500, cursor: "pointer", textAlign: "left",
+                        }}>
+                          {d.id === deptId ? <Check size={14} color={T.lagoon} /> : <span style={{ width: 14 }} />}
+                          <span style={{ flex: 1 }}>{d.name}</span>
+                          {ro && <span title="View-only on your current plan" style={{ fontSize: 11, color: "#A5731B", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 999, padding: "1px 7px", fontWeight: 700 }}>🔒 View only</span>}
+                        </button>
+                      );
+                    };
                     return (
-                    <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
-                      fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                      padding: "10px 14px", border: "none", background: d.id === deptId ? T.mist : "#fff",
-                      fontSize: 13.5, fontWeight: d.id === deptId ? 700 : 500, cursor: "pointer", textAlign: "left",
-                    }}>
-                      {d.id === deptId ? <Check size={14} color={T.lagoon} /> : <span style={{ width: 14 }} />}
-                      <span style={{ flex: 1 }}>{d.name}</span>
-                      {ro && <span title="View-only on your current plan" style={{ fontSize: 11, color: "#A5731B", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 999, padding: "1px 7px", fontWeight: 700 }}>🔒 View only</span>}
-                    </button>
-                  );})}
+                      <>
+                        {owned.length > 0 && (
+                          <div style={{ padding: "8px 14px 4px", fontSize: 11, fontWeight: 700, color: T.inkSoft, textTransform: "uppercase", letterSpacing: 0.4 }}>My Organisation</div>
+                        )}
+                        {owned.map(renderDept)}
+                        {member.length > 0 && (
+                          <div style={{ padding: "8px 14px 4px", fontSize: 11, fontWeight: 700, color: T.inkSoft, textTransform: "uppercase", letterSpacing: 0.4 }}>My Membership</div>
+                        )}
+                        {member.map(renderDept)}
+                      </>
+                    );
+                  })()}
                   <div style={{ borderTop: `1px solid ${T.line}` }}>
                     {!editBlocked && !viewOnlyRole && isOwnerLevel && (
                       <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
@@ -1291,6 +1323,11 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
                         fontWeight: 600, cursor: "pointer", textAlign: "left",
                       }}><Pencil size={14} /> Rename this department</button>
+                    )}
+                    {!isOwnerLevel && (
+                      <div style={{ padding: "10px 14px", fontSize: 12, color: T.inkSoft, lineHeight: 1.5, borderTop: `1px solid ${T.line}` }}>
+                        You're a member of this department. Only its owner can add or delete departments here.
+                      </div>
                     )}
                     {!editBlocked && !viewOnlyRole && isOwnerLevel && departments.length > 1 && (
                       <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
@@ -1314,6 +1351,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           {viewData.logo && <img className="dr-logo" src={viewData.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
         </div>
         <nav style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto" }}>
+          <button onClick={() => setTab("dashboard")} style={{
+            fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 6, padding: "10px 14px",
+            border: "none", borderRadius: "10px 10px 0 0", whiteSpace: "nowrap",
+            background: "transparent", color: "#B8D2CD",
+          }}><User size={15} /> Back to my dashboard</button>
           {tabs.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)} style={{
               fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, cursor: "pointer",
