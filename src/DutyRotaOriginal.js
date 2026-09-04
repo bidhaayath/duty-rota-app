@@ -740,7 +740,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null, role = null, orgName = "", onSaveOrgName = null, canEditOrgName = false }) {
+export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null, role = null, orgName = "", onSaveOrgName = null, canEditOrgName = false, onOpenBilling = null }) {
   const [data, setData] = useState(null);
   /* Role and editability belong to a person IN A DEPARTMENT, not to a person.
      Someone can own their own organisation and be a manager in another: at
@@ -1032,6 +1032,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         canAddDepartment={isOwnerLevel && !editBlocked && !viewOnlyRole}
         onAddDepartment={addDepartment}
         onOpenDepartment={(id) => { switchDept(id); setTab("rota"); }}
+        onOpenPlans={onOpenBilling}
       />
     );
   }

@@ -397,7 +397,8 @@ export default function App() {
       <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit}
         departmentLimit={sub.departmentLimit} role={role}
         orgName={org.name} onSaveOrgName={saveOrgName}
-        canEditOrgName={role === null || role === 'owner'} />
+        canEditOrgName={role === null || role === 'owner'}
+        onOpenBilling={() => setShowBilling(true)} />
       <LegalFooter />
     </div>
   );
