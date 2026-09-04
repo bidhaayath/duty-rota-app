@@ -4,6 +4,7 @@ import {
   Settings, CreditCard, User, LogOut,
 } from "lucide-react";
 import supabase from "./supabaseClient";
+import Account from "./Account";
 
 /* ────────────────────────────────────────────────────────────────────────
    My Dashboard — full-screen personal home.
@@ -81,8 +82,33 @@ export default function Dashboard({
   canAddDepartment = false,
   onOpenPlans = null,
 }) {
+  /* Which full screen is showing. "home" is the calendar; "account" is the
+     account screen reached from the sidebar. Kept here rather than in the
+     parent so the sidebar owns its own navigation. */
+  const [screen, setScreen] = useState("home");
   const [email, setEmail] = useState(null);
-  const [displayName, setDisplayName] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [staffName, setStaffName] = useState("");
+
+  /* The name to greet them by. What they set on their account screen wins —
+     it's the one they chose deliberately. A staff-row name is the fallback,
+     then the email. Re-read whenever we come back to the calendar, so a name
+     just changed on the account screen shows immediately. */
+  useEffect(() => {
+    if (screen !== "home") return;
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (cancelled) return;
+      const meta = (user && user.user_metadata) || {};
+      setAccountName((meta.full_name || meta.name || "").trim());
+    })();
+    return () => { cancelled = true; };
+  }, [screen]);
+
+  const displayName = accountName || staffName
+    || (email ? email.split("@")[0] : "there");
+
   const [rotasByDept, setRotasByDept] = useState({});
   const [loading, setLoading] = useState(true);
 
@@ -118,8 +144,7 @@ export default function Dashboard({
         );
         if (mine && mine.name) { nameFromStaff = mine.name; break; }
       }
-      const meta = (user && user.user_metadata) || {};
-      setDisplayName(nameFromStaff || meta.full_name || meta.name || (mail ? mail.split("@")[0] : "there"));
+      setStaffName(nameFromStaff);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -239,6 +264,10 @@ export default function Dashboard({
     </button>
   );
 
+  if (screen === "account") {
+    return <Account onBack={() => setScreen("home")} />;
+  }
+
   if (loading) {
     return (
       <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>
@@ -314,8 +343,8 @@ export default function Dashboard({
           <div style={{ height: 14 }} />
 
           <SectionHead icon={Settings}>Settings</SectionHead>
-          <MenuRow icon={User} label="Your account" soon />
-          <MenuRow icon={CreditCard} label="Billing" soon />
+          <MenuRow icon={User} label="Your account" onClick={() => setScreen("account")} />
+          <MenuRow icon={CreditCard} label="Subscription history" soon />
 
           <div style={{ height: 14 }} />
 
