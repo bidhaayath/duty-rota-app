@@ -70,10 +70,6 @@ export default function SubscriptionHistory({ onBack }) {
     return () => { cancelled = true; };
   }, []);
 
-  const totalPaid = rows
-    .filter((r) => String(r.status).toLowerCase() === "paid")
-    .reduce((sum, r) => sum + Number(r.amount_laari || 0), 0);
-
   return (
     <div className="dr-fade-in" style={{
       fontFamily: "Inter, system-ui, sans-serif", color: T.ink,
@@ -186,14 +182,8 @@ export default function SubscriptionHistory({ onBack }) {
               })}
             </div>
 
-            <div style={{
-              display: "flex", justifyContent: "space-between", alignItems: "baseline",
-              padding: "14px 18px 0", fontSize: 13,
-            }}>
-              <span style={{ color: T.inkSoft }}>
-                {rows.length} {rows.length === 1 ? "record" : "records"}
-              </span>
-              <span style={{ fontWeight: 700 }}>Total paid: {money(totalPaid)}</span>
+            <div style={{ padding: "14px 18px 0", fontSize: 13, color: T.inkSoft }}>
+              {rows.length} {rows.length === 1 ? "record" : "records"}
             </div>
           </>
         )}
