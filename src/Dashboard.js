@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import supabase from "./supabaseClient";
 import Account from "./Account";
+import SubscriptionHistory from "./SubscriptionHistory";
 
 /* ────────────────────────────────────────────────────────────────────────
    My Dashboard — full-screen personal home.
@@ -268,6 +269,10 @@ export default function Dashboard({
     return <Account onBack={() => setScreen("home")} />;
   }
 
+  if (screen === "history") {
+    return <SubscriptionHistory onBack={() => setScreen("home")} />;
+  }
+
   if (loading) {
     return (
       <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>
@@ -344,7 +349,7 @@ export default function Dashboard({
 
           <SectionHead icon={Settings}>Settings</SectionHead>
           <MenuRow icon={User} label="Your account" onClick={() => setScreen("account")} />
-          <MenuRow icon={CreditCard} label="Subscription history" soon />
+          <MenuRow icon={CreditCard} label="Subscription history" onClick={() => setScreen("history")} />
 
           <div style={{ height: 14 }} />
 
