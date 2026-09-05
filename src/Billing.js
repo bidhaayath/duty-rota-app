@@ -26,9 +26,8 @@ const WHATSAPP = '9607666261'; // +960 Maldives
    Plus/Pro to the Phase 2 prices — which must ALSO be updated in
    plan_limits, since the database is the price source of truth.        */
 const featureFlags = {
-  smartRoster: false,
+  smartRoster: true,
   employeeAccess: false,
-  multipleAdminUsers: false,
   premiumLaunchPricing: false,
 };
 
@@ -37,26 +36,26 @@ const featureFlags = {
 const PLAN_COPY = {
   basic: {
     blurb: 'For small teams that create and share duty rotas manually.',
-    adminUsersFuture: 1,
-    employeeAccessFuture: false,
+    adminUsersFuture: null,
+    employeeAccessFuture: true,
     smartRosterFuture: false,
   },
   standard: {
     blurb: 'For one-department organisations with unlimited staff.',
-    adminUsersFuture: 1,
+    adminUsersFuture: null,
     employeeAccessFuture: true,
     smartRosterFuture: false,
   },
   plus: {
     blurb: 'For growing organisations managing several departments.',
     badge: 'Best Plan',
-    adminUsersFuture: 3,
+    adminUsersFuture: null,
     employeeAccessFuture: true,
     smartRosterFuture: true,
   },
   pro: {
     blurb: 'For larger organisations with more departments and support needs.',
-    adminUsersFuture: 6,
+    adminUsersFuture: null,
     employeeAccessFuture: true,
     smartRosterFuture: true,
   },
@@ -119,7 +118,6 @@ const contactSales = () => {
 };
 
 const Tick = () => <span style={{ color: T.teal, fontWeight: 800, marginRight: 7 }}>✓</span>;
-const NoTick = () => <span style={{ color: T.faint, fontWeight: 800, marginRight: 7 }}>·</span>;
 
 function DevList({ items, note }) {
   /* The muted in-development block. Deliberately styled unlike the live
@@ -129,7 +127,7 @@ function DevList({ items, note }) {
   return (
     <div style={{ background: T.devBg, border: `1px dashed ${T.line}`, borderRadius: 8, padding: '9px 11px', marginBottom: 14 }}>
       <div style={{ fontSize: 10.5, fontWeight: 800, color: T.soft, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>
-        In development — not available yet
+        Coming soon
       </div>
       {items.map((f) => (
         <div key={f} style={{ fontSize: 12.5, color: T.soft, lineHeight: 1.8 }}>{f}</div>
@@ -205,14 +203,14 @@ export default function Billing({ onExit, email }) {
      apply when the current paid period ends; access always runs to the end
      of what was paid for.                                              */
   const faqs = [
-    ['What is an admin user?',
-      'An admin user can create, edit and publish duty rotas. Until multi-user access launches, each subscription has one organisation-management login.'],
+    ['Who can edit my duty rota?',
+      'You can, as the account owner. Once invitations launch you will also be able to make any of your staff a manager for a department, and they can build and publish that department\'s rota. There is no limit on how many managers you appoint.'],
     ['What is employee access?',
-      'Employee access allows staff to log in and view the latest published duty rota that is relevant to them. It is in development and will not be included in Basic.'],
+      'Employee access allows staff to log in and view the latest published duty rota that is relevant to them. It is being rolled out now and will be included in every plan, including Basic.'],
     ['Is multi-user access available now?',
-      'No. It is in development, and a release date has not been confirmed.'],
+      'It is being rolled out now. The groundwork is live and email invitations are the last piece; we will let you know as soon as you can invite your team.'],
     ['What is Smart Roster?',
-      'Smart Roster is planned automation for repetitive parts of duty-rota creation. It is in development for Plus, Pro and Custom. Basic and Standard use manual rota creation.'],
+      'Smart Roster automates the repetitive parts of building a duty rota while leaving the final schedule in your control. It is included with Plus, Pro and Custom. Basic and Standard use manual rota creation.'],
     ['How does annual billing work?',
       'Annual plans are charged once for the full year. The displayed monthly amount is the monthly equivalent of the annual charge.'],
     ['Why is the MVR amount approximate?',
@@ -307,9 +305,6 @@ export default function Billing({ onExit, email }) {
             const live = [
               p.max_staff == null ? 'Unlimited staff members' : `Up to ${p.max_staff} staff members`,
               `${p.max_departments == null ? 'Unlimited' : p.max_departments} department${p.max_departments === 1 ? '' : 's'}`,
-              featureFlags.multipleAdminUsers && copy.adminUsersFuture > 1
-                ? `Up to ${copy.adminUsersFuture} admin users in total`
-                : '1 admin user' + (copy.adminUsersFuture > 1 ? ' currently' : ''),
               'Manual rota creation',
               'PDF and image export',
               ...(featureFlags.employeeAccess && copy.employeeAccessFuture ? ['Unlimited employee viewing access'] : []),
@@ -322,11 +317,9 @@ export default function Billing({ onExit, email }) {
             const dev = [
               ...(!featureFlags.smartRoster && copy.smartRosterFuture ? ['Smart Roster automation'] : []),
               ...(!featureFlags.employeeAccess && copy.employeeAccessFuture ? ['Unlimited employee viewing access'] : []),
-              ...(!featureFlags.multipleAdminUsers && copy.adminUsersFuture > 1
-                ? [`Up to ${copy.adminUsersFuture} admin users in total`] : []),
             ];
-            const devNote = copy.adminUsersFuture > 1 && !featureFlags.multipleAdminUsers
-              ? `The future ${copy.adminUsersFuture === 3 ? 'three' : 'six'}-admin limit includes the primary account holder. Employee users will not count toward this limit.`
+            const devNote = !featureFlags.employeeAccess
+              ? 'Your plan is limited by departments, not by how many people use it.'
               : null;
 
             return (
@@ -382,9 +375,6 @@ export default function Billing({ onExit, email }) {
                 </div>
                 <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px', fontSize: 12.5, lineHeight: 1.9 }}>
                   {live.map((f) => <li key={f}><Tick />{f}</li>)}
-                  {p.tier === 'basic' && (
-                    <li style={{ color: T.faint }}><NoTick />Employee access not included</li>
-                  )}
                 </ul>
 
                 <div style={{ flex: 1 }}>
@@ -421,13 +411,13 @@ export default function Billing({ onExit, email }) {
 
         {/* 5 — Features in development banner */}
         <div style={{ ...card, background: T.devBg, borderStyle: 'dashed' }}>
-          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>Multi-user access is in development</div>
+          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>Multi-user access is rolling out now</div>
           <p style={{ fontSize: 13, color: T.soft, lineHeight: 1.7, margin: 0 }}>
-            We are building individual access so employees can view the latest published duty rota
-            without admin users repeatedly exporting and sharing updated files. Standard, Plus, Pro
-            and Custom will include unlimited employee viewing access. Plus is planned to support up
-            to 3 admin users, while Pro is planned to support up to 6 admin users. These features are
-            not currently available, and a release date has not been confirmed.
+            Your team will be able to sign in and see the duty rota that applies to them, instead of
+            waiting for an exported file. Every plan includes it, Basic included, and there is no cap
+            on how many people you add — your plan is limited by departments, not by people. You will
+            also be able to make any staff member a manager for a department, so they can build and
+            publish its rota. The groundwork is live and email invitations are the last piece.
           </p>
         </div>
 
@@ -444,7 +434,6 @@ export default function Billing({ onExit, email }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0 16px', fontSize: 12.5, lineHeight: 2 }}>
               <span><Tick />Unlimited staff members</span>
               <span><Tick />Unlimited departments</span>
-              <span><Tick />Custom admin-user allowance</span>
               <span><Tick />Your own company logo</span>
               <span><Tick />Priority support</span>
               <span><Tick />Dedicated setup assistance</span>
@@ -489,11 +478,10 @@ export default function Billing({ onExit, email }) {
               {[
                 ['Staff members', '20', 'Unlimited', 'Unlimited', 'Unlimited', 'Unlimited'],
                 ['Departments', '1', '1', '6', '12', 'Unlimited'],
-                ['Admin users available now', '1', '1', '1', '1', 'Custom'],
-                ['Employee viewing access', 'Not included', 'In development', 'In development', 'In development', 'In development'],
+                ['Employee viewing access', 'Rolling out', 'Rolling out', 'Rolling out', 'Rolling out', 'Rolling out'],
                 ['Manual rota creation', 'Included', 'Included', 'Included', 'Included', 'Included'],
                 ['PDF and image export', 'Included', 'Included', 'Included', 'Included', 'Included'],
-                ['Smart Roster', 'Not included', 'Not included', 'In development', 'In development', 'In development'],
+                ['Smart Roster', 'Not included', 'Not included', 'Included', 'Included', 'Included'],
                 ['Custom company logo', 'Not included', 'Not included', 'Included', 'Included', 'Included'],
                 ['Support', 'Standard', 'Standard', 'Standard', 'Priority', 'Priority'],
                 ['Dedicated setup help', 'Not included', 'Not included', 'Not included', 'Not included', 'Included'],
@@ -503,7 +491,7 @@ export default function Billing({ onExit, email }) {
                   {cells.map((c, i) => (
                     <td key={i} style={{
                       padding: '9px 12px', borderBottom: `1px solid ${T.line}`, textAlign: 'center',
-                      color: c === 'Included' ? T.teal : c === 'In development' ? T.warn : c === 'Not included' ? T.faint : T.ink,
+                      color: c === 'Included' ? T.teal : (c === 'In development' || c === 'Rolling out') ? T.warn : c === 'Not included' ? T.faint : T.ink,
                       fontWeight: c === 'Included' ? 700 : 400, whiteSpace: 'nowrap',
                     }}>
                       {c === 'Included' ? '✓ Included' : c}
@@ -516,12 +504,12 @@ export default function Billing({ onExit, email }) {
         </div>
 
         {/* 9 — Smart Roster section */}
-        <div style={{ ...card, background: T.devBg, borderStyle: 'dashed' }}>
-          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>Smart Roster is in development</div>
+        <div style={{ ...card }}>
+          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>Smart Roster</div>
           <p style={{ fontSize: 13, color: T.soft, lineHeight: 1.7, margin: 0 }}>
-            We are building automation to handle repetitive parts of duty-rota creation while keeping
-            the admin user in control of the final schedule. Smart Roster is planned for Plus, Pro and
-            Custom plans. It is not currently available, and a release date has not been confirmed.
+            Smart Roster takes the repetitive work out of building a duty rota and leaves the final
+            schedule in your hands — nothing is published until you say so. It is included with
+            Plus, Pro and Custom plans.
           </p>
         </div>
 
@@ -562,9 +550,8 @@ export default function Billing({ onExit, email }) {
 
         {/* 12 — Final note */}
         <p style={{ fontSize: 11.5, color: T.soft, textAlign: 'center', lineHeight: 1.7 }}>
-          Features marked "In development" are not currently available, and their release dates have
-          not been confirmed. Your rota and all your data are preserved through any plan activation
-          or change.
+          Features marked "Coming soon" are not available yet. Your rota and all your data are
+          preserved through any plan activation or change.
         </p>
       </div>
     </div>
