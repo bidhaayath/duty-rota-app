@@ -935,11 +935,19 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       window.alert(`You already have a department called "${clean}".\n\nPlease choose a different name.`);
       return;
     }
-    const { error } = await supabase.from("departments").update({ name: clean }).eq("id", deptId);
+    // Row-level security refuses a non-owner's rename WITHOUT returning an
+    // error — the update simply changes nothing. Asking for the changed rows
+    // back is the only way to tell success from a silent refusal.
+    const { data: renamed, error } = await supabase
+      .from("departments").update({ name: clean }).eq("id", deptId).select("id");
     if (error) {
       window.alert(isDuplicateNameError(error)
         ? `You already have a department called "${clean}".\n\nPlease choose a different name.`
         : "Could not rename the department. Please try again.");
+      return;
+    }
+    if (!renamed || renamed.length === 0) {
+      window.alert("Only the owner of this department can rename it.");
       return;
     }
     setDepartments((prev) => prev.map((x) => (x.id === deptId ? { ...x, name: clean } : x)));
@@ -1348,7 +1356,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                         fontWeight: 600, color: T.lagoon, cursor: "pointer", textAlign: "left",
                       }}><Plus size={14} /> Add department</button>
                     )}
-                    {!viewOnlyRole && (
+                    {!viewOnlyRole && isOwnerLevel && (
                       <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
