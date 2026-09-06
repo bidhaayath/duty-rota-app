@@ -5,6 +5,7 @@ import DutyRota, { resetRotaVersionTracking } from './DutyRotaOriginal';
 import Admin from './Admin';
 import Billing from './Billing';
 import AcceptInvite from "./AcceptInvite";
+import LogoMark from "./LogoMark";
 
 // A password-reset link signs the user in automatically. Without this check,
 // App.js would see a valid session and jump straight to the rota, never giving
@@ -380,10 +381,24 @@ export default function App() {
     <div>
       {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} />}
       {showEndingNote && <EndingSoonNote daysLeft={sub.daysLeft} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} onSeePlans={() => setShowBilling(true)} />}
-      <div className="no-print" style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: '20px' }}>📋 DutyRota</h1>
+      <style>{`
+        /* On a phone there isn't room for the name, the address and the
+           buttons. The address is the least useful of the three — the person
+           knows who they are signed in as, and it is on their account screen. */
+        @media (max-width: 640px) {
+          .edr-topbar-email { display: none; }
+          .edr-topbar { padding: 12px 14px !important; gap: 10px; }
+          .edr-topbar h1 { font-size: 17px !important; }
+          .edr-topbar button { padding: 7px 12px !important; font-size: 13px; }
+        }
+      `}</style>
+      <div className="no-print edr-topbar" style={{ background: 'white', padding: '15px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ margin: 0, fontSize: '20px', display: 'flex', alignItems: 'center', gap: 9, whiteSpace: 'nowrap', flexShrink: 0 }}>
+          <LogoMark size={26} />
+          <span>Easy Duty Rota</span>
+        </h1>
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <span style={{ fontSize: '13px', color: '#666' }}>{session.user.email}</span>
+          <span className="edr-topbar-email" style={{ fontSize: '13px', color: '#666' }}>{session.user.email}</span>
           <button
             onClick={() => setShowBilling(true)}
             style={{ padding: '8px 16px', background: 'white', color: '#0F8B7E', border: '1px solid #0F8B7E', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
