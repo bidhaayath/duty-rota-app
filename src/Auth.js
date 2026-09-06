@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import supabase from './supabaseClient';
+import LogoMark from './LogoMark';
 
 // ── Liquid glass styling ─────────────────────────────────────────
 // Frosted panels over drifting colour. All CSS — no images — so it stays
@@ -91,26 +92,6 @@ const okBox = {
   padding: '12px 13px', borderRadius: '12px',
   marginBottom: '15px', fontSize: '12.5px', lineHeight: 1.6,
 };
-
-/* The logo mark, drawn rather than loaded: three stacked bars — a rota —
-   with the accent circles from the brand. Scales perfectly, no file. */
-function LogoMark({ size = 44 }) {
-  return (
-    <svg width={size} height={size} viewBox="24 13 52 50" aria-hidden="true">
-      <defs>
-        <linearGradient id="edrPurple" x1="1" y1="0" x2="0" y2="1">
-          <stop offset="50%" stopColor="#8E7CC3" />
-          <stop offset="50%" stopColor="#C9BEE6" />
-        </linearGradient>
-      </defs>
-      <circle cx="32.9" cy="22.5" r="5.9" fill={BRAND.orange} />
-      <rect x="43" y="16.7" width="30" height="11.7" rx="3.4" fill={BRAND.orange} />
-      <rect x="27" y="32.2" width="30.3" height="11.6" rx="3.4" fill={BRAND.blue} />
-      <rect x="27" y="47.5" width="30.3" height="11.9" rx="3.4" fill={BRAND.green} />
-      <circle cx="67.2" cy="53.4" r="5.9" fill="url(#edrPurple)" />
-    </svg>
-  );
-}
 
 /* Slow-drifting colour behind the glass. Nothing here is interactive, and
    it is switched off for anyone who prefers reduced motion. */
