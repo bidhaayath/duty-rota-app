@@ -1,62 +1,179 @@
 import React, { useState, useEffect } from 'react';
 import supabase from './supabaseClient';
 
-// ── shared styles ────────────────────────────────────────────────
+// ── Liquid glass styling ─────────────────────────────────────────
+// Frosted panels over drifting colour. All CSS — no images — so it stays
+// sharp on any screen and costs nothing to load.
+
+const BRAND = {
+  teal: '#0F8B7E', deepTeal: '#0B6A60', ink: '#123038',
+  orange: '#E89B4C', blue: '#4C9BDE', green: '#82C25E', purple: '#A99BD4',
+};
+
 const page = {
+  position: 'relative',
   minHeight: '100vh',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: '#0F8B7E',
-  fontFamily: 'Arial, sans-serif',
   padding: '20px',
+  overflow: 'hidden',
+  background: 'linear-gradient(145deg, #0C5F6B 0%, #12798A 34%, #2A6FA8 68%, #4A5FA8 100%)',
+  fontFamily: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
 };
+
 const card = {
-  background: 'white',
-  padding: '40px',
-  borderRadius: '8px',
+  position: 'relative',
+  zIndex: 2,
   width: '100%',
-  maxWidth: '400px',
-  boxShadow: '0 5px 20px rgba(0,0,0,0.2)',
+  maxWidth: '410px',
+  padding: '34px 32px 30px',
   boxSizing: 'border-box',
+  borderRadius: '22px',
+  background: 'rgba(255,255,255,0.13)',
+  border: '1px solid rgba(255,255,255,0.28)',
+  backdropFilter: 'blur(30px) saturate(165%)',
+  WebkitBackdropFilter: 'blur(30px) saturate(165%)',
+  boxShadow: '0 18px 50px rgba(6,48,44,0.30), inset 0 1px 0 rgba(255,255,255,0.40)',
+  color: '#fff',
 };
+
 const input = {
   width: '100%',
-  padding: '10px',
-  marginBottom: '10px',
-  border: '1px solid #ddd',
-  borderRadius: '4px',
+  padding: '13px 15px',
+  marginBottom: '11px',
+  borderRadius: '12px',
+  border: '1px solid rgba(255,255,255,0.30)',
+  background: 'rgba(255,255,255,0.16)',
+  color: '#fff',
   boxSizing: 'border-box',
-  fontSize: '14px',
+  fontSize: '14.5px',
+  fontFamily: 'inherit',
+  outline: 'none',
 };
+
 const primaryBtn = (loading) => ({
   width: '100%',
-  padding: '12px',
-  background: loading ? '#7FC0B8' : '#0F8B7E',
-  color: 'white',
+  padding: '13px',
+  background: loading ? 'rgba(255,255,255,0.45)' : '#fff',
+  color: loading ? 'rgba(18,48,56,0.55)' : BRAND.deepTeal,
   border: 'none',
-  borderRadius: '4px',
-  fontWeight: 'bold',
+  borderRadius: '12px',
+  fontWeight: 700,
   cursor: loading ? 'not-allowed' : 'pointer',
-  fontSize: '14px',
+  fontSize: '14.5px',
+  fontFamily: 'inherit',
+  boxShadow: loading ? 'none' : '0 6px 18px rgba(3,40,36,0.28)',
 });
+
 const linkBtn = {
   background: 'none',
   border: 'none',
-  color: '#0F8B7E',
+  color: '#fff',
   cursor: 'pointer',
-  fontWeight: 'bold',
+  fontWeight: 700,
   fontSize: '13px',
   padding: 0,
+  fontFamily: 'inherit',
+  textDecoration: 'underline',
+  textUnderlineOffset: '3px',
 };
+
 const errBox = {
-  background: '#fee', color: '#c33', padding: '10px', borderRadius: '4px',
-  marginBottom: '15px', fontSize: '12.5px', lineHeight: 1.5,
+  background: 'rgba(255,138,120,0.20)', color: '#FFE6E1',
+  border: '1px solid rgba(255,160,145,0.45)',
+  padding: '11px 13px', borderRadius: '12px',
+  marginBottom: '15px', fontSize: '12.5px', lineHeight: 1.6,
 };
 const okBox = {
-  background: '#E6F4F1', color: '#0B6A60', padding: '12px', borderRadius: '4px',
-  marginBottom: '15px', fontSize: '12.5px', lineHeight: 1.5,
+  background: 'rgba(150,235,205,0.18)', color: '#E4FFF6',
+  border: '1px solid rgba(160,240,215,0.45)',
+  padding: '12px 13px', borderRadius: '12px',
+  marginBottom: '15px', fontSize: '12.5px', lineHeight: 1.6,
 };
+
+/* The logo mark, drawn rather than loaded: three stacked bars — a rota —
+   with the accent circles from the brand. Scales perfectly, no file. */
+function LogoMark({ size = 44 }) {
+  return (
+    <svg width={size} height={size} viewBox="24 13 52 50" aria-hidden="true">
+      <defs>
+        <linearGradient id="edrPurple" x1="1" y1="0" x2="0" y2="1">
+          <stop offset="50%" stopColor="#8E7CC3" />
+          <stop offset="50%" stopColor="#C9BEE6" />
+        </linearGradient>
+      </defs>
+      <circle cx="32.9" cy="22.5" r="5.9" fill={BRAND.orange} />
+      <rect x="43" y="16.7" width="30" height="11.7" rx="3.4" fill={BRAND.orange} />
+      <rect x="27" y="32.2" width="30.3" height="11.6" rx="3.4" fill={BRAND.blue} />
+      <rect x="27" y="47.5" width="30.3" height="11.9" rx="3.4" fill={BRAND.green} />
+      <circle cx="67.2" cy="53.4" r="5.9" fill="url(#edrPurple)" />
+    </svg>
+  );
+}
+
+/* Slow-drifting colour behind the glass. Nothing here is interactive, and
+   it is switched off for anyone who prefers reduced motion. */
+function GlassBackdrop() {
+  /* Defined orbs, not a wash. Each has a soft highlight so it reads as a
+     sphere, and the blur is light enough that the glass has something real
+     to refract. Hues stay in the teal-blue-violet family — orange against
+     teal is near-complementary and turns muddy where they overlap. */
+  const orb = (c1, c2) =>
+    `radial-gradient(circle at 32% 28%, ${c1} 0%, ${c2} 58%, rgba(255,255,255,0) 72%)`;
+  return (
+    <>
+      <style>{`
+        @keyframes edrDriftA { 0%,100% { transform: translate(0,0) scale(1); }
+                               50%     { transform: translate(5vw,-4vh) scale(1.08); } }
+        @keyframes edrDriftB { 0%,100% { transform: translate(0,0) scale(1); }
+                               50%     { transform: translate(-5vw,5vh) scale(1.05); } }
+        @keyframes edrDriftC { 0%,100% { transform: translate(0,0) scale(1); }
+                               50%     { transform: translate(3vw,6vh) scale(0.94); } }
+        .edr-orb { position: absolute; border-radius: 50%; pointer-events: none; }
+        .edr-in::placeholder { color: rgba(255,255,255,0.66); }
+        .edr-in:focus { border-color: rgba(255,255,255,0.78);
+                        background: rgba(255,255,255,0.26);
+                        box-shadow: 0 0 0 4px rgba(255,255,255,0.15); }
+        .edr-in:-webkit-autofill { -webkit-text-fill-color: #fff;
+                        transition: background-color 9999s ease-in-out 0s; }
+        .edr-btn { transition: transform 140ms ease, box-shadow 140ms ease; }
+        .edr-btn:hover:not(:disabled) { transform: translateY(-1px); }
+        .edr-btn:active:not(:disabled) { transform: translateY(0) scale(0.995); }
+        .edr-link:hover { opacity: 0.82; }
+        @media (prefers-reduced-motion: reduce) {
+          .edr-orb { animation: none !important; }
+          .edr-btn { transition: none; }
+        }
+      `}</style>
+      <div className="edr-orb" style={{
+        width: 480, height: 480, top: '-9%', left: '4%', filter: 'blur(14px)',
+        background: orb('rgba(150,220,255,0.95)', 'rgba(64,142,214,0.72)'),
+        animation: 'edrDriftA 24s ease-in-out infinite',
+      }} />
+      <div className="edr-orb" style={{
+        width: 300, height: 300, top: '38%', left: '-6%', filter: 'blur(10px)',
+        background: orb('rgba(190,235,225,0.92)', 'rgba(46,154,150,0.70)'),
+        animation: 'edrDriftC 30s ease-in-out infinite',
+      }} />
+      <div className="edr-orb" style={{
+        width: 400, height: 400, bottom: '-12%', right: '6%', filter: 'blur(14px)',
+        background: orb('rgba(198,186,240,0.92)', 'rgba(122,104,200,0.70)'),
+        animation: 'edrDriftB 28s ease-in-out infinite',
+      }} />
+      <div className="edr-orb" style={{
+        width: 180, height: 180, top: '14%', right: '16%', filter: 'blur(8px)',
+        background: orb('rgba(170,230,205,0.95)', 'rgba(96,190,150,0.68)'),
+        animation: 'edrDriftA 33s ease-in-out infinite',
+      }} />
+      <div className="edr-orb" style={{
+        width: 130, height: 130, bottom: '18%', left: '22%', filter: 'blur(7px)',
+        background: orb('rgba(255,214,160,0.85)', 'rgba(232,155,76,0.55)'),
+        animation: 'edrDriftB 26s ease-in-out infinite',
+      }} />
+    </>
+  );
+}
 
 // A password-reset link comes back with type=recovery in the URL hash,
 // e.g.  https://yoursite.app/#access_token=...&type=recovery
@@ -228,13 +345,23 @@ export default function Auth() {
 
   return (
     <div style={page}>
+      <GlassBackdrop />
       <div style={card}>
-        <h1 style={{ textAlign: 'center', color: '#333', margin: '0 0 6px', fontSize: '26px' }}>
-          📋 DutyRota
-        </h1>
-        <p style={{ textAlign: 'center', color: '#777', fontSize: '13px', margin: '0 0 26px' }}>
-          {titles[mode]}
-        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '22px' }}>
+          <LogoMark size={62} />
+          <h1 style={{
+            margin: '12px 0 2px', fontSize: '23px', fontWeight: 700,
+            letterSpacing: '-0.3px', color: '#fff', textAlign: 'center',
+          }}>Easy Duty Rota</h1>
+          <p style={{
+            margin: 0, fontSize: '11.5px', letterSpacing: '1.4px',
+            textTransform: 'uppercase', color: 'rgba(255,255,255,0.62)', textAlign: 'center',
+          }}>The Smarter Way to Roster</p>
+          <p style={{
+            margin: '16px 0 0', fontSize: '14px',
+            color: 'rgba(255,255,255,0.90)', textAlign: 'center', fontWeight: 600,
+          }}>{titles[mode]}</p>
+        </div>
 
         {error && <div style={errBox}>⚠ {error}</div>}
         {notice && <div style={okBox}>✓ {notice}</div>}
@@ -248,7 +375,7 @@ export default function Auth() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              style={input}
+              className="edr-in" style={input}
             />
           )}
 
@@ -260,7 +387,7 @@ export default function Auth() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              style={{ ...input, marginBottom: mode === 'login' ? '8px' : '20px' }}
+              className="edr-in" style={{ ...input, marginBottom: mode === 'login' ? '8px' : '20px' }}
             />
           )}
 
@@ -282,63 +409,63 @@ export default function Auth() {
                 onChange={(e) => setPassword2(e.target.value)}
                 required
                 autoComplete="new-password"
-                style={{ ...input, marginBottom: '20px' }}
+                className="edr-in" style={{ ...input, marginBottom: '20px' }}
               />
             </>
           )}
 
           {mode === 'login' && (
             <div style={{ textAlign: 'right', marginBottom: '18px' }}>
-              <button type="button" onClick={() => switchMode('forgot')} style={{ ...linkBtn, fontWeight: 'normal', color: '#777' }}>
+              <button type="button" onClick={() => switchMode('forgot')} className="edr-link" style={{ ...linkBtn, fontWeight: 500, color: 'rgba(255,255,255,0.72)' }}>
                 Forgot password?
               </button>
             </div>
           )}
 
           {mode === 'forgot' && (
-            <p style={{ fontSize: '12.5px', color: '#777', margin: '0 0 18px', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.78)', margin: '0 0 18px', lineHeight: 1.6 }}>
               Enter your email and we will send you a link to choose a new password.
             </p>
           )}
 
-          <button type="submit" disabled={loading} style={primaryBtn(loading)}>
+          <button type="submit" className="edr-btn" disabled={loading} style={primaryBtn(loading)}>
             {loading ? 'Please wait…' : buttonText[mode]}
           </button>
           {mode === 'signup' && (
-            <p style={{ fontSize: '12px', color: '#888', margin: '14px 0 0', lineHeight: 1.55, textAlign: 'center' }}>
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.72)', margin: '14px 0 0', lineHeight: 1.6, textAlign: 'center' }}>
               By creating an account you agree to our{' '}
-              <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: '#0F8B7E' }}>Terms of Service</a>
+              <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: '#fff', fontWeight: 600 }}>Terms of Service</a>
               {' '}and{' '}
-              <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#0F8B7E' }}>Privacy Policy</a>.
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#fff', fontWeight: 600 }}>Privacy Policy</a>.
             </p>
           )}
         </form>
 
         {mode === 'login' && (
-          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#555' }}>
+          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: 'rgba(255,255,255,0.80)' }}>
             Don't have an account?{' '}
-            <button onClick={() => switchMode('signup')} style={linkBtn}>Sign up</button>
+            <button onClick={() => switchMode('signup')} className="edr-link" style={linkBtn}>Sign up</button>
           </p>
         )}
 
         {mode === 'signup' && (
-          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#555' }}>
+          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: 'rgba(255,255,255,0.80)' }}>
             Already have an account?{' '}
-            <button onClick={() => switchMode('login')} style={linkBtn}>Log in</button>
+            <button onClick={() => switchMode('login')} className="edr-link" style={linkBtn}>Log in</button>
           </p>
         )}
 
         {mode === 'forgot' && (
-          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#555' }}>
+          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: 'rgba(255,255,255,0.80)' }}>
             Remembered it?{' '}
-            <button onClick={() => switchMode('login')} style={linkBtn}>Back to log in</button>
+            <button onClick={() => switchMode('login')} className="edr-link" style={linkBtn}>Back to log in</button>
           </p>
         )}
 
         {mode === 'reset' && (
-          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: '#555' }}>
+          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: 'rgba(255,255,255,0.80)' }}>
             Link not working?{' '}
-            <button onClick={() => switchMode('forgot')} style={linkBtn}>Send a new one</button>
+            <button onClick={() => switchMode('forgot')} className="edr-link" style={linkBtn}>Send a new one</button>
           </p>
         )}
       </div>
