@@ -15,6 +15,8 @@ import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 import Dashboard from "./Dashboard";
+import InviteDialog from "./InviteDialog";
+import StaffAccessCell, { useOrgAccess } from "./StaffAccessCell";
 
 // Load this user's saved rota. Tries Supabase first, then a local backup,
 // and finally falls back to a fresh empty rota so the app ALWAYS loads.
@@ -751,6 +753,22 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const [deptPerms, setDeptPerms] = useState(null); // null = not loaded yet
   const [departments, setDepartments] = useState([]);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
+  // The organisation name belongs to the DEPARTMENT, not to the viewer. A
+  // manager looking at someone else's department must see — and export —
+  // that organisation's name, never their own.
+  const [deptOrg, setDeptOrg] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!deptId) { setDeptOrg(null); return; }
+    (async () => {
+      const { data, error } = await supabase.rpc("department_org", { p_dept_id: deptId });
+      if (cancelled) return;
+      setDeptOrg(error || !data || !data.ok ? null : data);
+    })();
+    return () => { cancelled = true; };
+  }, [deptId]);
+  const effectiveOrgName = deptOrg ? deptOrg.name : orgName;
+  const ownsThisOrg = deptOrg ? !!deptOrg.is_owner : true;
   const [deptMenuOpen, setDeptMenuOpen] = useState(false);
   const switchingDept = useRef(false); // guards the autosave while a switch loads
   const [tab, setTab] = useState("rota");
@@ -917,11 +935,19 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       window.alert(`You already have a department called "${clean}".\n\nPlease choose a different name.`);
       return;
     }
-    const { error } = await supabase.from("departments").update({ name: clean }).eq("id", deptId);
+    // Row-level security refuses a non-owner's rename WITHOUT returning an
+    // error — the update simply changes nothing. Asking for the changed rows
+    // back is the only way to tell success from a silent refusal.
+    const { data: renamed, error } = await supabase
+      .from("departments").update({ name: clean }).eq("id", deptId).select("id");
     if (error) {
       window.alert(isDuplicateNameError(error)
         ? `You already have a department called "${clean}".\n\nPlease choose a different name.`
         : "Could not rename the department. Please try again.");
+      return;
+    }
+    if (!renamed || renamed.length === 0) {
+      window.alert("Only the owner of this department can rename it.");
       return;
     }
     setDepartments((prev) => prev.map((x) => (x.id === deptId ? { ...x, name: clean } : x)));
@@ -1027,7 +1053,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       <Dashboard
         departments={departments}
         deptPerms={deptPerms}
-        orgName={orgName}
+        orgName={effectiveOrgName}
         loadRota={loadRotaFor}
         canAddDepartment={isOwnerLevel && !editBlocked && !viewOnlyRole}
         onAddDepartment={addDepartment}
@@ -1063,18 +1089,30 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const canUseLogo = features ? features.company_logo : true;
   // All four print views read from viewData, so adding the organisation name
   // here puts it on every export without touching each one.
-  const viewData = { ...(canUseLogo ? data : { ...data, logo: "" }), orgName };
+  const viewData = { ...(canUseLogo ? data : { ...data, logo: "" }), orgName: effectiveOrgName };
 
-  // Department allowance. Departments are held oldest-first, so the first
-  // `departmentLimit` of them stay editable and anything beyond that is
-  // read-only until the user upgrades. null = unlimited. Deleting an editable
-  // one promotes the next in line automatically, since this is purely
-  // positional. The saved data is never touched.
+  // Department allowance. A person's plan limits the departments THEY OWN.
+  // Departments shared with them belong to someone else's organisation and
+  // are already covered by that owner's plan, so they never consume this
+  // allowance and are never locked by it. Owned departments are held
+  // oldest-first, so the first `departmentLimit` stay editable and anything
+  // beyond that is read-only until they upgrade. null = unlimited. Deleting
+  // an editable one promotes the next in line automatically, since this is
+  // purely positional. The saved data is never touched.
   const editableDeptIds = (departmentLimit == null)
     ? null // unlimited — every department editable
-    : new Set(departments.slice(0, departmentLimit).map((d) => d.id));
-  const deptEditable = (id) =>
-    editableDeptIds == null || id == null || editableDeptIds.has(id);
+    : new Set(
+        departments
+          .filter((d) => (deptPerms ? deptPerms.get(d.id)?.isOwner !== false : true))
+          .slice(0, departmentLimit)
+          .map((d) => d.id)
+      );
+  const deptEditable = (id) => {
+    if (editableDeptIds == null || id == null) return true;
+    // Shared departments are the other organisation's to pay for.
+    if (deptPerms && deptPerms.get(id)?.isOwner === false) return true;
+    return editableDeptIds.has(id);
+  };
   const currentDeptLocked = !deptEditable(deptId);
 
   // Staff allowance. On a tier with a staff limit, the first N ACTIVE staff
@@ -1318,7 +1356,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                         fontWeight: 600, color: T.lagoon, cursor: "pointer", textAlign: "left",
                       }}><Plus size={14} /> Add department</button>
                     )}
-                    {!viewOnlyRole && (
+                    {!viewOnlyRole && isOwnerLevel && (
                       <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -1424,7 +1462,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
-        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={isOwnerLevel} />}
+        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={isOwnerLevel} deptId={deptId} deptName={(departments.find((d) => d.id === deptId) || {}).name} />}
         {tab === "requests" && (
           <RequestsTab
             data={data} update={update} staffEditable={staffEditable}
@@ -1475,7 +1513,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           )
         )}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true}
-          orgName={orgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked} />}
+          orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
     </div>
@@ -2815,7 +2853,7 @@ function StatsPrint({ data, from, to }) {
 // rather than how the department runs — that stays with the owner. A null
 // role means an account with no membership row, i.e. every existing customer,
 // who is effectively the owner of their own organisation.
-function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true, canGrantManager = true }) {
+function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true, canGrantManager = true, deptId, deptName }) {
   // email and employmentRole are what turn a staff row into an invitation:
   // the email says who to invite, the role says what they get. Both are
   // optional, so every staff member entered before this simply has them
@@ -2823,6 +2861,8 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
   const empty = { name: "", designation: "", contact: "", recc: "", licence: "", email: "", employmentRole: "employee", startDate: "", endDate: "", leavePeriods: [] };
   const [form, setForm] = useState(null);
   const [showFormer, setShowFormer] = useState(false);
+  const [inviteFor, setInviteFor] = useState(null);
+  const { access, isOwner: isOrgOwner, refresh: refreshAccess } = useOrgAccess(deptId);
   const npEmpty = { type: "annual", label: "", start: "", end: "" };
   const [np, setNp] = useState(npEmpty);
 
@@ -3146,11 +3186,15 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                   <td style={{ ...td, fontWeight: 600 }}>{s.name}</td>
                   <td style={{ ...td, color: s.designation ? T.ink : T.inkSoft }}>{s.designation || "—"}</td>
                   <td style={{ ...td, color: s.email ? T.ink : T.inkSoft, fontSize: 12.5 }}>{s.email || "—"}</td>
-                  <td style={{ ...td, fontSize: 12.5 }}>
-                    {!s.email ? <span style={{ color: T.inkSoft }}>—</span>
-                      : s.employmentRole === "manager"
-                        ? <span style={{ background: "#E7F1EF", color: "#0B6A60", fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>Manager</span>
-                        : <span style={{ background: "#EEF4F3", color: T.inkSoft, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>Employee</span>}
+                  <td style={td}>
+                    <StaffAccessCell
+                      email={s.email}
+                      deptId={deptId}
+                      access={access}
+                      isOwner={isOrgOwner}
+                      onInvite={() => setInviteFor(s)}
+                      onChanged={refreshAccess}
+                    />
                   </td>
                   <td style={td}>{s.contact}</td>
                   <td style={td}>{s.recc}</td>
@@ -3203,6 +3247,15 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
         When someone resigns or transfers, use <strong>Mark left</strong> (or set a last working day) instead of deleting them.
         They disappear from future rotas, but past rotas, coverage counts, and statistics stay correct. <strong>Delete</strong> erases their history permanently.
       </div>
+      {inviteFor && (
+        <InviteDialog
+          staff={inviteFor}
+          deptId={deptId}
+          deptName={deptName}
+          canGrantManager={canGrantManager}
+          onClose={() => { setInviteFor(null); refreshAccess(); }}
+        />
+      )}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
 import supabase from "./supabaseClient";
 import Account from "./Account";
 import SubscriptionHistory from "./SubscriptionHistory";
+import Members from "./Members";
 
 /* ────────────────────────────────────────────────────────────────────────
    My Dashboard — full-screen personal home.
@@ -273,6 +274,10 @@ export default function Dashboard({
     return <SubscriptionHistory onBack={() => setScreen("home")} />;
   }
 
+  if (screen === "members") {
+    return <Members onBack={() => setScreen("home")} />;
+  }
+
   if (loading) {
     return (
       <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft }}>
@@ -324,6 +329,12 @@ export default function Dashboard({
                 fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: T.lagoon,
               }}
             ><Plus size={15} /> Add a department</button>
+          )}
+
+          {/* Who can get into this organisation. Owners only — a member has
+              no business seeing, or removing, anyone else's access. */}
+          {owned.length > 0 && (
+            <MenuRow icon={Users} label="Members" onClick={() => setScreen("members")} />
           )}
 
           <div style={{ height: 14 }} />
