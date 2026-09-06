@@ -4,6 +4,7 @@ import Auth from './Auth';
 import DutyRota, { resetRotaVersionTracking } from './DutyRotaOriginal';
 import Admin from './Admin';
 import Billing from './Billing';
+import AcceptInvite from "./AcceptInvite";
 
 // A password-reset link signs the user in automatically. Without this check,
 // App.js would see a valid session and jump straight to the rota, never giving
@@ -165,6 +166,13 @@ function LegalFooter() {
 }
 
 export default function App() {
+  const [inviteToken, setInviteToken] = useState(
+    () => new URLSearchParams(window.location.search).get("invite")
+  );
+  const clearInvite = () => {
+    window.history.replaceState({}, "", window.location.pathname);
+    setInviteToken(null);
+  };
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [recovering, setRecovering] = useState(recoveryPending());
@@ -333,6 +341,10 @@ export default function App() {
     });
     return () => { cancelled = true; };
   }, [session?.user?.id]);
+
+  if (inviteToken) {
+    return <AcceptInvite token={inviteToken} onDone={clearInvite} />;
+  }
 
   if (loading) {
     return (
