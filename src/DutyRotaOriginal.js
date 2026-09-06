@@ -753,6 +753,22 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const [deptPerms, setDeptPerms] = useState(null); // null = not loaded yet
   const [departments, setDepartments] = useState([]);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
+  // The organisation name belongs to the DEPARTMENT, not to the viewer. A
+  // manager looking at someone else's department must see — and export —
+  // that organisation's name, never their own.
+  const [deptOrg, setDeptOrg] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!deptId) { setDeptOrg(null); return; }
+    (async () => {
+      const { data, error } = await supabase.rpc("department_org", { p_dept_id: deptId });
+      if (cancelled) return;
+      setDeptOrg(error || !data || !data.ok ? null : data);
+    })();
+    return () => { cancelled = true; };
+  }, [deptId]);
+  const effectiveOrgName = deptOrg ? deptOrg.name : orgName;
+  const ownsThisOrg = deptOrg ? !!deptOrg.is_owner : true;
   const [deptMenuOpen, setDeptMenuOpen] = useState(false);
   const switchingDept = useRef(false); // guards the autosave while a switch loads
   const [tab, setTab] = useState("rota");
@@ -1029,7 +1045,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       <Dashboard
         departments={departments}
         deptPerms={deptPerms}
-        orgName={orgName}
+        orgName={effectiveOrgName}
         loadRota={loadRotaFor}
         canAddDepartment={isOwnerLevel && !editBlocked && !viewOnlyRole}
         onAddDepartment={addDepartment}
@@ -1065,7 +1081,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   const canUseLogo = features ? features.company_logo : true;
   // All four print views read from viewData, so adding the organisation name
   // here puts it on every export without touching each one.
-  const viewData = { ...(canUseLogo ? data : { ...data, logo: "" }), orgName };
+  const viewData = { ...(canUseLogo ? data : { ...data, logo: "" }), orgName: effectiveOrgName };
 
   // Department allowance. A person's plan limits the departments THEY OWN.
   // Departments shared with them belong to someone else's organisation and
@@ -1489,7 +1505,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           )
         )}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true}
-          orgName={orgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked} />}
+          orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
     </div>
