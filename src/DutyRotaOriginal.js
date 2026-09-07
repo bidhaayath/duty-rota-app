@@ -1395,7 +1395,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
             display: "flex", alignItems: "center", gap: 6, padding: "10px 14px",
             border: "none", borderRadius: "10px 10px 0 0", whiteSpace: "nowrap",
             background: "transparent", color: "#B8D2CD",
-          }}><User size={15} /> Back to my dashboard</button>
+          }}><User size={15} /> My Dashboard</button>
           {tabs.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)} style={{
               fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, cursor: "pointer",
