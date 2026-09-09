@@ -801,6 +801,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   // Off by default, so an export looks exactly as it always has unless the
   // person asks for the plain version.
   const [rotaOnly, setRotaOnly] = useState(false);
+  // Print orientation. null = automatic (weekly portrait, monthly landscape),
+  // which is what every export did before this control existed. Setting it
+  // to "portrait"/"landscape" is the customer overriding that choice. It is
+  // deliberately NOT persisted to the database — it is a print preference,
+  // and it lasts as long as the app is open.
+  const [orientOverride, setOrientOverride] = useState(null);
   const printBodyRef = useRef(null);
   // Tracks whether the last save to the server succeeded, so a failure is
   // shown on screen instead of only appearing in the browser console where
@@ -1224,6 +1230,9 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     // is not capped — its page break is real, not a screenshot cut.
     const IMG_MAX_DAYS = 30;
     const canSaveImage = !(printView.kind === "rota" && rotaDays.length > IMG_MAX_DAYS);
+    // Same >10-day rule as before, so the automatic default is unchanged.
+    const autoOrient = rotaDays.length > 10 ? "landscape" : "portrait";
+    const orientation = orientOverride || autoOrient;
     const saveAsImage = async () => {
       if (!canSaveImage) return;
       const node = printBodyRef.current;
@@ -1257,6 +1266,17 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           <Btn small onClick={saveAsImage} disabled={!canSaveImage} title={canSaveImage ? "" : `Available for ranges up to ${IMG_MAX_DAYS} days — use Print / Save as PDF for wider ranges.`}><Image size={14} /> Save as image</Btn>
           {!canSaveImage && <span style={{ alignSelf: "center", fontSize: 12, color: T.inkSoft }}>Image export supports up to {IMG_MAX_DAYS} days — use PDF for wider ranges.</span>}
           {printView.kind === "rota" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: T.ink }}>
+              Page:
+              <select value={orientation} onChange={(e) => setOrientOverride(e.target.value)}
+                style={{ fontFamily: "inherit", fontSize: 13, padding: "5px 8px", borderRadius: 7,
+                  border: `1px solid ${T.line}`, background: "#fff", color: T.ink, cursor: "pointer" }}>
+                <option value="portrait">Portrait</option>
+                <option value="landscape">Landscape</option>
+              </select>
+            </label>
+          )}
+          {printView.kind === "rota" && (
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: T.ink, cursor: "pointer" }}>
               <input type="checkbox" checked={rotaOnly} onChange={(e) => setRotaOnly(e.target.checked)} style={{ cursor: "pointer" }} />
               Rota only (hide totals)
@@ -1265,7 +1285,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
         <div ref={printBodyRef} className={rotaOnly && printView.kind === "rota" ? "rota-only" : undefined}>
-        {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} rotaOnly={rotaOnly} />}
+        {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} rotaOnly={rotaOnly} orientation={orientation} />}
         {printView.kind === "records" && <RecordsPrint data={viewData} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={viewData} from={statRange.from} to={statRange.to} />}
         {printView.kind === "insights" && <InsightsPrint data={viewData} cfg={printView.cfg} />}
@@ -2454,7 +2474,7 @@ function Stats({ data, range, setRange, onExport }) {
 const pth = { border: "1px solid #999", padding: "5px 7px", fontSize: 10.5, fontWeight: 700, textAlign: "center", background: "#E8E8E8" };
 const ptd = { border: "1px solid #999", padding: "5px 7px", fontSize: 11, textAlign: "center" };
 
-function RotaPrint({ data, days, rotaOnly = false }) {
+function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
   const codeById = codeByIdOf(data);
   const shownStaff = staffForDays(data, days);
   // Collect notes shown this week, numbered, to list under the rota
@@ -2468,9 +2488,9 @@ function RotaPrint({ data, days, rotaOnly = false }) {
   };
   return (
     <div>
-      <style>{days.length > 10
-        ? "@page { size: A4 landscape; margin: 10mm; }"
-        : "@page { size: A4 portrait; margin: 10mm; }"}</style>
+      {/* The customer's choice wins; with none set this falls back to the
+          original >10-day rule, so untouched exports look exactly as before. */}
+      <style>{`@page { size: A4 ${orientation || (days.length > 10 ? "landscape" : "portrait")}; margin: 10mm; }`}</style>
       <div className="rp-head">
         <div style={{ textAlign: "center" }}>
           {data.orgName && <div style={{ fontSize: 11, letterSpacing: 0.6, textTransform: "uppercase", color: "#666", marginBottom: 2 }}>{data.orgName}</div>}
