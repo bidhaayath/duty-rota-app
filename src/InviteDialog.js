@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, Copy, Check, Link2, AlertCircle } from "lucide-react";
 import supabase from "./supabaseClient";
 
@@ -52,12 +52,39 @@ export default function InviteDialog({
   const [error, setError] = useState(null);
   const [link, setLink] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [myEmail, setMyEmail] = useState(null);
+
+  /* Who is signed in. Needed on open so inviting yourself is refused
+     before the form is filled in, rather than at the final click. */
+  useEffect(() => {
+    let alive = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (alive) setMyEmail((data?.user?.email || "").toLowerCase());
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const isSelf = !!email && myEmail !== null && email.toLowerCase() === myEmail;
 
   const createInvite = async () => {
     setBusy(true); setError(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setError("You appear to be signed out. Please sign in again."); setBusy(false); return; }
+
+      /* Never invite yourself. Accepting it would create a membership row
+         in your own organisation with a role below owner, and the app reads
+         that row ahead of ownership — which quietly demotes you in your own
+         organisation. It also gains nothing: your duties already show on
+         your calendar once your email is on your staff record. */
+      if (email.toLowerCase() === (user.email || "").toLowerCase()) {
+        setError(
+          "This is your own account, so an invitation isn't needed — you already " +
+          "have full access. Your duties appear on your calendar automatically " +
+          "once your email is on your staff record."
+        );
+        setBusy(false); return;
+      }
 
       /* The organisation this department belongs to. Read from the database
          rather than trusted from the page, so the invite can only ever point
@@ -156,6 +183,20 @@ export default function InviteDialog({
                 They must sign in with this exact address. Change it on their
                 staff record first if it's wrong.
               </p>
+              {isSelf && (
+                <div style={{
+                  display: "flex", gap: 9, alignItems: "flex-start", marginTop: 10,
+                  background: T.warnBg, border: `1px solid ${T.warnLine}`, color: T.warn,
+                  borderRadius: 10, padding: "11px 13px", fontSize: 12.5, lineHeight: 1.6,
+                }}>
+                  <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>
+                    This is your own account, so no invitation is needed — you
+                    already have full access. Your duties show on your calendar
+                    automatically because your email is on this staff record.
+                  </span>
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: 14 }}>
@@ -214,13 +255,13 @@ export default function InviteDialog({
               }}>Cancel</button>
               <button
                 onClick={createInvite}
-                disabled={busy || !email}
+                disabled={busy || !email || isSelf}
                 style={{
-                  background: busy || !email ? "#E7EFED" : T.lagoon,
-                  color: busy || !email ? T.inkSoft : "#fff",
+                  background: busy || !email || isSelf ? "#E7EFED" : T.lagoon,
+                  color: busy || !email || isSelf ? T.inkSoft : "#fff",
                   border: "none", borderRadius: 9, padding: "10px 18px",
                   fontFamily: "inherit", fontSize: 13.5, fontWeight: 700,
-                  cursor: busy || !email ? "default" : "pointer",
+                  cursor: busy || !email || isSelf ? "default" : "pointer",
                   display: "inline-flex", alignItems: "center", gap: 7,
                 }}
               ><Link2 size={15} /> {busy ? "Creating…" : "Create invite link"}</button>

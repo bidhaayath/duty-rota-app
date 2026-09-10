@@ -341,7 +341,6 @@ export default function Dashboard({
 
           <SectionHead
             icon={Users}
-            soon={memberships.length === 0}
             note={memberships.length === 0 ? null : "Departments shared with you."}
           >My Membership</SectionHead>
           {memberships.length === 0
@@ -349,8 +348,9 @@ export default function Dashboard({
                 fontSize: 12.5, color: T.inkSoft, border: `1px dashed ${T.line}`,
                 borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
               }}>
-                Sharing a department with your team is coming soon. When it
-                arrives, departments shared with you will appear here.
+                Departments that someone else shares with you will appear here.
+                To give your own staff a login, open a department, go to the
+                Staff tab, add their email and tap Invite.
               </div>
             : memberships.map((d) => (
                 <DeptRow key={d.id} id={d.id} name={d.name} tag={roleLabel(d.role)} />
