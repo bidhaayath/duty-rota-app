@@ -383,6 +383,46 @@ const isNonOff = (data, date) =>
 const leaveOn = (staff, date) => (staff.leavePeriods || []).find((p) => date >= p.start && date <= p.end) || null;
 const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
 
+/* ── What a cell can hold ────────────────────────────────────────────
+   Historically a cell was one duty code id:
+       cells[date][staffId] = "abc123"
+   To support a task alongside a duty, and two duties on one day (resort
+   and guesthouse rotas), it may also be a list:
+       cells[date][staffId] = [{ code: "abc", task: "Waiter" },
+                                { code: "xyz", task: "Cashier" }]
+
+   BOTH SHAPES STAY VALID FOREVER. Existing rotas are never migrated —
+   rewriting 800 accounts' saved data is exactly the kind of operation
+   that loses someone's roster. Instead every reader goes through
+   entriesOf() below, so a plain string and a list behave identically.
+
+   COUNTING RULES, decided with the shift rules in mind:
+     - Anything measuring COVERAGE counts duties. Two duties in a day
+       means the unit was covered twice, so both count.
+     - Anything measuring a PERSON counts days. Working a split duty is
+       still one day worked, so "days on duty" and non-official day
+       payment count the date once, however many duties are in it.        */
+const entriesOf = (raw) => {
+  if (!raw) return [];
+  if (typeof raw === "string") return [{ code: raw, task: "" }];
+  if (Array.isArray(raw)) {
+    return raw.filter((e) => e && e.code)
+              .map((e) => ({ code: e.code, task: e.task || "" }));
+  }
+  return [];
+};
+const cellEntries = (data, date, staffId) => entriesOf((data.cells?.[date] || {})[staffId]);
+/* The first duty in a cell. For anything that still shows or compares a
+   single code, this is the one it means. */
+const firstCodeId = (data, date, staffId) => {
+  const e = cellEntries(data, date, staffId);
+  return e.length ? e[0].code : "";
+};
+/* "Does this cell include this duty" — replaces === comparisons, which
+   would silently miss a code sitting second in a split duty. */
+const cellHasCode = (data, date, staffId, codeId) =>
+  cellEntries(data, date, staffId).some((e) => e.code === codeId);
+
 /* Cell notes live in a separate map so all the duty-counting code, which
    reads cells[date][staffId] as a plain code id, keeps working unchanged.
    data.cellMeta[date][staffId] = { note?: string }                        */
@@ -426,10 +466,12 @@ const weekTotalsFor = (data, staff, days) => {
   days.forEach((date) => {
     if (!isEmployedOn(staff, date)) return;
     if (leaveOn(staff, date)) return;
-    const code = codeById((data.cells[date] || {})[staff.id]);
-    if (!code) return;
-    if (code.counts in t) t[code.counts]++;
-    if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) t.nonOfficialDuty++;
+    const codes = cellEntries(data, date, staff.id).map((e) => codeById(e.code)).filter(Boolean);
+    if (!codes.length) return;
+    // Shift columns count each duty: a split day adds to M and to E.
+    codes.forEach((code) => { if (code.counts in t) t[code.counts]++; });
+    // Non-official day payment counts the DAY, once, however many duties.
+    if (isNonOff(data, date) && codes.some((c) => DUTY_CATS.includes(c.counts))) t.nonOfficialDuty++;
   });
   return t;
 };
@@ -441,8 +483,11 @@ const dayCountFor = (data, date, cat) => {
   return data.staff.reduce((a, s) => {
     if (!isEmployedOn(s, date)) return a;
     if (leaveOn(s, date)) return a;
-    const code = codeById((data.cells[date] || {})[s.id]);
-    return a + (code?.counts === cat ? 1 : 0);
+    // Coverage counts duties, so someone doing M and E appears in both.
+    const n = cellEntries(data, date, s.id)
+      .map((e) => codeById(e.code))
+      .filter((code) => code?.counts === cat).length;
+    return a + n;
   }, 0);
 };
 // Only staff employed at some point in [from, to] appear in records/stats
@@ -450,21 +495,37 @@ const recordsFor = (data, from, to) => {
   const codeById = codeByIdOf(data);
   const dates = datesBetween(from, to);
   return data.staff.filter((s) => employedInRange(s, from, to)).map((s) => {
-    const t = { morning: 0, afternoon: 0, evening: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {}, leaveByBucket: { sl: 0, frl: 0, ml: 0, other: 0 } };
+    const t = { morning: 0, afternoon: 0, evening: 0, night: 0, other: 0, release: 0, off: 0, fridayOff: 0, nonOfficialDuty: 0, nonOfficialDates: [], leaveByCode: {}, leaveByBucket: { sl: 0, frl: 0, ml: 0, other: 0 }, daysOnDuty: 0, splitDays: 0 };
     dates.forEach((date) => {
       if (!isEmployedOn(s, date)) return;
       if (leaveOn(s, date)) return;
-      const code = codeById((data.cells[date] || {})[s.id]);
-      if (!code) return;
-      if (DUTY_CATS.includes(code.counts) || code.counts === "off") t[code.counts]++;
-      const bucket = leaveBucket(code);
-      if (bucket) {
-        t.leaveByCode[code.code.toUpperCase()] = (t.leaveByCode[code.code.toUpperCase()] || 0) + 1;
-        t.leaveByBucket[bucket]++;
+      const codes = cellEntries(data, date, s.id).map((e) => codeById(e.code)).filter(Boolean);
+      if (!codes.length) return;
+
+      // Shift columns count each duty worked.
+      codes.forEach((code) => {
+        if (DUTY_CATS.includes(code.counts)) t[code.counts]++;
+        const bucket = leaveBucket(code);
+        if (bucket) {
+          t.leaveByCode[code.code.toUpperCase()] = (t.leaveByCode[code.code.toUpperCase()] || 0) + 1;
+          t.leaveByBucket[bucket]++;
+        }
+      });
+
+      // Everything below describes the DAY, so it counts once.
+      const duties = codes.filter((c) => DUTY_CATS.includes(c.counts));
+      if (duties.length) {
+        t.daysOnDuty++;
+        if (duties.length > 1) t.splitDays++;
+        if (isNonOff(data, date)) {
+          t.nonOfficialDuty++;
+          t.nonOfficialDates.push({ date, code: duties.map((c) => c.code).join(" + ") });
+        }
       }
-      if (code.counts === "off" && parseD(date).getDay() === FRIDAY) t.fridayOff++;
-      if (DUTY_CATS.includes(code.counts) && isNonOff(data, date)) {
-        t.nonOfficialDuty++; t.nonOfficialDates.push({ date, code: code.code });
+      // A day off is a day, not a duty: an "off" cell is counted once.
+      if (codes.some((c) => c.counts === "off")) {
+        t.off++;
+        if (parseD(date).getDay() === FRIDAY) t.fridayOff++;
       }
     });
     // All leave periods count calendar days inside the selected range
@@ -484,7 +545,15 @@ const recordsFor = (data, from, to) => {
     const otherLeave = t.leaveByBucket.other + otherPeriodDays;
     return {
       staff: s, ...t, annualDays, maternityDays, otherPeriodDays, sl, frl, ml, otherLeave,
-      totalDuty: t.morning + t.afternoon + t.evening + t.night + t.other + t.release,
+      // Days the person was on duty. Previously this summed the shift
+      // columns, which is the same number until a cell can hold two
+      // duties -- then a split day would wrongly count twice. Counting
+      // days keeps it the figure people check against payment.
+      totalDuty: t.daysOnDuty,
+      splitDays: t.splitDays,
+      // Kept separately because the organisation-level statistic
+      // legitimately measures shifts worked, not days.
+      dutyShifts: t.morning + t.afternoon + t.evening + t.night + t.other + t.release,
     };
   });
 };
@@ -1272,7 +1341,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                 return { span: seg.span, bg: st.bg, fg: st.fg,
                          text: seg.span >= 3 ? st.label : st.abbrev };
               }
-              const code = cby((viewData.cells[seg.date] || {})[s.id] || "");
+              const code = cby(firstCodeId(viewData, seg.date, s.id));
               return {
                 span: 1,
                 text: code ? code.code : "",
@@ -1981,7 +2050,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
       } else {
         const existing = entry.exchange;
         entry.exchange = {
-          originalCode: existing ? existing.originalCode : ((d.cells[date] || {})[staffId] || ""),
+          originalCode: existing ? existing.originalCode : firstCodeId(d, date, staffId),
           requestedBy: who,
         };
       }
@@ -2169,7 +2238,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     const ex = meta?.exchange || null;
                     // In "see original" mode a changed cell shows what it was
                     // before the exchange; unchanged cells look the same.
-                    const liveCodeId = (data.cells[date] || {})[s.id] || "";
+                    const liveCodeId = firstCodeId(data, date, s.id);
                     const codeId = showOriginal && ex ? (ex.originalCode || "") : liveCodeId;
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
@@ -2289,7 +2358,7 @@ function Records({ data, range, setRange, onExport }) {
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2420,7 +2489,7 @@ function Stats({ data, range, setRange, onExport }) {
   }, [data, range, valid]);
 
   const totals = {
-    duty: rows.reduce((a, r) => a + r.totalDuty, 0),
+    duty: rows.reduce((a, r) => a + r.dutyShifts, 0),
     nonOff: rows.reduce((a, r) => a + r.nonOfficialDuty, 0),
     leave: rows.reduce((a, r) => a + r.annualDays + r.sl + r.frl + r.ml + r.otherLeave, 0),
     off: rows.reduce((a, r) => a + r.off, 0),
@@ -2644,7 +2713,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
                       </td>
                     );
                   }
-                  const code = codeById((data.cells[seg.date] || {})[s.id]);
+                  const code = codeById(firstCodeId(data, seg.date, s.id));
                   const num = noteNum(seg.date, s.id);
                   const ex = exchangeOf(data, seg.date, s.id);
                   return (
@@ -2723,7 +2792,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
 
 function RecordsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Total duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
       <div className="rp-head">
@@ -2834,7 +2903,7 @@ function StatsPrint({ data, from, to }) {
     Night: dayCountFor(data, date, "night"),
   }));
   const totals = {
-    duty: rows.reduce((a, r) => a + r.totalDuty, 0),
+    duty: rows.reduce((a, r) => a + r.dutyShifts, 0),
     nonOff: rows.reduce((a, r) => a + r.nonOfficialDuty, 0),
     leave: rows.reduce((a, r) => a + r.annualDays + r.maternityDays + r.sl + r.frl + r.ml + r.otherLeave, 0),
     off: rows.reduce((a, r) => a + r.off, 0),
@@ -3382,14 +3451,20 @@ const insightsForStaff = (data, staff, from, to) => {
   let leaveDays = 0, emptyDays = 0;
   dates.forEach((date) => {
     if (leaveOn(staff, date)) { leaveDays++; return; }
-    const cid = (data.cells[date] || {})[staff.id] || "";
-    if (!cid) { emptyDays++; return; }
-    const code = codeById(cid);
-    if (!code) { emptyDays++; return; }
-    if (!perCode[cid]) perCode[cid] = { total: 0, byDow: [0, 0, 0, 0, 0, 0, 0], nonOfficial: 0 };
-    perCode[cid].total++;
-    perCode[cid].byDow[parseD(date).getDay()]++;
-    if (isNonOff(data, date)) perCode[cid].nonOfficial++;
+    const entries = cellEntries(data, date, staff.id).filter((e) => codeById(e.code));
+    if (!entries.length) { emptyDays++; return; }
+    // Per-code tallies count duties: doing M and E adds one to each.
+    entries.forEach((e) => {
+      const cid = e.code;
+      if (!perCode[cid]) perCode[cid] = { total: 0, byDow: [0, 0, 0, 0, 0, 0, 0], nonOfficial: 0 };
+      perCode[cid].total++;
+      perCode[cid].byDow[parseD(date).getDay()]++;
+    });
+    /* Non-official is the payment figure, so it counts the DAY once.
+       Charging it to the first duty only means adding the per-code
+       numbers up still gives the correct day count, instead of
+       double-counting a split duty. */
+    if (isNonOff(data, date)) perCode[entries[0].code].nonOfficial++;
   });
   return { perCode, leaveDays, emptyDays, workingDays: dates.length };
 };
@@ -3401,7 +3476,8 @@ const comboCount = (data, staff, codeId, dow, from, to) => {
   let n = 0;
   dates.forEach((date) => {
     if (leaveOn(staff, date)) return;
-    if ((data.cells[date] || {})[staff.id] !== codeId) return;
+    // "contains", not "equals": a code can sit second in a split duty.
+    if (!cellHasCode(data, date, staff.id, codeId)) return;
     if (dow !== -1 && parseD(date).getDay() !== dow) return;
     n++;
   });
@@ -3418,7 +3494,7 @@ const codeLeaderboard = (data, codeId, from, to) => {
       dates.forEach((date) => {
         if (!isEmployedOn(s, date)) return;
         if (leaveOn(s, date)) return;
-        if ((data.cells[date] || {})[s.id] === codeId) n++;
+        if (cellHasCode(data, date, s.id, codeId)) n++;
       });
       return { staff: s, count: n };
     })
