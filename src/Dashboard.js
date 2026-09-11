@@ -174,29 +174,94 @@ export default function Dashboard({
         (s) => (s.email || "").trim().toLowerCase() === email
       );
       if (!mine) return null;
-      return { deptName: d.name, staffId: mine.id, codes: rota.codes || [], cells: rota.cells || {} };
+      return {
+        deptName: d.name, staffId: mine.id,
+        codes: rota.codes || [], cells: rota.cells || {},
+        // Needed to mark non-official days and on-call turns. Both are
+        // per department, so someone in two departments can have a day
+        // that is non-official in one and ordinary in the other.
+        onCall: rota.onCall || {},
+        nonOfficial: rota.nonOfficial || [],
+        fridayRule: rota.fridayRule !== false,
+      };
     }).filter(Boolean);
   }, [departments, rotasByDept, email]);
 
-  const dutiesOn = (dateStr) => {
-    const out = [];
+  /* A cell is either a plain duty code id, or a list of duties when a
+     department uses tasks or split shifts:
+         "abc123"   or   [{ code: "abc", task: "Waiter" }, ...]
+     Both shapes must read the same here. Passing a list straight through
+     would put an object where React expects text, which throws and takes
+     the whole calendar down. */
+  const entriesOf = (raw) => {
+    if (!raw) return [];
+    if (typeof raw === "string") return [{ code: raw, task: "" }];
+    if (Array.isArray(raw)) return raw.filter((e) => e && e.code);
+    return [];
+  };
+
+  const FRIDAY = 5;
+  /* A non-official day is set per department: every Friday when the
+     Friday rule is on, plus any date the manager marked. */
+  const isNonOfficial = (m, dateStr) =>
+    (m.fridayRule && new Date(dateStr + "T00:00:00").getDay() === FRIDAY) ||
+    (m.nonOfficial || []).includes(dateStr);
+
+  /* Everything known about one day, across every department the person
+     belongs to. The calendar cell uses the short parts; the panel
+     underneath shows the rest. */
+  const dayInfo = (dateStr) => {
+    const duties = [];
+    let anyNonOfficial = false;
+    let anyOnCall = false;
     myMemberships.forEach((m) => {
-      const codeId = (m.cells[dateStr] || {})[m.staffId];
-      if (!codeId) return;
-      const code = m.codes.find((c) => c.id === codeId);
-      out.push({
-        text: code ? code.code : codeId,
-        color: code ? code.color : T.mist,
-        deptName: m.deptName,
+      const nonOff = isNonOfficial(m, dateStr);
+      const onCall = (m.onCall || {})[dateStr] === m.staffId;
+      if (nonOff) anyNonOfficial = true;
+      if (onCall) anyOnCall = true;
+      // One entry per duty, so a split shift shows both.
+      entriesOf((m.cells[dateStr] || {})[m.staffId]).forEach((entry) => {
+        const code = m.codes.find((c) => c.id === entry.code);
+        if (!code && !entry.code) return;
+        duties.push({
+          text: code ? code.code : "?",
+          label: code ? (code.label || "") : "",
+          task: entry.task || "",
+          color: code ? code.color : T.mist,
+          deptName: m.deptName,
+          nonOfficial: nonOff,
+          onCall,
+        });
       });
+      // On call with no duty rostered still deserves a line in the panel.
+      if (onCall && !entriesOf((m.cells[dateStr] || {})[m.staffId]).length) {
+        duties.push({
+          text: "", label: "", task: "", color: T.mist,
+          deptName: m.deptName, nonOfficial: nonOff, onCall: true, onCallOnly: true,
+        });
+      }
     });
-    return out;
+    return { duties, anyNonOfficial, anyOnCall };
   };
 
   const grid = monthGrid(view.year, view.month);
-  const todaysDuties = dutiesOn(dstr(today));
-  const prevMonth = () => setView((v) => (v.month === 0 ? { year: v.year - 1, month: 11 } : { year: v.year, month: v.month - 1 }));
-  const nextMonth = () => setView((v) => (v.month === 11 ? { year: v.year + 1, month: 0 } : { year: v.year, month: v.month + 1 }));
+  // The panel underneath follows whichever day is tapped, starting on today.
+  const [selected, setSelected] = useState(dstr(today));
+  const selectedInfo = dayInfo(selected);
+  const niceFullDate = (ds) =>
+    new Date(ds + "T00:00:00").toLocaleDateString("en-GB",
+      { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  /* Moving to another month also moves the selection, otherwise the panel
+     underneath keeps describing a day that is no longer on screen and no
+     cell appears highlighted. Landing back on the current month reselects
+     today, which is what someone paging back and forth expects. */
+  const goToMonth = (year, month) => {
+    setView({ year, month });
+    const onThisMonth = year === today.getFullYear() && month === today.getMonth();
+    setSelected(onThisMonth ? dstr(today) : dstr(new Date(year, month, 1)));
+  };
+  const prevMonth = () => goToMonth(view.month === 0 ? view.year - 1 : view.year, view.month === 0 ? 11 : view.month - 1);
+  const nextMonth = () => goToMonth(view.month === 11 ? view.year + 1 : view.year, view.month === 11 ? 0 : view.month + 1);
 
   const logout = async () => {
     if (!window.confirm("Sign out of EasyDutyRota?")) return;
@@ -207,7 +272,7 @@ export default function Dashboard({
   /* ── Sidebar pieces ── */
   const SectionHead = ({ icon: Icon, children, note, soon = false }) => (
     <div style={{ marginBottom: 8 }}>
-      <div style={{
+      <div className="dr-dash-sec" style={{
         background: T.lagoon, color: "#fff", borderRadius: 10, padding: "11px 14px",
         fontFamily: "Sora, sans-serif", fontSize: 14.5, fontWeight: 600,
         display: "flex", alignItems: "center", gap: 8,
@@ -297,7 +362,49 @@ export default function Dashboard({
         .dr-dash-item:active { transform: scale(0.99); }
         .dr-dash-item:focus-visible { outline: 2px solid ${T.lagoon}; outline-offset: 2px; }
         @media (prefers-reduced-motion: reduce) { .dr-dash-item { transition: none; } }
-        @media (max-width: 900px) { .dr-dash-wrap { grid-template-columns: 1fr !important; } }
+        @media (max-width: 900px) {
+          .dr-dash-wrap { grid-template-columns: 1fr !important; gap: 16px !important; }
+          /* The calendar is why an employee opens this on a phone, so it
+             comes first; the organisation and account menus follow. */
+          .dr-dash-main { order: 1; }
+          .dr-dash-side { order: 2; }
+        }
+        /* Phone typography. The desktop sizes are comfortable on a wide
+           screen and shouty on a 380px one, so everything steps down and
+           the padding tightens to give the grid its width back. */
+        @media (max-width: 640px) {
+          .dr-dash-main { padding: 14px 11px 18px !important; border-radius: 11px !important; }
+          .dr-dash-title { font-size: 18px !important; margin-bottom: 2px !important; }
+          .dr-dash-sub { font-size: 11.5px !important; margin-bottom: 13px !important; }
+          .dr-dash-month { font-size: 14px !important; min-width: 128px !important; }
+          .dr-dash-dow { font-size: 9px !important; padding: 2px 0 !important; }
+          .dr-dash-day { padding: 3px 3px !important; border-radius: 7px !important; }
+          .dr-dash-code { font-size: 10px !important; }
+          .dr-dash-task { font-size: 8.5px !important; }
+          .dr-dash-panel { padding: 11px 12px !important; margin-top: 14px !important; }
+          .dr-dash-pdate { font-size: 13px !important; }
+          .dr-dash-sec { font-size: 13px !important; padding: 9px 12px !important; }
+          .dr-dash-item { font-size: 12.5px !important; padding: 9px 11px !important; }
+        }
+        /* Fit the whole month on one screen. A phone user wants to see the
+           shape of their month at a glance, not scroll through it, so the
+           cells lose their padding and the duty chips become compact bars.
+           Text stays legible; what goes is the space around it. */
+        @media (max-width: 640px) {
+          .dr-dash-grid { gap: 2px !important; }
+          .dr-dash-day {
+            min-height: 0 !important; padding: 2px 2px 3px !important;
+            border-radius: 5px !important; overflow: hidden;
+          }
+          .dr-dash-daynum { font-size: 9.5px !important; min-width: 15px !important; height: 15px !important; }
+          .dr-dash-oc { font-size: 7.5px !important; padding: 1px 2.5px !important; }
+          .dr-dash-duty {
+            padding: 1px 3px !important; margin-bottom: 2px !important;
+            border-radius: 4px !important;
+          }
+          .dr-dash-code { font-size: 9px !important; line-height: 1.15 !important; }
+          .dr-dash-task { font-size: 7.5px !important; line-height: 1.15 !important; }
+        }
       `}</style>
 
       <div className="dr-dash-wrap" style={{
@@ -306,7 +413,7 @@ export default function Dashboard({
         alignItems: "start",
       }}>
         {/* ── Sidebar ── */}
-        <aside style={{ display: "flex", flexDirection: "column" }}>
+        <aside className="dr-dash-side" style={{ display: "flex", flexDirection: "column" }}>
           <SectionHead icon={LayoutDashboard} note={orgName || "You can name your organisation in Settings."}>
             My Organisation
           </SectionHead>
@@ -341,6 +448,7 @@ export default function Dashboard({
 
           <SectionHead
             icon={Users}
+            soon={memberships.length === 0}
             note={memberships.length === 0 ? null : "Departments shared with you."}
           >My Membership</SectionHead>
           {memberships.length === 0
@@ -348,9 +456,8 @@ export default function Dashboard({
                 fontSize: 12.5, color: T.inkSoft, border: `1px dashed ${T.line}`,
                 borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
               }}>
-                Departments that someone else shares with you will appear here.
-                To give your own staff a login, open a department, go to the
-                Staff tab, add their email and tap Invite.
+                Sharing a department with your team is coming soon. When it
+                arrives, departments shared with you will appear here.
               </div>
             : memberships.map((d) => (
                 <DeptRow key={d.id} id={d.id} name={d.name} tag={roleLabel(d.role)} />
@@ -372,87 +479,179 @@ export default function Dashboard({
         </aside>
 
         {/* ── Calendar ── */}
-        <main style={{
+        <main className="dr-dash-main" style={{
           background: "#fff", border: `1px solid ${T.line}`, borderRadius: 14,
           padding: "22px 22px 26px",
         }}>
-          <h1 style={{
+          <h1 className="dr-dash-title" style={{
             fontFamily: "Sora, sans-serif", fontSize: 25, fontWeight: 700, color: T.lagoon,
             textAlign: "center", margin: "0 0 4px", letterSpacing: -0.3,
           }}>Welcome, {displayName}!</h1>
-          <p style={{ textAlign: "center", color: T.inkSoft, fontSize: 13, margin: "0 0 20px" }}>
+          <p className="dr-dash-sub" style={{ textAlign: "center", color: T.inkSoft, fontSize: 13, margin: "0 0 20px" }}>
             Your duties across every department, in one place.
           </p>
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginBottom: 14 }}>
             <button className="dr-dash-item" onClick={prevMonth} aria-label="Previous month" style={navBtn}><ChevronLeft size={18} /></button>
-            <div style={{ fontFamily: "Sora, sans-serif", fontSize: 16.5, fontWeight: 600, minWidth: 180, textAlign: "center" }}>
+            <div className="dr-dash-month" style={{ fontFamily: "Sora, sans-serif", fontSize: 16.5, fontWeight: 600, minWidth: 180, textAlign: "center" }}>
               {MONTHS[view.month]} {view.year}
             </div>
             <button className="dr-dash-item" onClick={nextMonth} aria-label="Next month" style={navBtn}><ChevronRight size={18} /></button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+          <div className="dr-dash-grid" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, marginBottom: 4 }}>
             {DAY_NAMES.map((d) => (
-              <div key={d} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: T.inkSoft, letterSpacing: 0.5, padding: "4px 0" }}>{d}</div>
+              <div key={d} className="dr-dash-dow" style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: T.inkSoft, letterSpacing: 0.5, padding: "4px 0" }}>{d}</div>
             ))}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {grid.map((week, wi) => (
-              <div key={wi} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+              <div key={wi} className="dr-dash-grid" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
                 {week.map((date) => {
+                  const ds = dstr(date);
                   const inMonth = date.getMonth() === view.month;
                   const isToday = sameDay(date, today);
-                  const duties = inMonth ? dutiesOn(dstr(date)) : [];
+                  const isSelected = ds === selected;
+                  const info = inMonth ? dayInfo(ds) : { duties: [], anyNonOfficial: false, anyOnCall: false };
+                  const duties = info.duties.filter((d) => !d.onCallOnly);
                   return (
-                    <div key={dstr(date)} style={{
-                      minHeight: duties.length ? 58 : 38, borderRadius: 8, padding: "5px 6px",
-                      /* A day with nothing on it recedes: no fill, a fainter
-                         edge. Days that carry a duty keep the white card, so
-                         the eye lands on them first. */
-                      background: !inMonth ? "transparent" : (duties.length ? "#fff" : "#FBFDFC"),
-                      border: isToday
-                        ? `1.5px solid ${T.lagoon}`
-                        : `1px solid ${inMonth && duties.length ? T.line : "#E9F0EE"}`,
-                      opacity: inMonth ? 1 : 0.45,
-                    }}>
-                      <div style={{ marginBottom: duties.length ? 4 : 0 }}>
-                        <span style={{
+                    <button
+                      key={ds}
+                      onClick={() => inMonth && setSelected(ds)}
+                      aria-label={niceFullDate(ds)}
+                      className="dr-dash-day"
+                      style={{
+                        position: "relative",
+                        textAlign: "left", fontFamily: "inherit", cursor: inMonth ? "pointer" : "default",
+                        minHeight: duties.length ? 58 : 38, borderRadius: 8, padding: "5px 6px",
+                        /* Non-official days carry the same gold as the rota grid,
+                           so the day that counts for payment is recognisable in
+                           both places without needing a key. */
+                        background: !inMonth ? "transparent"
+                          : info.anyNonOfficial ? "#FDF8EE"
+                          : (duties.length ? "#fff" : "#FBFDFC"),
+                        border: isSelected
+                          ? `2px solid ${T.lagoon}`
+                          : isToday
+                            ? `1.5px solid ${T.lagoon}`
+                            : `1px solid ${inMonth && (duties.length || info.anyNonOfficial) ? T.line : "#E9F0EE"}`,
+                        opacity: inMonth ? 1 : 0.45,
+                      }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: duties.length ? 4 : 0 }}>
+                        <span className="dr-dash-daynum" style={{
                           display: "inline-flex", alignItems: "center", justifyContent: "center",
                           minWidth: 19, height: 19, borderRadius: 999, padding: "0 5px",
                           fontSize: 11, fontWeight: 700, lineHeight: 1,
                           background: isToday ? T.lagoon : "transparent",
-                          color: isToday ? "#fff" : T.inkSoft,
+                          color: isToday ? "#fff" : (info.anyNonOfficial ? "#A5731B" : T.inkSoft),
                         }}>{pad(date.getDate())}</span>
+                        {/* On call is a state, not a duty, so it gets a mark
+                            rather than a block of its own. */}
+                        {/* Pinned to the corner rather than sitting beside the
+                            date: in a narrow cell the two competed for width and
+                            this was the one that got clipped. */}
+                        {info.anyOnCall && (
+                          <span title="On call" className="dr-dash-oc" style={{
+                            position: "absolute", top: 2, right: 2,
+                            fontSize: 8.5, fontWeight: 800, letterSpacing: 0.2, lineHeight: 1,
+                            color: "#fff", background: "#A5731B",
+                            borderRadius: 4, padding: "2px 3px",
+                          }}>OC</span>
+                        )}
                       </div>
+                      {/* The cell carries the duty and its task only. Which
+                          department, and what the code means, are in the panel
+                          below — a month grid has no room to say everything. */}
                       {duties.map((duty, i) => (
-                        <div key={i} title={`${duty.text} — ${duty.deptName}`} style={{
+                        <div key={i} className="dr-dash-duty" style={{
                           background: duty.color, color: textOn(duty.color),
                           borderRadius: 6, padding: "3px 6px", marginBottom: 3,
-                          overflow: "hidden", border: `1px solid rgba(0,0,0,0.06)`,
+                          overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)",
                         }}>
-                          {/* The code leads — it's what you read at a glance.
-                              The department sits under it, full text so nothing
-                              needs decoding, but lighter so it doesn't compete. */}
-                          <div style={{ fontSize: 11, fontWeight: 800, lineHeight: 1.2, letterSpacing: 0.1 }}>{duty.text}</div>
-                          <div style={{
-                            fontSize: 9.5, fontWeight: 500, lineHeight: 1.3, opacity: 0.85,
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>{duty.deptName}</div>
+                          <div className="dr-dash-code" style={{ fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{duty.text}</div>
+                          {duty.task && (
+                            <div className="dr-dash-task" style={{
+                              fontSize: 9.5, fontWeight: 500, lineHeight: 1.3, opacity: 0.9,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            }}>{duty.task}</div>
+                          )}
                         </div>
                       ))}
-                    </div>
+                    </button>
                   );
                 })}
               </div>
             ))}
           </div>
 
-          <div style={{ textAlign: "center", marginTop: 18, fontSize: 14.5, fontWeight: 600 }}>
-            {todaysDuties.length === 0
-              ? <span style={{ color: T.inkSoft }}>Today — no duty scheduled</span>
-              : <span>Today — {todaysDuties.map((d) => `${d.text} (${d.deptName})`).join(" · ")}</span>}
+          {/* ── The day in detail ──
+              The grid can only carry a code and a task. Everything else that
+              matters — which department, what the code actually means, whether
+              the day counts for payment, whether they are on call — lives here,
+              for whichever day is tapped. Opens on today. */}
+          <div className="dr-dash-panel" style={{
+            marginTop: 18, border: `1px solid ${T.line}`, borderRadius: 12,
+            background: selectedInfo.anyNonOfficial ? "#FDF8EE" : "#FBFDFC", padding: "14px 16px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
+              <span className="dr-dash-pdate" style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 600 }}>
+                {niceFullDate(selected)}
+              </span>
+              {selected === dstr(today) && (
+                <span style={{
+                  fontSize: 10.5, fontWeight: 700, color: "#fff", background: T.lagoon,
+                  borderRadius: 999, padding: "2px 9px",
+                }}>TODAY</span>
+              )}
+              {selectedInfo.anyNonOfficial && (
+                <span style={{
+                  fontSize: 10.5, fontWeight: 700, color: "#A5731B", background: "#FBF1DC",
+                  border: "1px solid #E7D9B8", borderRadius: 999, padding: "2px 9px",
+                }}>NON-OFFICIAL DAY</span>
+              )}
+              {selectedInfo.anyOnCall && (
+                <span style={{
+                  fontSize: 10.5, fontWeight: 700, color: "#A5731B", background: "#FBF1DC",
+                  border: "1px solid #E7D9B8", borderRadius: 999, padding: "2px 9px",
+                }}>ON CALL</span>
+              )}
+            </div>
+
+            {selectedInfo.duties.length === 0 ? (
+              <div style={{ fontSize: 13, color: T.inkSoft }}>
+                No duty scheduled{selectedInfo.anyNonOfficial ? " — this is a non-official day." : "."}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {selectedInfo.duties.map((d, i) => (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "flex-start", gap: 11,
+                    background: "#fff", border: `1px solid ${T.line}`,
+                    borderRadius: 9, padding: "10px 12px",
+                  }}>
+                    <span style={{
+                      flexShrink: 0, minWidth: 40, textAlign: "center",
+                      background: d.onCallOnly ? "#FBF1DC" : d.color,
+                      color: d.onCallOnly ? "#A5731B" : textOn(d.color),
+                      border: "1px solid rgba(0,0,0,0.07)", borderRadius: 7,
+                      padding: "6px 8px", fontSize: 12.5, fontWeight: 800, lineHeight: 1.2,
+                    }}>{d.onCallOnly ? "OC" : d.text}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35 }}>
+                        {d.onCallOnly ? "On call" : (d.label || d.text)}
+                        {d.task && <span style={{ fontWeight: 500, color: T.inkSoft }}> — {d.task}</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 2 }}>
+                        {d.deptName}
+                        {d.onCall && !d.onCallOnly && " · on call"}
+                        {d.nonOfficial && " · counts as non-official day duty"}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <p style={{ textAlign: "center", color: T.inkSoft, fontSize: 11.5, margin: "20px 0 0", lineHeight: 1.6 }}>

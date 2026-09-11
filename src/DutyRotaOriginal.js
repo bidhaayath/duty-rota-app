@@ -675,7 +675,7 @@ const migrate = (d) => {
 
 /* ─────────────────── Shared UI ─────────────────── */
 const Card = ({ children, style, className }) => (
-  <div className={className} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
+  <div className={["dr-card", className].filter(Boolean).join(" ")} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
 );
 const Btn = ({ children, onClick, kind = "primary", small, style, disabled }) => {
   const kinds = {
@@ -684,7 +684,7 @@ const Btn = ({ children, onClick, kind = "primary", small, style, disabled }) =>
     danger: { background: "#FBEAE7", color: T.coral },
   };
   return (
-    <button onClick={onClick} disabled={disabled} style={{
+    <button className="dr-btn" onClick={onClick} disabled={disabled} style={{
       fontFamily: "inherit", cursor: disabled ? "not-allowed" : "pointer", border: "none",
       borderRadius: 10, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6,
       padding: small ? "6px 12px" : "10px 16px", fontSize: small ? 13 : 14,
@@ -693,7 +693,7 @@ const Btn = ({ children, onClick, kind = "primary", small, style, disabled }) =>
   );
 };
 const Field = ({ label, children }) => (
-  <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
+  <label className="dr-field" style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
     {label}{children}
   </label>
 );
@@ -1292,6 +1292,84 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       }
       .rota-desig { display: none; }
     }
+
+    /* ── The rota grid on a phone ──
+       A duty cell is 74px wide plus padding, so on a 380px screen barely two
+       days fit beside the frozen name column and the week has to be scrolled
+       to be read. Shrinking the cell, its text and the table padding gets
+       four or five days on screen at once, which is the difference between
+       glancing at the week and hunting through it. */
+    @media screen and (max-width: 900px) {
+      .dr-rota-grid { min-width: 0 !important; }
+      .dr-rota-grid th, .dr-rota-grid td { padding: 3px 3px !important; font-size: 10.5px !important; }
+      .dr-rota-grid .dr-cell {
+        min-width: 42px !important; font-size: 10.5px !important;
+        padding: 5px 2px !important; border-radius: 6px !important;
+      }
+      .rota-name {
+        width: 92px !important; min-width: 92px !important; max-width: 92px !important;
+        font-size: 10.5px !important;
+      }
+      .rota-num { width: 18px !important; min-width: 18px !important; max-width: 18px !important; }
+      .rota-name { left: 18px !important; }
+      .rota-foot-label { font-size: 10px !important; }
+    }
+    /* ── The other tabs on a phone ──
+       The rota grid above is already tuned for a narrow screen. Everything
+       else — Staff, Records, Statistics, Insights, Settings, Duty Codes —
+       was laid out for a laptop and reads as oversized on a 380px screen:
+       18px card padding either side, 14-15px body text and full-size
+       buttons leave little room for the content itself.
+
+       These are !important because almost every size in this file is an
+       inline style, which otherwise wins. The rota grid is excluded by
+       name so its careful column widths are not disturbed. */
+    @media screen and (max-width: 900px) {
+      .dr-app { font-size: 13px; }
+      .dr-app .dr-card { padding: 12px !important; border-radius: 11px !important; }
+      .dr-app h1 { font-size: 18px !important; }
+      .dr-app h2 { font-size: 15px !important; }
+      .dr-app h3 { font-size: 13.5px !important; }
+      .dr-app .dr-field { font-size: 11.5px !important; }
+      .dr-app input, .dr-app select, .dr-app textarea {
+        font-size: 13px !important; padding: 8px 10px !important;
+      }
+      /* Tables on the other tabs: Records, Statistics, Insights, Staff,
+         Duty Codes. They scroll sideways already, so the win is fitting
+         more columns before the scroll starts. */
+      .dr-app table:not(.dr-rota-grid) { font-size: 11.5px !important; }
+      .dr-app table:not(.dr-rota-grid) th,
+      .dr-app table:not(.dr-rota-grid) td {
+        padding: 6px 7px !important;
+      }
+
+      /* ── Header, toolbars and controls on a phone ──
+         These use tag + class together on purpose. An earlier version used
+         the bare class and lost every time to the general h1 rule above:
+         both were !important, so the more specific selector won. Matching
+         the tag as well as the class outranks it.
+         (No backticks in here - this stylesheet is a template literal.) */
+      .dr-app h1.dr-depttitle { font-size: 13.5px !important; letter-spacing: 0 !important; }
+      .dr-app button.dr-deptbtn { font-size: 10px !important; padding: 3px 8px !important; }
+      .dr-app button.dr-tab {
+        font-size: 10.5px !important; padding: 6px 7px !important; gap: 3px !important;
+      }
+      .dr-app button.dr-btn { font-size: 11px !important; padding: 6px 9px !important; }
+      .dr-app button.dr-viewtoggle { font-size: 11px !important; padding: 5px 10px !important; }
+      .dr-app .dr-range { font-size: 12px !important; }
+      .dr-app main.dr-main { padding: 11px 10px 26px !important; }
+
+      /* Body copy and headings inside every tab: Statistics, Staff,
+         Duty Requests, Insights, Settings, Duty Codes. */
+      .dr-app h2 { font-size: 13.5px !important; }
+      .dr-app h3 { font-size: 12.5px !important; }
+      .dr-app p { font-size: 11.5px !important; }
+      .dr-app label.dr-field { font-size: 10.5px !important; }
+      .dr-app input, .dr-app select, .dr-app textarea {
+        font-size: 12px !important; padding: 6px 8px !important;
+      }
+      .dr-app div.dr-card { padding: 10px !important; }
+    }
   `;
 
   if (printView) {
@@ -1463,13 +1541,13 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   ];
 
   return (
-    <div key="dr-app" className="dr-fade-in" style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
+    <div key="dr-app" className="dr-fade-in dr-app" style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
       <style>{globalCss}</style>
 
       <header className="dr-header" style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
         {departments.length > 0 && (
           <div style={{ position: "relative", display: "inline-block", marginBottom: 8 }}>
-            <button onClick={() => setDeptMenuOpen((o) => !o)} style={{
+            <button className="dr-deptbtn" onClick={() => setDeptMenuOpen((o) => !o)} style={{
               fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 7,
               background: "rgba(255,255,255,0.12)", color: "#DDEBE8", border: "1px solid rgba(255,255,255,0.22)",
               borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
@@ -1557,7 +1635,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <h1 style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
+            <h1 className="dr-depttitle" style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
             <span className="dr-tagline" style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota &amp; non-official day tracker</span>
             {saveStatus === "saving" && <span style={{ fontSize: 12, color: "#9FC3BD" }}>Saving…</span>}
             {saveStatus === "saved" && <span style={{ fontSize: 12, color: T.leaf }}>✓ Saved</span>}
@@ -1566,14 +1644,14 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           {viewData.logo && <img className="dr-logo" src={viewData.logo} alt="" style={{ height: 62, maxWidth: 230, objectFit: "contain", flexShrink: 0 }} />}
         </div>
         <nav style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto" }}>
-          <button onClick={() => setTab("dashboard")} style={{
+          <button className="dr-tab" onClick={() => setTab("dashboard")} style={{
             fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, cursor: "pointer",
             display: "flex", alignItems: "center", gap: 6, padding: "10px 14px",
             border: "none", borderRadius: "10px 10px 0 0", whiteSpace: "nowrap",
             background: "transparent", color: "#B8D2CD",
           }}><User size={15} /> My Dashboard</button>
           {tabs.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)} style={{
+            <button key={id} className="dr-tab" onClick={() => setTab(id)} style={{
               fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, cursor: "pointer",
               display: "flex", alignItems: "center", gap: 6, padding: "10px 14px",
               border: "none", borderRadius: "10px 10px 0 0", whiteSpace: "nowrap",
@@ -1583,7 +1661,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         </nav>
       </header>
 
-      <main style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
+      <main className="dr-main" style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
         {saveStatus === "error" && (
           <div className="dr-anim-in" style={{
             background: "#FBEAE7", border: "1px solid #F1B8AE", borderRadius: 10,
@@ -1784,7 +1862,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
-      <button onClick={open ? close : openPanel} style={{
+      <button className="dr-cell" onClick={open ? close : openPanel} style={{
         fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
         padding: "7px 4px", borderRadius: 7, border: `1px solid ${hasCode ? "transparent" : T.line}`,
         background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none", position: "relative",
@@ -2090,7 +2168,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                 if (v === rotaView) return;
                 if (v === "weekly") setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0));
                 setRotaView(v);
-              }} style={{
+              }} className="dr-viewtoggle" style={{
                 fontFamily: "inherit", padding: "6px 13px", fontSize: 12.5, fontWeight: 700,
                 border: "none", cursor: "pointer",
                 background: rotaView === v ? T.lagoon : "#fff",
@@ -2101,7 +2179,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
           {rotaView === "weekly" ? (
             <>
               <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={15} /></Btn>
-              <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
+              <div className="dr-range" style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
               <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={15} /></Btn>
               <Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0))}>Today</Btn>
             </>
@@ -2176,7 +2254,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
       </div>
 
       <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1120 }}>
+        <table className="dr-rota-grid" style={{ borderCollapse: "collapse", width: "100%", minWidth: 1120 }}>
           <thead>
             <tr>
               <th className="rota-num" style={th}>#</th>
@@ -2248,7 +2326,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                       // Read-only rendering: no picker, so the past can't be edited.
                       return (
                         <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
-                          <div title={ex ? `Original duty (${EXCHANGE_BY[ex.requestedBy].label})` : ""} style={{
+                          <div className="dr-cell" title={ex ? `Original duty (${EXCHANGE_BY[ex.requestedBy].label})` : ""} style={{
                             fontSize: 12.5, fontWeight: 700, minWidth: 74, padding: "7px 4px", borderRadius: 7,
                             border: ex ? "1px dashed #2F6DB5" : `1px solid ${code ? "transparent" : T.line}`,
                             background: bg, color: code ? textOn(code.color) : T.inkSoft,
@@ -2298,7 +2376,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                 if (showOriginal) {
                   return (
                     <td key={date} style={{ ...td, padding: 3, textAlign: "center" }}>
-                      <div style={{
+                      <div className="dr-cell" style={{
                         fontSize: 12, fontWeight: 700, minWidth: 74, padding: "7px 4px", borderRadius: 7,
                         border: `1px solid ${T.line}`, background: "#FDF8EE",
                         color: pickedStaff ? T.ink : T.inkSoft, opacity: pickedStaff ? 1 : 0.55,
@@ -2312,6 +2390,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                       value={picked}
                       onChange={(e) => setOnCall(date, e.target.value)}
                       title="On-call for this day"
+                      className="dr-cell"
                       style={{
                         fontFamily: "inherit", fontSize: 12, fontWeight: 700, width: "100%", minWidth: 74,
                         padding: "6px 4px", borderRadius: 7, border: `1px solid ${T.line}`,
