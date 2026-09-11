@@ -4,7 +4,7 @@ import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
   AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
-  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet
+  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -1456,6 +1456,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     { id: "staff", label: "Staff", icon: Users },
     { id: "requests", label: "Duty Requests", icon: MessageCircle },
     { id: "smart", label: "Smart Roster", icon: Wand2 },
+    { id: "codes", label: "Duty Codes", icon: Palette },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "insights", label: "Insights", icon: Search },
     { id: "help", label: "Help", icon: HelpCircle },
@@ -1687,6 +1688,7 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
             />
           )
         )}
+        {tab === "codes" && <DutyCodesTab data={data} update={update} />}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true}
           orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
         {tab === "help" && <HelpTab data={data} />}
@@ -4115,43 +4117,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
     if (ok) { setOrgSaved(true); setTimeout(() => setOrgSaved(false), 2500); }
     else alert("Could not save the organisation name. Please check your connection and try again.");
   };
-  const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
-  const [form, setForm] = useState(null);
   const [nd, setNd] = useState({ from: "", to: "" });
-  const palette = [
-    "#F4B860", "#E8A33D", "#E58E77", "#E4604E", "#C0483A", "#C08552", "#8C5A2B",
-    "#8FBF6B", "#6E9E4C", "#4F7D3A", "#9AD1C8", "#5FA89C", "#2E7D6F",
-    "#6FA8DC", "#4A82BC", "#2C5C8A", "#8E7CC3", "#6C5BA8", "#5E3A87",
-    "#D98BD3", "#B761B0", "#F0A090", "#D96A6A",
-    "#2E3358", "#5A6472", "#98A2B3", "#C9D2DC", "#E8EEF2", "#FFFFFF",
-  ];
-
-  const save = () => {
-    if (!form.code.trim()) return;
-    update((d) => {
-      if (form.id) { const i = d.codes.findIndex((c) => c.id === form.id); d.codes[i] = form; }
-      else d.codes.push({ ...form, id: uid() });
-      return d;
-    });
-    setForm(null);
-  };
-  const removeCode = (id) => {
-    // Deleting a code also clears it from every cell that used it, so the
-    // count of what is about to disappear is worth showing first.
-    const c = data.codes.find((x) => x.id === id);
-    const used = Object.values(data.cells || {})
-      .reduce((n, day) => n + Object.values(day || {}).filter((v) => v === id).length, 0);
-    if (!window.confirm(
-      `Delete the ${c ? c.code : ""} code?` +
-      (used ? `\n\nIt is used on ${used} ${used === 1 ? "duty" : "duties"}, and those cells will be emptied.` : "") +
-      `\n\nUndo will bring it back if you change your mind.`
-    )) return;
-    update((d) => {
-      d.codes = d.codes.filter((c2) => c2.id !== id);
-      Object.values(d.cells).forEach((day) => Object.keys(day).forEach((sid) => { if (day[sid] === id) delete day[sid]; }));
-      return d;
-    });
-  };
 
   const addRange = () => {
     const from = nd.from, to = nd.to || nd.from;
@@ -4169,7 +4135,6 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
   const removeDate = (date) => update((d) => { d.nonOfficial = d.nonOfficial.filter((x) => x !== date); return d; });
   const clearAll = () => update((d) => { d.nonOfficial = []; return d; });
 
-  const countsLabel = { morning: "Morning duty", afternoon: "Afternoon duty", evening: "Evening duty", night: "Night duty", other: "Other duty", release: "Release duty", off: "Off day", sl: "Sick leave (SL)", frl: "Family related leave (FRL)", ml: "Medical leave (ML)", leave: "Other leave" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -4377,6 +4342,78 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </div>
       </Card>
 
+    </div>
+  );
+}
+
+/* ─────────────────── Duty codes ───────────────────
+   Lifted out of Settings onto a screen of its own. Settings is about how
+   a department behaves; this is the vocabulary of duties it uses, which
+   managers edit far more often and shouldn't have to scroll to find.     */
+function DutyCodesTab({ data, update }) {
+  const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
+  const [form, setForm] = useState(null);
+  const palette = [
+    "#F4B860", "#E8A33D", "#E58E77", "#E4604E", "#C0483A", "#C08552", "#8C5A2B",
+    "#8FBF6B", "#6E9E4C", "#4F7D3A", "#9AD1C8", "#5FA89C", "#2E7D6F",
+    "#6FA8DC", "#4A82BC", "#2C5C8A", "#8E7CC3", "#6C5BA8", "#5E3A87",
+    "#D98BD3", "#B761B0", "#F0A090", "#D96A6A",
+    "#2E3358", "#5A6472", "#98A2B3", "#C9D2DC", "#E8EEF2", "#FFFFFF",
+  ];
+  const save = () => {
+    if (!form.code.trim()) return;
+    update((d) => {
+      if (form.id) { const i = d.codes.findIndex((c) => c.id === form.id); d.codes[i] = form; }
+      else d.codes.push({ ...form, id: uid() });
+      return d;
+    });
+    setForm(null);
+  };
+  const removeCode = (id) => {
+    // Deleting a code also clears it from every cell that used it, so the
+    // count of what is about to disappear is worth showing first.
+    const c = data.codes.find((x) => x.id === id);
+    // Counts cells using this code in EITHER shape: a plain code id, or one
+    // entry inside a list. A raw comparison would miss the second.
+    const used = Object.values(data.cells || {})
+      .reduce((n, day) => (!day || typeof day !== "object") ? n
+        : n + Object.values(day)
+            .filter((v) => entriesOf(v).some((e) => e.code === id)).length, 0);
+    if (!window.confirm(
+      `Delete the ${c ? c.code : ""} code?` +
+      (used ? `\n\nIt is used on ${used} ${used === 1 ? "duty" : "duties"}, and those cells will be emptied.` : "") +
+      `\n\nUndo will bring it back if you change your mind.`
+    )) return;
+    update((d) => {
+      d.codes = d.codes.filter((c2) => c2.id !== id);
+      Object.values(d.cells || {}).forEach((day) => {
+        /* A day should be an object of staffId -> duty. Some saved rotas
+           contain a stray value that isn't (seen in real data), and writing
+           into it throws. The previous code only ever called delete, which
+           fails silently on such a value, so this was never visible. Skip
+           anything that isn't a proper day rather than crash the app. */
+        if (!day || typeof day !== "object" || Array.isArray(day)) return;
+        Object.keys(day).forEach((sid) => {
+          const kept = entriesOf(day[sid]).filter((e) => e.code !== id);
+          if (!kept.length) { delete day[sid]; return; }
+          // A split duty that loses one duty keeps the other, and returns to
+          // a plain code id when a single untasked duty is all that remains.
+          day[sid] = (kept.length === 1 && !kept[0].task) ? kept[0].code : kept;
+        });
+      });
+      return d;
+    });
+  };
+
+  const countsLabel = { morning: "Morning duty", afternoon: "Afternoon duty", evening: "Evening duty", night: "Night duty", other: "Other duty", release: "Release duty", off: "Off day", sl: "Sick leave (SL)", frl: "Family related leave (FRL)", ml: "Medical leave (ML)", leave: "Other leave" };
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>
+        The duties this department uses. The code is what appears in the rota
+        grid, and "Counts as" decides which totals it feeds and whether it
+        counts towards non-official day payment.
+      </p>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 17 }}>Duty codes</h2>
         <Btn onClick={() => setForm(empty)}><Plus size={15} /> New code</Btn>
