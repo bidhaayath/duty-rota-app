@@ -4,7 +4,7 @@ import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
   AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
-  User, Briefcase, Eye, RotateCcw, Wand2
+  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -13,6 +13,7 @@ import {
 import supabase from "./supabaseClient";
 import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
+import { exportRotaToExcel } from "./rotaExcel";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 import Dashboard from "./Dashboard";
 import InviteDialog from "./InviteDialog";
@@ -1233,6 +1234,88 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
     // Same >10-day rule as before, so the automatic default is unchanged.
     const autoOrient = rotaDays.length > 10 ? "landscape" : "portrait";
     const orientation = orientOverride || autoOrient;
+    /* Build a plain description of what is on screen and let rotaExcel.js
+       turn it into a workbook. The app rules stay here — who was employed
+       on a date, what a leave span covers, how totals are counted — so the
+       spreadsheet can never drift from the grid and the PDF. */
+    const saveAsExcel = async () => {
+      try {
+        const cby = codeByIdOf(viewData);
+        const heads = ["M", "A", ...(viewData.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "OFF"];
+        const staffRows = staffForDays(viewData, rotaDays);
+
+        const model = {
+          orgName: viewData.orgName || "",
+          deptName: viewData.title || "Rota",
+          rangeLabel: rotaDays.length
+            ? `${niceDate(rotaDays[0])} – ${niceDate(rotaDays[rotaDays.length - 1])}`
+            : "",
+          days: rotaDays.map((date) => {
+            const d = parseD(date);
+            return {
+              date,
+              dayName: DAY_NAMES[d.getDay()],
+              dayLabel: `${d.getDate()} ${d.toLocaleString("en", { month: "short" })}`,
+              nonOff: isNonOff(viewData, date),
+            };
+          }),
+          totalHeads: heads,
+          rows: staffRows.map((s, i) => {
+            const t = weekTotalsFor(viewData, s, rotaDays);
+            const cells = weekSegments(s, rotaDays).map((seg) => {
+              if (seg.kind === "notEmployed") {
+                return { span: seg.span, muted: true, bg: "#F2F4F5", fg: "#9AA5AB",
+                         text: seg.span >= 2 ? (seg.before ? "Not yet joined" : "Left") : "—" };
+              }
+              if (seg.kind === "leave") {
+                const st = styleFor(seg.period);
+                return { span: seg.span, bg: st.bg, fg: st.fg,
+                         text: seg.span >= 3 ? st.label : st.abbrev };
+              }
+              const code = cby((viewData.cells[seg.date] || {})[s.id] || "");
+              return {
+                span: 1,
+                text: code ? code.code : "",
+                bg: code ? code.color : (isNonOff(viewData, seg.date) ? "#FDF8EE" : "#FFFFFF"),
+                fg: code ? textOn(code.color) : "#4A6570",
+              };
+            });
+            const totals = [t.morning, t.afternoon, ...(viewData.eveningEnabled ? [t.evening] : []),
+                            t.night, t.other, t.release, t.off];
+            return { num: i + 1, name: s.name, designation: s.designation || "",
+                     cells, totals, nonOfficialDuty: t.nonOfficialDuty };
+          }),
+          onCall: rotaDays.map((date) => {
+            const id = viewData.onCall?.[date] || "";
+            if (!id) return "";
+            const who = viewData.staff.find((x) => x.id === id);
+            return who ? uniqueLabel(who, viewData.staff.filter((x) => isEmployedOn(x, date))) : "";
+          }),
+          /* Same rows, same order, same colours as the table footer. */
+          coverage: [["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
+            ...(viewData.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []),
+            ["NIGHT", "night", "#6FA8DC"],
+            ...(viewData.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : []),
+          ].map(([label, cat, color]) => ({
+            label, color, fg: textOn(color), soft: color + "33",
+            counts: rotaDays.map((date) => dayCountFor(viewData, date, cat)),
+          })),
+          staff: viewData.staff.map((s) => ({
+            name: s.name, designation: s.designation, email: s.email,
+            contact: s.contact, recc: s.recc,
+            licence: s.licence ? niceDate(s.licence) : "",
+            employmentRole: s.employmentRole,
+            startDate: s.startDate ? niceDate(s.startDate) : "",
+            endDate: s.endDate ? niceDate(s.endDate) : "",
+            status: s.endDate && parseD(s.endDate) < new Date() ? "Former" : "Active",
+          })),
+        };
+        await exportRotaToExcel(model);
+      } catch (e) {
+        window.alert("Sorry, couldn't create the Excel file. Try Print / Save as PDF instead.");
+      }
+    };
+
     const saveAsImage = async () => {
       if (!canSaveImage) return;
       const node = printBodyRef.current;
@@ -1263,6 +1346,9 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         <style>{globalCss}</style>
         <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
           <Btn small onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</Btn>
+          {printView.kind === "rota" && (
+            <Btn small onClick={saveAsExcel}><FileSpreadsheet size={14} /> Export Excel</Btn>
+          )}
           <Btn small onClick={saveAsImage} disabled={!canSaveImage} title={canSaveImage ? "" : `Available for ranges up to ${IMG_MAX_DAYS} days — use Print / Save as PDF for wider ranges.`}><Image size={14} /> Save as image</Btn>
           {!canSaveImage && <span style={{ alignSelf: "center", fontSize: 12, color: T.inkSoft }}>Image export supports up to {IMG_MAX_DAYS} days — use PDF for wider ranges.</span>}
           {printView.kind === "rota" && (
