@@ -248,12 +248,32 @@ export default function SmartRosterTab({
     return m;
   }, [data.codes]);
 
+  /* A cell is either a plain duty code id, or a list of duties when a
+     department uses tasks or split shifts:
+         "abc123"   or   [{ code: "abc", task: "Waiter" }, ...]
+     The engine holds one duty per staff member per day, so a split duty
+     contributes its first duty here. Reading the raw value instead would
+     find no matching code and skip the day entirely — the engine would
+     then treat a person who worked twice as having been free, and roster
+     them again. Silent, and exactly the kind of unfairness the lookback
+     exists to prevent. */
+  const firstCodeIdOf = (raw) => {
+    if (!raw) return "";
+    if (typeof raw === "string") return raw;
+    if (Array.isArray(raw)) {
+      const first = raw.find((e) => e && e.code);
+      return first ? first.code : "";
+    }
+    return "";
+  };
+
   const flatten = (from, to) => {
     const out = {};
     for (const [date, row] of Object.entries(data.cells || {})) {
       if (date < from || date > to) continue;
-      for (const [sid, codeId] of Object.entries(row || {})) {
-        const code = codeById[codeId];
+      if (!row || typeof row !== "object") continue;
+      for (const [sid, raw] of Object.entries(row)) {
+        const code = codeById[firstCodeIdOf(raw)];
         if (code) out[`${sid}|${date}`] = code;
       }
     }
@@ -971,6 +991,23 @@ export default function SmartRosterTab({
           T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle}
           th={th} td={td} dstr={dstr} rules={rules} />
       )}
+
+      {/* Said here rather than discovered later. A manager whose department
+          uses tasks or split shifts needs to know what the engine will and
+          will not do with them before applying a week over their work. */}
+      <p style={{
+        margin: 0, fontSize: 12, color: T.inkSoft, lineHeight: 1.65,
+        background: "#F4F8F7", border: `1px solid ${T.line}`,
+        borderRadius: 10, padding: "11px 13px",
+      }}>
+        <strong style={{ color: T.ink }}>What Smart Roster does not do yet.</strong>{" "}
+        It writes one duty per person per day, so it does not create split or
+        double duties, and it does not assign tasks. If a day already holds two
+        duties, it counts that person as having worked when sharing the week out
+        fairly, using the first duty of the two. Applying a week replaces the
+        duties in it, so any split duty or task on those days is replaced too —
+        add them again afterwards.
+      </p>
     </div>
   );
 }
