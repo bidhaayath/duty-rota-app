@@ -435,7 +435,9 @@ const cellMetaOf = (data, date, staffId) => (data.cellMeta?.[date]?.[staffId]) |
 
 /* Duty exchanges. When a duty is changed from what was originally rostered,
    the cell remembers what it WAS and who asked for the change:
-     cellMeta[date][staffId].exchange = { originalCode: "<code id>", requestedBy: "staff"|"manager" }
+     cellMeta[date][staffId].exchange = { originalCode: "<code id>",
+                                          originalPost: "<post id>",
+                                          requestedBy: "staff"|"manager" }
    originalCode "" means the cell was originally empty. Marking is manual and
    is never cleared automatically — changing the duty back to the original
    code leaves the mark in place until the user clears it. */
@@ -1469,9 +1471,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                          text: seg.span >= 3 ? st.label : st.abbrev };
               }
               const code = cby(firstCodeId(viewData, seg.date, s.id));
+              const pid = viewData.postsEnabled
+                ? (cellEntries(viewData, seg.date, s.id)[0]?.post || "") : "";
               return {
                 span: 1,
                 text: code ? code.code : "",
+                post: pid ? ((viewData.posts || []).find((x) => x.id === pid)?.name || "") : "",
                 bg: code ? code.color : (isNonOff(viewData, seg.date) ? "#FDF8EE" : "#FFFFFF"),
                 fg: code ? textOn(code.color) : "#4A6570",
               };
@@ -1829,10 +1834,11 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
    brand-new code without leaving the rota. Chips are finger-sized.       */
 const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", "#4DB6AC", "#F06292", "#A1887F", "#9575CD", "#4DD0E1"];
 
-function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled, exchange, onExchange }) {
+function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled, exchange, onExchange,
+  posts = [], postsEnabled = false, postId = "", onPickPost, postName = "" }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState("pick"); // 'pick' | 'note' | 'add' | 'swap'
+  const [mode, setMode] = useState("pick"); // 'pick' | 'post' | 'note' | 'add' | 'swap'
   const [noteText, setNoteText] = useState(note || "");
   const [nc, setNc] = useState({ code: "", label: "", color: NEW_CODE_COLORS[0], counts: "morning" });
   const wrapRef = useRef(null);
@@ -1863,7 +1869,22 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
     setTimeout(() => inputRef.current?.focus(), 10);
   };
   const close = () => { setOpen(false); setQuery(""); setMode("pick"); };
-  const pick = (id) => { onPick(id); close(); };
+  /* Picking a duty normally finishes the job. When the department uses
+     posts, it moves on to the post step instead of closing — two short
+     steps rather than one long list, which is what makes this workable on
+     a phone. Clearing the duty always closes: there is nothing to post. */
+  const usesPosts = postsEnabled && posts.length > 0;
+  const pick = (id) => {
+    /* Picking a duty moves straight on to the post, with whatever the person
+       was last on already selected — so the common case is a glance and a tap
+       on Done, and a change is one tap on a different post. An earlier version
+       skipped this step whenever a post could be guessed, which saved a tap
+       but hid the guess; showing it is worth more than saving it. */
+    onPick(id);
+    if (id && usesPosts) { setQuery(""); setMode("post"); return; }
+    close();
+  };
+  const pickPost = (pid) => { onPickPost && onPickPost(pid); close(); };
 
   useEffect(() => {
     if (!open) return;
@@ -1917,7 +1938,17 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
         background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none", position: "relative",
         boxShadow: open ? `0 0 0 2px ${T.lagoon}` : "none",
       }}>
-        {current ? current.code : "—"}
+        {current ? current.code : "\u2014"}
+        {/* The post under the duty. Every style here is inline on purpose:
+            the image export clones the DOM and copies inline styles only, so
+            anything styled by a CSS class would vanish from the exported
+            picture without any error to warn you. */}
+        {postName && (
+          <div style={{
+            fontSize: 9.5, fontWeight: 600, lineHeight: 1.2, marginTop: 1,
+            opacity: 0.9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>{postName}</div>
+        )}
         {/* small blue dot marks a cell that has a note */}
         {note && <span title="Has a note" style={{ position: "absolute", top: 2, right: 2, width: 7, height: 7, borderRadius: "50%", background: "#2F6DB5", border: "1px solid #fff" }} />}
         {/* icon marks a duty changed from the original: person = staff asked,
@@ -1940,6 +1971,12 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
           position: "fixed", zIndex: 40, left: pos.left, top: pos.top, bottom: pos.bottom,
           width: PANEL_W, boxSizing: "border-box", background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
           boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8, overflowWrap: "break-word", wordBreak: "break-word",
+          /* The panel is rendered inside a rota cell, and the shared td style
+             sets white-space: nowrap so duty codes never wrap. That is
+             inherited here, which made the explanatory text in the note and
+             changed-duty panels run straight out of the box. Normal wrapping
+             is restored for the panel only; the cells keep theirs. */
+          whiteSpace: "normal",
         }}>
           {mode === "pick" && (
             <>
@@ -1952,22 +1989,72 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
               </div>
               <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKey} placeholder="Type to search… Enter = pick"
                 style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 7 }} />
-              <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => setMode("note")} style={{ ...btnMini, flex: 1, background: note ? "#E7F0FA" : T.mist, color: note ? "#2F6DB5" : T.ink, border: `1px solid ${T.line}` }}>
+              {/* The four actions for a cell, in one block: note, new code,
+                  post, and the changed-duty mark. A two-column grid keeps them
+                  the same size and inside the panel — the post button was
+                  previously on its own above and spilled out of it. When the
+                  department has no posts there are three, so the changed-duty
+                  mark takes the full width rather than leaving a gap. */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <button onClick={() => setMode("note")} style={{ ...btnMini, background: note ? "#E7F0FA" : T.mist, color: note ? "#2F6DB5" : T.ink, border: `1px solid ${T.line}` }}>
                   {note ? "✎ Edit note" : "+ Note"}
                 </button>
-                <button onClick={() => setMode("add")} style={{ ...btnMini, flex: 1, background: T.mist, color: T.ink, border: `1px solid ${T.line}` }}>+ New code</button>
+                <button onClick={() => setMode("add")} style={{ ...btnMini, background: T.mist, color: T.ink, border: `1px solid ${T.line}` }}>+ New code</button>
+
+                {usesPosts && hasCode && (
+                  <button onClick={() => setMode("post")} style={{
+                    ...btnMini,
+                    background: postId ? "#EAF6F3" : T.mist,
+                    color: postId ? "#12655C" : T.ink,
+                    border: `1px solid ${postId ? "#BFE2DA" : T.line}`,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {postName ? `\u25CF ${postName}` : "+ Add post"}
+                  </button>
+                )}
+
+                <button onClick={() => setMode("swap")} style={{
+                  ...btnMini,
+                  gridColumn: (usesPosts && hasCode) ? "auto" : "1 / -1",
+                  background: exchange ? EXCHANGE_BY[exchange.requestedBy].bg : T.mist,
+                  color: exchange ? EXCHANGE_BY[exchange.requestedBy].color : T.ink,
+                  border: `1px solid ${T.line}`, display: "flex", alignItems: "center",
+                  justifyContent: "center", gap: 6, overflow: "hidden", whiteSpace: "nowrap",
+                }}>
+                  <ArrowLeftRight size={12} />
+                  {exchange ? `Changed · ${EXCHANGE_BY[exchange.requestedBy].short}` : "Mark as changed"}
+                </button>
               </div>
-              <button onClick={() => setMode("swap")} style={{
-                ...btnMini, width: "100%", marginTop: 6,
-                background: exchange ? EXCHANGE_BY[exchange.requestedBy].bg : T.mist,
-                color: exchange ? EXCHANGE_BY[exchange.requestedBy].color : T.ink,
-                border: `1px solid ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              }}>
-                <ArrowLeftRight size={12} />
-                {exchange ? `Changed · ${EXCHANGE_BY[exchange.requestedBy].short}` : "Mark as changed"}
-              </button>
             </>
+          )}
+
+          {/* Step two: where they are stationed. Only reached when the
+              department uses posts, and always skippable — plenty of duties
+              have no post, and forcing a choice would be worse than useless. */}
+          {mode === "post" && (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 2 }}>Post</div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>Where are they stationed?</div>
+              <div style={{ display: "grid", gap: 5, maxHeight: 210, overflowY: "auto" }}>
+                <button onClick={() => pickPost("")} style={{
+                  ...btnMini, textAlign: "left", padding: "8px 11px",
+                  border: `1px dashed ${T.line}`, background: !postId ? "#EAF6F3" : "#fff",
+                  color: T.inkSoft, fontWeight: 600,
+                }}>No post</button>
+                {posts.map((x) => (
+                  <button key={x.id} onClick={() => pickPost(x.id)} style={{
+                    ...btnMini, textAlign: "left", padding: "8px 11px",
+                    border: postId === x.id ? `2px solid ${T.lagoon}` : `1px solid ${T.line}`,
+                    background: postId === x.id ? "#EAF6F3" : "#fff",
+                    color: T.ink, fontWeight: 700,
+                  }}>{x.name}</button>
+                ))}
+              </div>
+              <button onClick={close} style={{
+                ...btnMini, width: "100%", marginTop: 8, background: T.mist,
+                color: T.ink, border: `1px solid ${T.line}`,
+              }}>Done</button>
+            </div>
           )}
 
           {mode === "note" && (
@@ -2014,7 +2101,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
               <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>Duty changed from original</div>
               <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>
                 {exchange
-                  ? `Currently marked as: ${EXCHANGE_BY[exchange.requestedBy].label}. Original duty was ${codes.find((c) => c.id === exchange.originalCode)?.code || "—"}.`
+                  ? `Currently marked as: ${EXCHANGE_BY[exchange.requestedBy].label}. Originally ${codes.find((c) => c.id === exchange.originalCode)?.code || "—"}${exchange.originalPost && postsEnabled ? ` — ${(posts.find((x) => x.id === exchange.originalPost) || {}).name || ""}` : ""}.`
                   : `Records that this duty differs from what was originally rostered. The current duty (${current ? current.code : "—"}) is kept as the original.`}
               </div>
               {!exchange && (
@@ -2078,8 +2165,13 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         const ex = meta && meta.exchange;
         if (!ex) return;
         if (!day) day = { ...(cells[date] || {}) };
-        if (ex.originalCode) day[sid] = ex.originalCode;
-        else delete day[sid];
+        if (ex.originalCode) {
+          // Restore the original post alongside the original duty, or the
+           // view would show today's post against yesterday's duty.
+          day[sid] = ex.originalPost
+            ? [{ code: ex.originalCode, post: ex.originalPost }]
+            : ex.originalCode;
+        } else delete day[sid];
       });
       if (day) cells[date] = day;
     });
@@ -2118,14 +2210,73 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
     border: `1px solid ${T.line}`, borderRadius: 8, background: "#fff", color: T.ink,
   };
 
+  /* The post this person was on most recently, looking backwards from the
+     given date. "Most recent" rather than "most usual" on purpose: it
+     follows a guard who has been moved to a different gate this week
+     instead of arguing with the change, and "same as last time" is a rule
+     a manager can predict without thinking about it. */
+  const lastPostFor = (staffId, beforeDate) => {
+    const dates = Object.keys(data.cells || {})
+      .filter((dt) => dt < beforeDate)
+      .sort()
+      .reverse();
+    for (const dt of dates) {
+      const post = cellEntries(data, dt, staffId)[0]?.post;
+      if (post) return post;
+    }
+    return "";
+  };
+
+  /* The post to start the post step on: what this person was last on, and
+     nothing more. Falling back to some other person's post, or to whichever
+     post happens to be first on the list, would put a name in the cell that
+     nothing in the rota supports. Better to leave it unset and let the
+     manager choose. */
+  const defaultPostFor = (staffId, date) => {
+    if (!data.postsEnabled) return "";
+    const list = data.posts || [];
+    if (!list.length) return "";
+    const chosen = lastPostFor(staffId, date);
+    // A post that has since been deleted must not be resurrected.
+    return list.some((x) => x.id === chosen) ? chosen : "";
+  };
+
+  /* Returns the post that ended up on the cell, so the picker knows whether
+     it still needs to ask. */
   const setCell = (date, staffId, codeId) => {
     if (!staffEditable(staffId)) {
       alert("This staff member is view-only on your current plan.\n\nUpgrade to assign or change their duties.");
+      return "";
+    }
+    const existing = cellEntries(data, date, staffId)[0]?.post || "";
+    /* Carry the post forward onto a cell that has none. A guard on the same
+       gate all week then costs one tap a day instead of two. It is filled in
+       visibly, not silently: the post appears in the cell straight away, can
+       be changed in the same panel, and Undo puts everything back. */
+    const carried = (!existing && codeId) ? defaultPostFor(staffId, date) : "";
+    const postId = existing || carried;
+    update((d) => {
+      if (!d.cells[date]) d.cells[date] = {};
+      if (!codeId) { delete d.cells[date][staffId]; return d; }
+      d.cells[date][staffId] = postId ? [{ code: codeId, post: postId }] : codeId;
+      return d;
+    });
+    return postId;
+  };
+
+  /* The post is stored on the duty, not beside it, so the two can never
+     drift apart. A cell with a duty and no post collapses back to a plain
+     code id, which keeps ordinary rotas in the shape they have always had. */
+  const setCellPost = (date, staffId, postId) => {
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their duties.");
       return;
     }
     update((d) => {
-      if (!d.cells[date]) d.cells[date] = {};
-      if (codeId) d.cells[date][staffId] = codeId; else delete d.cells[date][staffId];
+      const entries = entriesOf((d.cells[date] || {})[staffId]);
+      if (!entries.length) return d;          // no duty, nothing to attach to
+      const next = entries.map((e, i) => (i === 0 ? { ...e, post: postId || "" } : e));
+      d.cells[date][staffId] = (next.length === 1 && !next[0].post) ? next[0].code : next;
       return d;
     });
   };
@@ -2180,6 +2331,12 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         const existing = entry.exchange;
         entry.exchange = {
           originalCode: existing ? existing.originalCode : firstCodeId(d, date, staffId),
+          /* The post is part of what was originally rostered. A guard moved
+             from Front Gate to Security Room on the same morning shift has
+             genuinely been changed, and recording only the duty code would
+             show "original M, now M" — a change with nothing to see. */
+          originalPost: existing ? (existing.originalPost || "")
+            : (entriesOf((d.cells[date] || {})[staffId])[0]?.post || ""),
           requestedBy: who,
         };
       }
@@ -2369,6 +2526,19 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     // before the exchange; unchanged cells look the same.
                     const liveCodeId = firstCodeId(data, date, s.id);
                     const codeId = showOriginal && ex ? (ex.originalCode || "") : liveCodeId;
+                    /* The post belongs to the duty, so it is only shown when the
+                       department has posts switched on. Turning the switch off
+                       hides them without deleting anything.
+
+                       In "see original" mode it follows the duty: showing the
+                       original duty beside today's post would describe a shift
+                       that never existed. */
+                    const cellPostId = !data.postsEnabled ? ""
+                      : (showOriginal && ex) ? (ex.originalPost || "")
+                      : (cellEntries(data, date, s.id)[0]?.post || "");
+                    const cellPostName = cellPostId
+                      ? ((data.posts || []).find((x) => x.id === cellPostId)?.name || "")
+                      : "";
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
                     if (showOriginal) {
@@ -2380,7 +2550,16 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                             border: ex ? "1px dashed #2F6DB5" : `1px solid ${code ? "transparent" : T.line}`,
                             background: bg, color: code ? textOn(code.color) : T.inkSoft,
                             opacity: ex ? 1 : 0.55,
-                          }}>{code ? code.code : "—"}</div>
+                          }}>
+                            {code ? code.code : "\u2014"}
+                            {/* Inline styles only — the image export drops classes. */}
+                            {cellPostName && (
+                              <div style={{
+                                fontSize: 9.5, fontWeight: 600, lineHeight: 1.2, marginTop: 1,
+                                opacity: 0.9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                              }}>{cellPostName}</div>
+                            )}
+                          </div>
                         </td>
                       );
                     }
@@ -2391,6 +2570,11 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                           codes={data.codes}
                           eveningEnabled={data.eveningEnabled}
                           onPick={(id) => setCell(date, s.id, id)}
+                          posts={data.posts || []}
+                          postsEnabled={!!data.postsEnabled}
+                          postId={cellPostId}
+                          postName={cellPostName}
+                          onPickPost={(pid) => setCellPost(date, s.id, pid)}
                           cellBg={bg}
                           cellFg={code ? textOn(code.color) : T.inkSoft}
                           hasCode={!!code}
@@ -2846,10 +3030,24 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
                   const code = codeById(firstCodeId(data, seg.date, s.id));
                   const num = noteNum(seg.date, s.id);
                   const ex = exchangeOf(data, seg.date, s.id);
+                  /* The post, when the department uses them. Only shown if the
+                     switch is on, so an export never reveals posts a manager
+                     believes are turned off. */
+                  const pPostId = data.postsEnabled ? (cellEntries(data, seg.date, s.id)[0]?.post || "") : "";
+                  const pPostName = pPostId
+                    ? ((data.posts || []).find((x) => x.id === pPostId)?.name || "")
+                    : "";
                   return (
                     <td key={seg.date} style={{ ...ptd, background: code ? code.color : "#fff", color: code ? textOn(code.color) : "#999", fontWeight: 700, position: "relative" }}>
                       {code ? code.code : ""}
                       {num && <sup style={{ fontSize: 8 }}>{num}</sup>}
+                      {/* Inline styles only: the image export clones this DOM and
+                         copies inline styles, dropping anything set by a class. */}
+                      {pPostName && (
+                        <div style={{ fontSize: 7.5, fontWeight: 600, lineHeight: 1.15, opacity: 0.92 }}>
+                          {pPostName}
+                        </div>
+                      )}
                       {/* S = staff asked for the change, M = manager changed it */}
                       {ex && <sup style={{ fontSize: 8, marginLeft: 1 }}>{ex.requestedBy === "manager" ? "M" : "S"}</sup>}
                     </td>

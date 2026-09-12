@@ -419,10 +419,14 @@ export default function SmartRosterTab({
     }
     const wrong = [];
     for (const w of verify.writes) {
-      const landed = (data.cells?.[w.date] || {})[w.sid];
-      if (landed !== w.id) {
+      /* A cell is either a plain duty code id or a list of duties carrying a
+         post. Comparing the raw value only works for the first shape: a cell
+         holding a post would never match and would be reported as empty even
+         though the duty landed correctly. Compare the duty itself. */
+      const landedId = firstCodeIdOf((data.cells?.[w.date] || {})[w.sid]);
+      if (landedId !== w.id) {
         const who = (data.staff || []).find((s) => String(s.id) === String(w.sid))?.name || w.sid;
-        wrong.push(`${w.date} · ${who}: expected ${w.code}, rota has ${codeById[landed] || "nothing"}`);
+        wrong.push(`${w.date} · ${who}: expected ${w.code}, rota has ${codeById[landedId] || "nothing"}`);
       }
     }
     const total = verify.writes.length;
@@ -1002,11 +1006,11 @@ export default function SmartRosterTab({
       }}>
         <strong style={{ color: T.ink }}>What Smart Roster does not do yet.</strong>{" "}
         It writes one duty per person per day, so it does not create split or
-        double duties, and it does not assign tasks. If a day already holds two
+        double duties, and it does not choose posts. If a day already holds two
         duties, it counts that person as having worked when sharing the week out
         fairly, using the first duty of the two. Applying a week replaces the
-        duties in it, so any split duty or task on those days is replaced too —
-        add them again afterwards.
+        duties in it, and a replaced duty does not keep its post — set those
+        again afterwards on the days that need them.
       </p>
     </div>
   );
