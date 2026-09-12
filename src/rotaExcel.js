@@ -59,7 +59,7 @@ const safeFileName = (s) =>
  *   days        [{ date, dayName, dayLabel, nonOff }]
  *   totalHeads  [string]  e.g. ["M","A","N","OD","RD","OFF"]
  *   rows        [{ num, name, designation, cells, totals, nonOfficialDuty }]
- *                 cells: [{ span, text, bg, fg, muted }]
+ *                 cells: [{ span, text, post, bg, fg, muted }]
  *                 totals: [number] aligned with totalHeads
  *   onCall      [string]  one per day, "" when nobody
  *   staff       [{ name, designation, email, contact, recc, licence,
@@ -132,7 +132,8 @@ export async function exportRotaToExcel(model) {
   /* Staff rows. */
   rows.forEach((r, ri) => {
     const row = ws.getRow(HEAD + 1 + ri);
-    row.height = 20;
+    // A row with any post needs the height for two lines of text.
+    row.height = r.cells.some((c) => c.post) ? 30 : 20;
 
     row.getCell(1).value = r.num;
     row.getCell(1).font = { size: 9, color: { argb: "FF4A6570" } };
@@ -149,8 +150,12 @@ export async function exportRotaToExcel(model) {
       const span = Math.max(1, seg.span || 1);
       const cell = row.getCell(col);
       if (span > 1) ws.mergeCells(row.number, col, row.number, col + span - 1);
-      cell.value = seg.text || "";
-      cell.alignment = { horizontal: "center", vertical: "middle" };
+      /* Duty on the first line, post underneath, in one cell. Two rows per
+         person would double the height of every sheet and make combining
+         several departments much harder, which is the whole point of this
+         export for the person receiving it. */
+      cell.value = seg.post ? `${seg.text || ""}\n${seg.post}` : (seg.text || "");
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: !!seg.post };
       cell.font = {
         bold: !seg.muted, size: 10,
         italic: !!seg.muted,
