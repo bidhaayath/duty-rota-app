@@ -291,7 +291,7 @@ export default function Dashboard({
           borderRadius: 999, padding: "1px 8px",
         }}>Soon</span>}
       </div>
-      {note && <div style={{ fontSize: 11.5, color: T.inkSoft, padding: "6px 2px 0" }}>{note}</div>}
+      {note && <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.72)", padding: "6px 2px 0" }}>{note}</div>}
     </div>
   );
 
@@ -302,7 +302,7 @@ export default function Dashboard({
       style={{
         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
         width: "100%", textAlign: "left", cursor: "pointer", marginBottom: 7,
-        background: "#fff", border: `1px solid ${T.line}`, borderRadius: 9,
+        background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 10,
         padding: "10px 13px", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: T.ink,
       }}
     >
@@ -323,15 +323,15 @@ export default function Dashboard({
       style={{
         display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
         cursor: soon ? "default" : "pointer", marginBottom: 7,
-        background: "#fff", border: `1px solid ${T.line}`, borderRadius: 9,
+        background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 9,
         padding: "10px 13px", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600,
-        color: soon ? T.inkSoft : (danger ? T.coral : T.ink), opacity: soon ? 0.7 : 1,
+        color: soon ? "rgba(255,255,255,0.6)" : (danger ? "#FFB4A6" : "#fff"), opacity: soon ? 0.7 : 1,
       }}
     >
       <Icon size={15} style={{ flexShrink: 0 }} />
       <span style={{ flex: 1 }}>{label}</span>
       {soon && <span style={{
-        fontSize: 10.5, fontWeight: 700, color: T.inkSoft, background: T.mist,
+        fontSize: 10.5, fontWeight: 700, color: "rgba(255,255,255,0.85)", background: "rgba(255,255,255,0.18)",
         border: `1px solid ${T.line}`, borderRadius: 999, padding: "1px 7px",
       }}>Soon</span>}
     </button>
@@ -358,13 +358,93 @@ export default function Dashboard({
   }
 
   return (
-    <div className="dr-fade-in" style={{
-      fontFamily: "Inter, system-ui, sans-serif", color: T.ink,
-      background: T.mist, minHeight: "100vh",
+    <div className="dr-fade-in dr-theme" style={{
+      fontFamily: "Inter, system-ui, sans-serif", color: "#fff",
+      minHeight: "100vh", position: "relative", overflow: "hidden",
+      /* The sign-in page's background, brought inside: a deep blue-teal
+         gradient with a few large soft-focus blobs drifting over it. The
+         blobs are what the frosted panels pick up — without something
+         behind it, glass is just a pale rectangle. */
+      background: "linear-gradient(140deg,#1B6F8C 0%,#1E7D96 35%,#2A6FA8 70%,#3B6FB5 100%)",
+      backgroundAttachment: "fixed",
     }}>
+      {/* Decorative only. Absolute rather than fixed: a fixed layer covers the
+         whole viewport, including the top bar this component does not own, and
+         a blurred blob drifting over it washed out the My plan and Logout
+         buttons. Absolute keeps the blobs inside the dashboard where they
+         belong. */}
+      <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" }}>
+        <span style={{ position: "absolute", width: 420, height: 420, borderRadius: "50%", background: "#7FD4C1", filter: "blur(90px)", opacity: 0.5, top: -120, right: -80 }} />
+        <span style={{ position: "absolute", width: 360, height: 360, borderRadius: "50%", background: "#8FA8E8", filter: "blur(90px)", opacity: 0.45, bottom: -110, right: 40 }} />
+        <span style={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", background: "#E8C07F", filter: "blur(85px)", opacity: 0.36, bottom: 80, left: -110 }} />
+        <span style={{ position: "absolute", width: 380, height: 380, borderRadius: "50%", background: "#6FC9E8", filter: "blur(90px)", opacity: 0.4, top: 120, left: -140 }} />
+      </div>
       <style>{`
+        /* ── Liquid glass ──
+           Frosted surfaces for the frame: the card, the panel, the sidebar
+           rows. A light top edge makes each surface look like it catches the
+           light from above, which is what stops it reading as a flat grey box.
+
+           The duty chips inside the calendar are deliberately left solid.
+           Their job is being read at a glance, and frosting them would wash
+           the colours into each other — the one thing on this screen that
+           must stay crisp. Glass around the data, not over it. */
+        .dr-glass {
+          background: rgba(255,255,255,0.14);
+          -webkit-backdrop-filter: blur(22px) saturate(140%);
+          backdrop-filter: blur(22px) saturate(140%);
+          border: 1px solid rgba(255,255,255,0.30);
+          box-shadow: 0 10px 34px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.40);
+        }
+        .dr-glass-soft {
+          background: rgba(255,255,255,0.13);
+          -webkit-backdrop-filter: blur(14px) saturate(130%);
+          backdrop-filter: blur(14px) saturate(130%);
+          border: 1px solid rgba(255,255,255,0.26);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
+        }
+        /* Without backdrop-filter a translucent panel over this background is
+           unreadable, so the surfaces fall back to a solid deep blue. */
+        @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+          .dr-glass { background: rgba(16,74,96,0.92); }
+          .dr-glass-soft { background: rgba(16,74,96,0.86); }
+        }
+
+        /* ── Text on the dark background ──
+           The screen was built for dark ink on white, so every colour below is
+           inverted here rather than edited in thirty-five places inline. Scoped
+           to .dr-theme so nothing else in the app is touched.
+
+           The duty chips and the rows inside the day panel are deliberately
+           excluded: they carry their own colours and must stay crisp. */
+        .dr-theme .dr-dash-title { color: #fff !important; }
+        .dr-theme .dr-dash-sub { color: rgba(255,255,255,0.75) !important; }
+        .dr-theme .dr-dash-month { color: #fff !important; }
+        .dr-theme .dr-dash-dow { color: rgba(255,255,255,0.7) !important; }
+        .dr-theme .dr-dash-pdate { color: #fff !important; }
+        .dr-theme .dr-dash-daynum { color: rgba(255,255,255,0.82) !important; }
+        .dr-theme .dr-dash-item { color: #fff !important; }
+        /* The section headings sat at the same tone as the rows under them, so
+           a heading looked like one more item in the list. Mint sets them apart
+           and ties them to the other markers in this theme — today, the selected
+           day, the TODAY badge — rather than introducing another colour. */
+        .dr-theme .dr-dash-sec {
+          background: linear-gradient(135deg, rgba(11,58,79,0.62), rgba(11,58,79,0.40)) !important;
+          border: 1px solid rgba(255,255,255,0.22) !important;
+          color: #FFFFFF !important;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.18) !important;
+          letter-spacing: 0.2px;
+        }
+        /* The icon keeps the mint so the heading still belongs to this theme
+           while the bar itself sits back and lets the department names lead. */
+        .dr-theme .dr-dash-sec svg { color: #8FE3D2; }
+        .dr-theme .dr-dash-item:hover {
+          background: rgba(255,255,255,0.24) !important;
+          border-color: rgba(255,255,255,0.45) !important;
+        }
+        .dr-theme .dr-dash-nav { color: #fff !important; }
         .dr-dash-item { transition: background 140ms ease, border-color 140ms ease, transform 140ms ease; }
-        .dr-dash-item:hover { background: ${T.mist}; border-color: #C7DBD7; }
+        .dr-dash-item:hover { background: rgba(255,255,255,0.78); border-color: rgba(15,139,126,0.35); }
         .dr-dash-item:active { transform: scale(0.99); }
         .dr-dash-item:focus-visible { outline: 2px solid ${T.lagoon}; outline-offset: 2px; }
         @media (prefers-reduced-motion: reduce) { .dr-dash-item { transition: none; } }
@@ -414,6 +494,7 @@ export default function Dashboard({
       `}</style>
 
       <div className="dr-dash-wrap" style={{
+        position: "relative", zIndex: 1,
         display: "grid", gridTemplateColumns: "310px 1fr", gap: 26,
         maxWidth: 1250, margin: "0 auto", padding: "24px 22px 44px",
         alignItems: "start",
@@ -425,7 +506,7 @@ export default function Dashboard({
           </SectionHead>
           {owned.length === 0
             ? <div style={{
-                fontSize: 12.5, color: T.inkSoft, border: `1px dashed ${T.line}`,
+                fontSize: 12.5, color: "rgba(255,255,255,0.75)", border: "1px dashed rgba(255,255,255,0.32)",
                 borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
               }}>
                 No departments of your own yet.
@@ -437,7 +518,7 @@ export default function Dashboard({
               onClick={onAddDepartment}
               style={{
                 display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
-                cursor: "pointer", marginBottom: 7, background: "#fff",
+                cursor: "pointer", marginBottom: 7, background: "rgba(255,255,255,0.16)",
                 border: `1px dashed ${T.line}`, borderRadius: 9, padding: "10px 13px",
                 fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: T.lagoon,
               }}
@@ -459,7 +540,7 @@ export default function Dashboard({
           >My Membership</SectionHead>
           {memberships.length === 0
             ? <div style={{
-                fontSize: 12.5, color: T.inkSoft, border: `1px dashed ${T.line}`,
+                fontSize: 12.5, color: "rgba(255,255,255,0.75)", border: "1px dashed rgba(255,255,255,0.32)",
                 borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
               }}>
                 Sharing a department with your team is coming soon. When it
@@ -485,9 +566,8 @@ export default function Dashboard({
         </aside>
 
         {/* ── Calendar ── */}
-        <main className="dr-dash-main" style={{
-          background: "#fff", border: `1px solid ${T.line}`, borderRadius: 14,
-          padding: "22px 22px 26px",
+        <main className="dr-dash-main dr-glass" style={{
+          borderRadius: 16, padding: "22px 22px 26px",
         }}>
           <h1 className="dr-dash-title" style={{
             fontFamily: "Sora, sans-serif", fontSize: 25, fontWeight: 700, color: T.lagoon,
@@ -519,38 +599,64 @@ export default function Dashboard({
                   const inMonth = date.getMonth() === view.month;
                   const isToday = sameDay(date, today);
                   const isSelected = ds === selected;
-                  const info = inMonth ? dayInfo(ds) : { duties: [], anyNonOfficial: false, anyOnCall: false };
+                  /* Neighbouring-month days carry their duties too. A shift on
+                     the 30th of August is still a shift, and leaving those cells
+                     blank made the start of a month look emptier than it is. They
+                     are faded so the month in view still reads as the subject. */
+                  const info = dayInfo(ds);
                   const duties = info.duties.filter((d) => !d.onCallOnly);
                   return (
                     <button
                       key={ds}
-                      onClick={() => inMonth && setSelected(ds)}
+                      onClick={() => {
+                        // Tapping a day from the month either side moves the
+                        // calendar there, rather than describing a day that is
+                        // barely visible at the edge of the grid.
+                        if (!inMonth) setView({ year: date.getFullYear(), month: date.getMonth() });
+                        setSelected(ds);
+                      }}
                       aria-label={niceFullDate(ds)}
                       className="dr-dash-day"
                       style={{
                         position: "relative",
-                        textAlign: "left", fontFamily: "inherit", cursor: inMonth ? "pointer" : "default",
-                        minHeight: duties.length ? 58 : 38, borderRadius: 8, padding: "5px 6px",
-                        /* Non-official days carry the same gold as the rota grid,
-                           so the day that counts for payment is recognisable in
-                           both places without needing a key. */
+                        textAlign: "left", fontFamily: "inherit", cursor: "pointer",
+                        minHeight: duties.length ? 58 : 38, borderRadius: 10, padding: "5px 6px",
+                        /* Deliberately NOT frosted. Glass belongs on the few big
+                           surfaces — the card and the panel below — the way it
+                           works on the sign-in page. Giving all 42 cells their own
+                           frosted panel made every empty day look like something
+                           worth reading, and the month stopped being scannable.
+
+                           So: a day with duties gets a quiet white card, a day
+                           without gets nothing at all beyond its number, and the
+                           gold of a non-official day still shows through. */
                         background: !inMonth ? "transparent"
-                          : info.anyNonOfficial ? "#FDF8EE"
-                          : (duties.length ? "#fff" : "#FBFDFC"),
+                          : info.anyNonOfficial ? "rgba(243,217,164,0.26)"
+                          : duties.length ? "rgba(255,255,255,0.12)"
+                          : "transparent",
+                        /* Faded rather than hidden: enough to read, not enough to
+                           be mistaken for part of this month. Days with a duty stay
+                           a little clearer than empty ones. */
+                        /* Lagoon is too dark to read as a highlight here, so the
+                           selected and today markers use the pale mint from the
+                           sign-in palette instead. */
                         border: isSelected
-                          ? `2px solid ${T.lagoon}`
+                          ? "2px solid #8FE3D2"
                           : isToday
-                            ? `1.5px solid ${T.lagoon}`
-                            : `1px solid ${inMonth && (duties.length || info.anyNonOfficial) ? T.line : "#E9F0EE"}`,
-                        opacity: inMonth ? 1 : 0.45,
+                            ? "1.5px solid rgba(143,227,210,0.75)"
+                            : (inMonth && (duties.length || info.anyNonOfficial))
+                              ? "1px solid rgba(255,255,255,0.22)"
+                              : "1px solid transparent",
+                        boxShadow: isSelected ? "0 4px 18px rgba(143,227,210,0.28)" : "none",
+                        opacity: inMonth ? 1 : (duties.length ? 0.45 : 0.3),
                       }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: duties.length ? 4 : 0 }}>
                         <span className="dr-dash-daynum" style={{
                           display: "inline-flex", alignItems: "center", justifyContent: "center",
                           minWidth: 19, height: 19, borderRadius: 999, padding: "0 5px",
                           fontSize: 11, fontWeight: 700, lineHeight: 1,
-                          background: isToday ? T.lagoon : "transparent",
-                          color: isToday ? "#fff" : (info.anyNonOfficial ? "#A5731B" : T.inkSoft),
+                          background: isToday ? "#8FE3D2" : "transparent",
+                          color: isToday ? "#0E4C4A" : (info.anyNonOfficial ? "#F3D9A4" : "rgba(255,255,255,0.82)"),
                         }}>{pad(date.getDate())}</span>
                         {/* On call is a state, not a duty, so it gets a mark
                             rather than a block of its own. */}
@@ -561,7 +667,7 @@ export default function Dashboard({
                           <span title="On call" className="dr-dash-oc" style={{
                             position: "absolute", top: 2, right: 2,
                             fontSize: 8.5, fontWeight: 800, letterSpacing: 0.2, lineHeight: 1,
-                            color: "#fff", background: "#A5731B",
+                            color: "#5C3F08", background: "#F3D9A4",
                             borderRadius: 4, padding: "2px 3px",
                           }}>OC</span>
                         )}
@@ -596,9 +702,9 @@ export default function Dashboard({
               matters — which department, what the code actually means, whether
               the day counts for payment, whether they are on call — lives here,
               for whichever day is tapped. Opens on today. */}
-          <div className="dr-dash-panel" style={{
-            marginTop: 18, border: `1px solid ${T.line}`, borderRadius: 12,
-            background: selectedInfo.anyNonOfficial ? "#FDF8EE" : "#FBFDFC", padding: "14px 16px",
+          <div className="dr-dash-panel dr-glass-soft" style={{
+            marginTop: 18, borderRadius: 14, padding: "14px 16px",
+            background: selectedInfo.anyNonOfficial ? "rgba(243,217,164,0.22)" : undefined,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
               <span className="dr-dash-pdate" style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 600 }}>
@@ -606,26 +712,26 @@ export default function Dashboard({
               </span>
               {selected === dstr(today) && (
                 <span style={{
-                  fontSize: 10.5, fontWeight: 700, color: "#fff", background: T.lagoon,
+                  fontSize: 10.5, fontWeight: 700, color: "#0E4C4A", background: "#8FE3D2",
                   borderRadius: 999, padding: "2px 9px",
                 }}>TODAY</span>
               )}
               {selectedInfo.anyNonOfficial && (
                 <span style={{
-                  fontSize: 10.5, fontWeight: 700, color: "#A5731B", background: "#FBF1DC",
-                  border: "1px solid #E7D9B8", borderRadius: 999, padding: "2px 9px",
+                  fontSize: 10.5, fontWeight: 700, color: "#5C3F08", background: "#F3D9A4",
+                  border: "1px solid rgba(255,255,255,0.35)", borderRadius: 999, padding: "2px 9px",
                 }}>NON-OFFICIAL DAY</span>
               )}
               {selectedInfo.anyOnCall && (
                 <span style={{
-                  fontSize: 10.5, fontWeight: 700, color: "#A5731B", background: "#FBF1DC",
-                  border: "1px solid #E7D9B8", borderRadius: 999, padding: "2px 9px",
+                  fontSize: 10.5, fontWeight: 700, color: "#5C3F08", background: "#F3D9A4",
+                  border: "1px solid rgba(255,255,255,0.35)", borderRadius: 999, padding: "2px 9px",
                 }}>ON CALL</span>
               )}
             </div>
 
             {selectedInfo.duties.length === 0 ? (
-              <div style={{ fontSize: 13, color: T.inkSoft }}>
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.78)" }}>
                 No duty scheduled{selectedInfo.anyNonOfficial ? " — this is a non-official day." : "."}
               </div>
             ) : (
@@ -633,6 +739,8 @@ export default function Dashboard({
                 {selectedInfo.duties.map((d, i) => (
                   <div key={i} style={{
                     display: "flex", alignItems: "flex-start", gap: 11,
+                    /* Solid, not glass: this row carries the duty colour chip
+                       and the post name, and both need to stay crisp. */
                     background: "#fff", border: `1px solid ${T.line}`,
                     borderRadius: 9, padding: "10px 12px",
                   }}>
@@ -644,7 +752,11 @@ export default function Dashboard({
                       padding: "6px 8px", fontSize: 12.5, fontWeight: 800, lineHeight: 1.2,
                     }}>{d.onCallOnly ? "OC" : d.text}</span>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35 }}>
+                      {/* This row is solid white so the duty colour stays crisp,
+                         which means its text must set a dark colour explicitly.
+                         Without it the line inherits the white used everywhere
+                         else on this theme and disappears. */}
+                      <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35, color: T.ink }}>
                         {d.onCallOnly ? "On call" : (d.label || d.text)}
                         {d.postName && <span style={{ fontWeight: 500, color: T.inkSoft }}> — {d.postName}</span>}
                       </div>
@@ -660,7 +772,7 @@ export default function Dashboard({
             )}
           </div>
 
-          <p style={{ textAlign: "center", color: T.inkSoft, fontSize: 11.5, margin: "20px 0 0", lineHeight: 1.6 }}>
+          <p style={{ textAlign: "center", color: "rgba(255,255,255,0.7)", fontSize: 11.5, margin: "20px 0 0", lineHeight: 1.6 }}>
             A duty appears here when a staff row in that department carries your
             login email. This view is read-only — open a department to make changes.
           </p>
@@ -673,5 +785,5 @@ export default function Dashboard({
 const navBtn = {
   display: "flex", alignItems: "center", justifyContent: "center",
   width: 34, height: 34, borderRadius: 9, cursor: "pointer",
-  background: "#fff", border: `1px solid ${T.line}`, color: T.ink,
+  background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", color: "#fff",
 };
