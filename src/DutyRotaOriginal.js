@@ -386,10 +386,15 @@ const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
 /* ── What a cell can hold ────────────────────────────────────────────
    Historically a cell was one duty code id:
        cells[date][staffId] = "abc123"
-   To support a task alongside a duty, and two duties on one day (resort
-   and guesthouse rotas), it may also be a list:
-       cells[date][staffId] = [{ code: "abc", task: "Waiter" },
-                                { code: "xyz", task: "Cashier" }]
+   To support a post alongside a duty, and two duties on one day (resort,
+   guesthouse and security rotas), it may also be a list:
+       cells[date][staffId] = [{ code: "abc", post: "p1" },
+                                { code: "xyz", post: "p2" }]
+
+   `post` holds the POST ID from data.posts, never the post name. Storing the
+   id means renaming a post updates every rota that used it; storing the name
+   would leave last month reading "Front Gate" after it became "Main Gate",
+   which looks like a bug and cannot be corrected afterwards.
 
    BOTH SHAPES STAY VALID FOREVER. Existing rotas are never migrated —
    rewriting 800 accounts' saved data is exactly the kind of operation
@@ -404,10 +409,10 @@ const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
        payment count the date once, however many duties are in it.        */
 const entriesOf = (raw) => {
   if (!raw) return [];
-  if (typeof raw === "string") return [{ code: raw, task: "" }];
+  if (typeof raw === "string") return [{ code: raw, post: "" }];
   if (Array.isArray(raw)) {
     return raw.filter((e) => e && e.code)
-              .map((e) => ({ code: e.code, task: e.task || "" }));
+              .map((e) => ({ code: e.code, post: e.post || "" }));
   }
   return [];
 };
@@ -585,6 +590,12 @@ const seed = () => ({
   cellMeta: {},
   onCall: {},
   nonOfficial: [],
+  /* Posts: where a person is stationed while working a duty — Front Gate,
+     Security Room, Cashier. A duty says WHEN, a post says WHERE. Off by
+     default: a hospital ward has no use for them and should never be shown
+     the option unless it asks for it. */
+  posts: [],
+  postsEnabled: false,
   fridayRule: true,
   // 0 = Sunday, 1 = Monday. Sunday in the Maldives; Europe mostly runs Monday.
   weekStartsOn: 0,
@@ -624,6 +635,10 @@ const migrate = (d) => {
     if (s.designation === undefined) s.designation = "";
   });
   if (d.welcomeDismissed === undefined) d.welcomeDismissed = false;
+  // Posts are new. Every rota saved before this feature gets an empty list
+  // and the feature switched off, so nothing about it changes.
+  if (!Array.isArray(d.posts)) d.posts = [];
+  if (d.postsEnabled === undefined) d.postsEnabled = false;
   if (!d.cellMeta) d.cellMeta = {};
   if (!d.onCall) d.onCall = {};
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
@@ -1337,10 +1352,22 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       /* Tables on the other tabs: Records, Statistics, Insights, Staff,
          Duty Codes. They scroll sideways already, so the win is fitting
          more columns before the scroll starts. */
-      .dr-app table:not(.dr-rota-grid) { font-size: 11.5px !important; }
+      .dr-app table:not(.dr-rota-grid) { font-size: 11px !important; }
       .dr-app table:not(.dr-rota-grid) th,
       .dr-app table:not(.dr-rota-grid) td {
-        padding: 6px 7px !important;
+        padding: 4px 5px !important; font-size: 11px !important;
+      }
+      /* Cell contents are rarely bare text: names sit in spans, access is a
+         dropdown, status is a badge, actions are buttons. Each carries its own
+         inline font size, so a rule on the cell alone never reaches them and
+         the table still reads large. Forcing the contents to inherit makes one
+         size govern the whole table. */
+      .dr-app table:not(.dr-rota-grid) td *,
+      .dr-app table:not(.dr-rota-grid) th * { font-size: inherit !important; }
+      .dr-app table:not(.dr-rota-grid) td button,
+      .dr-app table:not(.dr-rota-grid) td select,
+      .dr-app table:not(.dr-rota-grid) td input {
+        padding: 3px 6px !important;
       }
 
       /* ── Header, toolbars and controls on a phone ──
@@ -1369,6 +1396,28 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         font-size: 12px !important; padding: 6px 8px !important;
       }
       .dr-app div.dr-card { padding: 10px !important; }
+
+      /* Wide tables on a phone. Both force a minimum width so their columns
+         stay readable on a laptop; on a 360px screen that becomes a long
+         sideways scroll. Releasing the minimum lets them use the width
+         available, and the staff table drops the columns a manager is least
+         likely to need on a phone. Nothing is lost \u2014 every field is still
+         there on a wider screen and in the staff edit form. */
+      .dr-app table.dr-codes-table { min-width: 0 !important; }
+      .dr-app table.dr-staff-table { min-width: 0 !important; }
+      /* Staff columns: 1 # | 2 Name | 3 Designation | 4 Email | 5 Access
+         6 Contact | 7 Employee ID | 8 Licence | 9 Employment | 10 Leave
+         11 Status | 12 actions. Hidden below: 6, 7, 8, 9, 10. */
+      .dr-app table.dr-staff-table th:nth-child(6),
+      .dr-app table.dr-staff-table td:nth-child(6),
+      .dr-app table.dr-staff-table th:nth-child(7),
+      .dr-app table.dr-staff-table td:nth-child(7),
+      .dr-app table.dr-staff-table th:nth-child(8),
+      .dr-app table.dr-staff-table td:nth-child(8),
+      .dr-app table.dr-staff-table th:nth-child(9),
+      .dr-app table.dr-staff-table td:nth-child(9),
+      .dr-app table.dr-staff-table th:nth-child(10),
+      .dr-app table.dr-staff-table td:nth-child(10) { display: none !important; }
     }
   `;
 
@@ -3408,7 +3457,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       )}
 
       <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+        <table className="dr-staff-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
           <thead>
             <tr>{["#", "Name", "Designation", "Email", "Access", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
           </thead>
@@ -4020,7 +4069,14 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}><strong>Where to see it:</strong> The Insights tab shows a breakdown of on-call — how many days each person was on call, and how many of those fell on non-official days. The On-call row also appears on the printed rota and image exports.</p>
       </Section>
 
-      <Section title="5. Leave — two different kinds">
+      <Section title="5. Posts — where someone is stationed">
+        <p style={{ marginTop: 0 }}>A duty code says <em>when</em> someone works — morning, afternoon, night. A <strong>post</strong> says <em>where</em> they are while they work it: Front Gate, Security Room, Cashier, Reception. Together they read as <Code>M — Front Gate</Code>.</p>
+        <p>Posts are useful for security teams, airports, guesthouses and restaurants, where the same person moves between stations from day to day. Most hospital wards never need them, so posts are <strong>switched off unless you turn them on</strong>.</p>
+        <p><strong>Setting them up:</strong> turn on <em>Use posts on this rota</em> in Settings, then add your posts on the Duty Codes tab. Keep the list short and stable — the same names every week — so your records stay comparable over a month.</p>
+        <p style={{ marginBottom: 0 }}>A post is chosen from your list rather than typed each time. That is deliberate: if one person types &ldquo;Front Gate&rdquo; and another types &ldquo;front gate&rdquo;, they become two different things and any count of them is wrong.</p>
+      </Section>
+
+      <Section title="6. Leave — two different kinds">
         <p style={{ marginTop: 0 }}>DutyRota handles leave in two ways, and it helps to know the difference:</p>
         <p style={{ marginBottom: 4 }}><strong>Leave periods</strong> (set in the Staff tab)</p>
         <p style={{ marginTop: 0 }}>For longer, planned leave — <strong>annual, maternity, pre-maternity, emergency,</strong> and <strong>other</strong>. You give a start and end date, and it fills the whole period on the rota automatically. All of these count every calendar day in the period, including Fridays, Saturdays, and non-official days.</p>
@@ -4028,7 +4084,7 @@ function HelpTab({ data }) {
         <p style={{ marginTop: 0, marginBottom: 0 }}>For day-by-day leave — <Code>SL</Code> (sick leave), <Code>FRL</Code>, <Code>ML</Code>, and any others. You enter these in a cell like any duty. Each code’s <strong>Counts as</strong> setting decides which category it adds to, so a code like <Code>N/FRL</Code> can count as FRL.</p>
       </Section>
 
-      <Section title="6. Recording a changed duty (duty exchanges)">
+      <Section title="7. Recording a changed duty (duty exchanges)">
         <p style={{ marginTop: 0 }}>When a duty ends up different from what you originally rostered — a nurse asked to swap, or you moved her yourself — you can mark that on the cell, so the rota keeps a record of both the change and who asked for it.</p>
         <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>Mark it first, then change the duty</p>
         <p style={{ marginTop: 0 }}>
@@ -4055,7 +4111,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>The mark stays until you clear it — changing the duty back to the original code does not remove it. To clear it, open the cell, tap the <strong>Changed</strong> button, then <strong>Clear mark</strong>. Applying a generated week over those dates also clears the marks on the cells it rewrites, and tells you how many before it does.</p>
       </Section>
 
-      <Section title="7. When someone joins or leaves">
+      <Section title="8. When someone joins or leaves">
         <p style={{ marginTop: 0 }}>When a staff member resigns or moves to another department, <strong>do not delete them</strong> — that would erase their past duties and make old rotas and statistics wrong.</p>
         <p>Instead, in the <strong>Staff</strong> tab, open that person and set a <strong>Last working day</strong> (or use the <strong>Mark left</strong> button for today). They will:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
@@ -4066,11 +4122,11 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>For a new joiner, set a <strong>Joining date</strong> so they don't show on rotas before they started. If someone comes back, use <strong>Reactivate</strong>.</p>
       </Section>
 
-      <Section title="8. Ordering your staff list">
+      <Section title="9. Ordering your staff list">
         <p style={{ margin: 0 }}>In the <strong>Staff</strong> tab, use the up and down arrows next to each name to set the order staff appear in. This order is used everywhere — the weekly rota, records, statistics, and printed PDFs, including the row numbers. The <strong>Sort A–Z</strong> button arranges everyone alphabetically in one click.</p>
       </Section>
 
-      <Section title="9. Reports & printing">
+      <Section title="10. Reports & printing">
         <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many leave days were taken in each category (SL, FRL, ML, Other leave).</p>
         <p>On any of these, the <strong>Export PDF</strong> button opens an export view with two choices:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
@@ -4080,7 +4136,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Your logo, if you have set one, appears on both.</p>
       </Section>
 
-      <Section title="10. Managing more than one department">
+      <Section title="11. Managing more than one department">
         <p style={{ marginTop: 0 }}>If you run more than one ward or unit, you don&rsquo;t need a separate login for each. Use the department button at the top left — the one showing your current department name.</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 5 }}><strong>Switch</strong> — tap any department in the list to open its rota.</li>
@@ -4091,7 +4147,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Departments are completely separate: staff, duty codes, statistics and exports never mix between them. Undo works within one department — switching to another starts a fresh trail, so you can never undo one ward's change into another's.</p>
       </Section>
 
-      <Section title="11. Digging into the details (Insights tab)">
+      <Section title="12. Digging into the details (Insights tab)">
         <p style={{ marginTop: 0 }}>The <strong>Insights</strong> tab answers specific questions about who did what. Pick a date range at the top, then use any of these:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>Staff breakdown</strong> — choose a nurse to see every duty code she worked, split by day of the week, with Fridays, Saturdays, and non-official days shown separately.</li>
@@ -4103,7 +4159,7 @@ function HelpTab({ data }) {
         <p style={{ marginBottom: 0 }}>Leave days are never counted as duty here, and you can export the staff breakdown to PDF.</p>
       </Section>
 
-      <Section title="12. Your account & data">
+      <Section title="13. Your account & data">
         <ul style={{ margin: 0, paddingLeft: 20 }}>
           <li style={{ marginBottom: 6 }}><strong>It saves automatically.</strong> There's no save button — every change is kept.</li>
           <li style={{ marginBottom: 6 }}><strong>It works across devices.</strong> Log in on your laptop and your phone with the same email, and you'll see the same rota.</li>
@@ -4113,7 +4169,7 @@ function HelpTab({ data }) {
         </ul>
       </Section>
 
-      <Section title="13. Smart Roster (beta)">
+      <Section title="14. Smart Roster (beta)">
         <p style={{ marginTop: 0 }}>
           Smart Roster generates a full week automatically. It is a <strong>Plus feature</strong>{" "}
           and is currently in <strong>beta</strong> — it works well for most wards, but always
@@ -4386,6 +4442,21 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </div>
       </Card>
 
+      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Posts</h2>
+      <Card>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+          <input type="checkbox" checked={!!data.postsEnabled}
+            onChange={(e) => update((d) => { d.postsEnabled = e.target.checked; return d; })}
+            style={{ accentColor: T.lagoon, width: 16, height: 16 }} />
+          Use posts on this rota
+        </label>
+        <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 6 }}>
+          {data.postsEnabled
+            ? "Each duty can also record where the person is stationed \u2014 Front Gate, Security Room, Cashier. Set the list up on the Duty Codes tab."
+            : "Off by default. Turn this on if you need to record where someone is stationed as well as which duty they work \u2014 common for security teams, airports and restaurants. Turning it off later only hides posts; nothing recorded is deleted."}
+        </div>
+      </Card>
+
       <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Non-official days</h2>
       <Card>
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
@@ -4432,6 +4503,52 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
 function DutyCodesTab({ data, update }) {
   const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
   const [form, setForm] = useState(null);
+
+  /* ── Posts ──
+     A post is where someone is stationed while working a duty: Front Gate,
+     Security Room, Cashier. Kept as a fixed list the manager sets up, not
+     free text, so "Front Gate" and "front gate" cannot both end up in a
+     month of data and make the counts meaningless later. */
+  const posts = data.posts || [];
+  const [postForm, setPostForm] = useState(null);
+
+  const savePost = () => {
+    const name = (postForm.name || "").trim();
+    if (!name) { window.alert("Give the post a name."); return; }
+    const clash = posts.some((x) => x.id !== postForm.id && x.name.toLowerCase() === name.toLowerCase());
+    if (clash) { window.alert(`There is already a post called "${name}".`); return; }
+    update((d) => {
+      const list = [...(d.posts || [])];
+      const at = list.findIndex((x) => x.id === postForm.id);
+      if (at >= 0) list[at] = { ...list[at], name };
+      else list.push({ id: uid(), name });
+      d.posts = list;
+      return d;
+    });
+    setPostForm(null);
+  };
+
+  const removePost = (id) => {
+    const post = posts.find((x) => x.id === id);
+    if (!post) return;
+    if (!window.confirm(`Delete the post "${post.name}"? Duties already recorded against it keep their duty; only the post is removed.`)) return;
+    update((d) => {
+      d.posts = (d.posts || []).filter((x) => x.id !== id);
+      /* Clear the post from any cell that used it, leaving the duty itself
+         untouched. Without this a cell would point at a post that no longer
+         exists and would show blank with no explanation. */
+      Object.values(d.cells || {}).forEach((day) => {
+        if (!day || typeof day !== "object" || Array.isArray(day)) return;
+        Object.keys(day).forEach((sid) => {
+          const entries = entriesOf(day[sid]);
+          if (!entries.some((e) => e.post === id)) return;
+          const kept = entries.map((e) => (e.post === id ? { ...e, post: "" } : e));
+          day[sid] = (kept.length === 1 && !kept[0].post) ? kept[0].code : kept;
+        });
+      });
+      return d;
+    });
+  };
   const palette = [
     "#F4B860", "#E8A33D", "#E58E77", "#E4604E", "#C0483A", "#C08552", "#8C5A2B",
     "#8FBF6B", "#6E9E4C", "#4F7D3A", "#9AD1C8", "#5FA89C", "#2E7D6F",
@@ -4477,7 +4594,7 @@ function DutyCodesTab({ data, update }) {
           if (!kept.length) { delete day[sid]; return; }
           // A split duty that loses one duty keeps the other, and returns to
           // a plain code id when a single untasked duty is all that remains.
-          day[sid] = (kept.length === 1 && !kept[0].task) ? kept[0].code : kept;
+          day[sid] = (kept.length === 1 && !kept[0].post) ? kept[0].code : kept;
         });
       });
       return d;
@@ -4537,7 +4654,7 @@ function DutyCodesTab({ data, update }) {
       )}
 
       <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+        <table className="dr-codes-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
           <thead><tr>{["Code", "Label", "Counts as", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>
             {data.codes.map((c) => (
@@ -4556,6 +4673,61 @@ function DutyCodesTab({ data, update }) {
           </tbody>
         </table>
       </Card>
+
+      {/* ── Posts ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+        <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 17 }}>Posts</h2>
+        <Btn onClick={() => setPostForm({ id: null, name: "" })}><Plus size={15} /> New post</Btn>
+      </div>
+      <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>
+        Where someone is stationed while working a duty — Front Gate, Security
+        Room, Cashier. The duty says when; the post says where. Useful for
+        security teams, airports and restaurants; most wards leave this empty.
+        {!data.postsEnabled && " Turn posts on in Settings to use them on the rota."}
+      </p>
+
+      {postForm && (
+        <Card>
+          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+            <Field label="Post name">
+              <input autoFocus value={postForm.name} maxLength={40}
+                onChange={(e) => setPostForm({ ...postForm, name: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") savePost(); }}
+                placeholder="e.g. Front Gate" style={inputStyle} />
+            </Field>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <Btn onClick={savePost}>Save post</Btn>
+            <Btn kind="ghost" onClick={() => setPostForm(null)}>Cancel</Btn>
+          </div>
+        </Card>
+      )}
+
+      {posts.length === 0 ? (
+        <Card>
+          <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>
+            No posts yet. Add one and it becomes available on every duty in this
+            department.
+          </p>
+        </Card>
+      ) : (
+        <Card style={{ padding: 0, overflowX: "auto" }}>
+          <table className="dr-posts-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Post", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {posts.map((x) => (
+                <tr key={x.id}>
+                  <td style={{ ...td, fontWeight: 600 }}>{x.name}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
+                    <Btn kind="ghost" small onClick={() => setPostForm({ id: x.id, name: x.name })} style={{ marginRight: 6 }}><Pencil size={13} /></Btn>
+                    <Btn kind="danger" small onClick={() => removePost(x.id)}><Trash2 size={13} /></Btn>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </div>
   );
 }
