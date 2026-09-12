@@ -181,6 +181,7 @@ export default function Dashboard({
         // per department, so someone in two departments can have a day
         // that is non-official in one and ordinary in the other.
         onCall: rota.onCall || {},
+        posts: rota.posts || [],
         nonOfficial: rota.nonOfficial || [],
         fridayRule: rota.fridayRule !== false,
       };
@@ -189,13 +190,13 @@ export default function Dashboard({
 
   /* A cell is either a plain duty code id, or a list of duties when a
      department uses tasks or split shifts:
-         "abc123"   or   [{ code: "abc", task: "Waiter" }, ...]
+         "abc123"   or   [{ code: "abc", post: "p1" }, ...]
      Both shapes must read the same here. Passing a list straight through
      would put an object where React expects text, which throws and takes
      the whole calendar down. */
   const entriesOf = (raw) => {
     if (!raw) return [];
-    if (typeof raw === "string") return [{ code: raw, task: "" }];
+    if (typeof raw === "string") return [{ code: raw, post: "" }];
     if (Array.isArray(raw)) return raw.filter((e) => e && e.code);
     return [];
   };
@@ -223,10 +224,15 @@ export default function Dashboard({
       entriesOf((m.cells[dateStr] || {})[m.staffId]).forEach((entry) => {
         const code = m.codes.find((c) => c.id === entry.code);
         if (!code && !entry.code) return;
+        // Cells store the post id, so the name is looked up here. A post that
+        // has since been deleted resolves to nothing and simply is not shown.
+        const post = (m.posts || []).find((x) => x.id === entry.post);
         duties.push({
+          postName: post ? post.name : "",
           text: code ? code.code : "?",
           label: code ? (code.label || "") : "",
-          task: entry.task || "",
+          // The post id from the department list, resolved to a name below.
+          post: entry.post || "",
           color: code ? code.color : T.mist,
           deptName: m.deptName,
           nonOfficial: nonOff,
@@ -236,7 +242,7 @@ export default function Dashboard({
       // On call with no duty rostered still deserves a line in the panel.
       if (onCall && !entriesOf((m.cells[dateStr] || {})[m.staffId]).length) {
         duties.push({
-          text: "", label: "", task: "", color: T.mist,
+          text: "", label: "", post: "", postName: "", color: T.mist,
           deptName: m.deptName, nonOfficial: nonOff, onCall: true, onCallOnly: true,
         });
       }
@@ -570,11 +576,11 @@ export default function Dashboard({
                           overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)",
                         }}>
                           <div className="dr-dash-code" style={{ fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{duty.text}</div>
-                          {duty.task && (
+                          {duty.postName && (
                             <div className="dr-dash-task" style={{
                               fontSize: 9.5, fontWeight: 500, lineHeight: 1.3, opacity: 0.9,
                               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                            }}>{duty.task}</div>
+                            }}>{duty.postName}</div>
                           )}
                         </div>
                       ))}
@@ -640,7 +646,7 @@ export default function Dashboard({
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35 }}>
                         {d.onCallOnly ? "On call" : (d.label || d.text)}
-                        {d.task && <span style={{ fontWeight: 500, color: T.inkSoft }}> — {d.task}</span>}
+                        {d.postName && <span style={{ fontWeight: 500, color: T.inkSoft }}> — {d.postName}</span>}
                       </div>
                       <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 2 }}>
                         {d.deptName}
