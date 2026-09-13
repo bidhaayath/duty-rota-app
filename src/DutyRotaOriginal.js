@@ -1255,6 +1255,40 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       .rp-head { flex-direction: column; gap: 8px; }
       .rp-logo { position: static; height: 46px; max-width: 62%; }
     }
+    /* ── Long ranges print tighter ──
+       A month is 31 columns plus eight totals. At the sizes that suit a week
+       that needs two sheets, and the columns are so narrow the headers collide.
+       Tightening the padding and type is what actually buys the room — scaling
+       the whole page down blurs everything instead. */
+    .rota-compact th, .rota-compact td { padding: 2px 1px !important; font-size: 8.5px !important; }
+    /* The name column was the one thing not shrinking with everything else,
+       so on a month it took a quarter of the page for names that need about
+       half that. Capped, and long names wrap rather than widen the column. */
+    .rota-compact .rota-name-col,
+    .rota-compact .rota-name-cell {
+      font-size: 8.5px !important;
+      width: 118px !important; min-width: 118px !important; max-width: 118px !important;
+      white-space: normal !important; word-break: break-word; line-height: 1.15 !important;
+    }
+    @media print {
+      .rota-compact .rota-name-col,
+      .rota-compact .rota-name-cell {
+        width: 104px !important; min-width: 104px !important; max-width: 104px !important;
+        font-size: 8px !important;
+      }
+    }
+    .rota-compact .rota-stats { font-size: 8px !important; }
+
+    @media print {
+      /* Let a long grid shrink to the page rather than spill onto a second
+         sheet. Chrome honours this on the printed output; on screen the
+         export preview is unaffected. */
+      .rota-compact { table-layout: auto; }
+      .rota-compact th, .rota-compact td { padding: 1px 1px !important; font-size: 8px !important; }
+      /* A row must not be split across two pages. */
+      .rota-grid tr { break-inside: avoid; page-break-inside: avoid; }
+    }
+
     /* Landscape for wide rota ranges only; the per-print page override
        below wins for narrower ones (weekly, records, stats). */
     @page { size: A4 landscape; margin: 10mm; }
@@ -3168,6 +3202,11 @@ const ptd = { border: "1px solid #999", padding: "5px 7px", fontSize: 11, textAl
 function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
   const codeById = codeByIdOf(data);
   const shownStaff = staffForDays(data, days);
+  /* A fortnight is about where a full-size grid stops fitting an A4 sheet
+     sideways. Past that everything tightens: shorter headers, less padding,
+     smaller text — so a month prints on one page instead of two, without the
+     reader having to find the scale box in the print dialog. */
+  const compact = days.length > 14;
   // Collect notes shown this week, numbered, to list under the rota
   const noteList = [];
   const noteNum = (date, staffId) => {
@@ -3201,19 +3240,41 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
           Note: on a monthly range this makes every day column equal and
           narrow. That is accepted — the weekly rota is what people print and
           pin up, and it is the case this option is for. */}
-      <table className="rota-grid" style={{ borderCollapse: "collapse", width: "100%", ...(rotaOnly ? { tableLayout: "fixed" } : null) }}>
+      <table className={`rota-grid${compact ? " rota-compact" : ""}`} style={{ borderCollapse: "collapse", width: "100%", ...(rotaOnly ? { tableLayout: "fixed" } : null) }}>
         <thead>
           <tr>
             <th style={{ ...pth, width: 24 }}>#</th>
             <th className="rota-name-col" style={{ ...pth, textAlign: "left", ...(rotaOnly ? { width: 200 } : null) }}>NAME &amp; DESIGNATION</th>
-            {days.map((date) => {
+            {days.map((date, di) => {
               const d = parseD(date);
               const nonOff = isNonOff(data, date);
+              /* On a long range every column is narrow, and the full header —
+                 day name, date, month, and the word NON-OFFICIAL — is wider than
+                 the column it sits in, so neighbouring headers run into each
+                 other ("MONTUE"). Compact keeps a single letter for the day and
+                 the date number, shows the month only when it changes, and lets
+                 the gold fill say non-official on its own. */
+              const prev = di > 0 ? parseD(days[di - 1]) : null;
+              const newMonth = !prev || prev.getMonth() !== d.getMonth();
               return (
                 <th key={date} style={{ ...pth, background: nonOff ? "#F6E3B4" : "#E8E8E8" }}>
-                  {DAY_NAMES[d.getDay()]}<br />
-                  <span style={{ fontWeight: 500 }}>{d.getDate()} {d.toLocaleString("en", { month: "short" })}</span>
-                  {nonOff && <><br /><span style={{ fontSize: 8.5, color: "#8A5E10" }}>NON-OFFICIAL</span></>}
+                  {compact ? (
+                    <>
+                      {DAY_NAMES[d.getDay()].slice(0, 1)}<br />
+                      <span style={{ fontWeight: 500 }}>{d.getDate()}</span>
+                      {newMonth && (
+                        <><br /><span style={{ fontWeight: 500, fontSize: 7 }}>
+                          {d.toLocaleString("en", { month: "short" })}
+                        </span></>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {DAY_NAMES[d.getDay()]}<br />
+                      <span style={{ fontWeight: 500 }}>{d.getDate()} {d.toLocaleString("en", { month: "short" })}</span>
+                      {nonOff && <><br /><span style={{ fontSize: 8.5, color: "#8A5E10" }}>NON-OFFICIAL</span></>}
+                    </>
+                  )}
                 </th>
               );
             })}
@@ -3227,7 +3288,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
             return (
               <tr key={s.id}>
                 <td style={{ ...ptd, fontWeight: 700, color: "#666" }}>{i + 1}</td>
-                <td style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(s)}</td>
+                <td className="rota-name-cell" style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(s)}</td>
                 {segs.map((seg, i2) => {
                   if (seg.kind === "notEmployed") {
                     return (
@@ -3368,7 +3429,21 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
           Superscript numbers refer to the notes above.
         </div>
       )}
-      <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>{exportGeneratedAt()}</div>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 10, marginTop: 8, fontSize: 10, color: "#666",
+      }}>
+        <span>{exportGeneratedAt()}</span>
+        {/* Small, grey and to one side. These exports get passed to heads of
+           department and other organisations, so the mark should travel with
+           them without competing with the customer's own logo at the top. */}
+        <span style={{ display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+          <img src="/favicon-192.png" alt="" style={{ height: 13, width: 13, objectFit: "contain" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <span style={{ fontWeight: 600, color: "#888" }}>Easy Duty Rota</span>
+          <span style={{ color: "#AAA" }}>easydutyrota.com</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -3450,7 +3525,21 @@ function RecordsPrint({ data, from, to }) {
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
         All leave periods count calendar days.
       </div>
-      <div style={{ fontSize: 10, color: "#666", marginTop: 4 }}>{exportGeneratedAt()}</div>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 10, marginTop: 4, fontSize: 10, color: "#666",
+      }}>
+        <span>{exportGeneratedAt()}</span>
+        {/* Small, grey and to one side. These exports get passed to heads of
+           department and other organisations, so the mark should travel with
+           them without competing with the customer's own logo at the top. */}
+        <span style={{ display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+          <img src="/favicon-192.png" alt="" style={{ height: 13, width: 13, objectFit: "contain" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <span style={{ fontWeight: 600, color: "#888" }}>Easy Duty Rota</span>
+          <span style={{ color: "#AAA" }}>easydutyrota.com</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -3601,7 +3690,21 @@ function StatsPrint({ data, from, to }) {
           )}
         </div>
       </div>
-      <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>{exportGeneratedAt()}</div>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 10, marginTop: 8, fontSize: 10, color: "#666",
+      }}>
+        <span>{exportGeneratedAt()}</span>
+        {/* Small, grey and to one side. These exports get passed to heads of
+           department and other organisations, so the mark should travel with
+           them without competing with the customer's own logo at the top. */}
+        <span style={{ display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+          <img src="/favicon-192.png" alt="" style={{ height: 13, width: 13, objectFit: "contain" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <span style={{ fontWeight: 600, color: "#888" }}>Easy Duty Rota</span>
+          <span style={{ color: "#AAA" }}>easydutyrota.com</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -4445,7 +4548,21 @@ function InsightsPrint({ data, cfg }) {
       <div style={{ fontSize: 11, color: "#666", marginTop: 8 }}>
         Worked {res.workingDays} day(s) · on leave {res.leaveDays} · no duty entered {res.emptyDays}. Leave days are not counted as duty.
       </div>
-      <div style={{ fontSize: 10, color: "#666", marginTop: 4 }}>{exportGeneratedAt()}</div>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 10, marginTop: 4, fontSize: 10, color: "#666",
+      }}>
+        <span>{exportGeneratedAt()}</span>
+        {/* Small, grey and to one side. These exports get passed to heads of
+           department and other organisations, so the mark should travel with
+           them without competing with the customer's own logo at the top. */}
+        <span style={{ display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+          <img src="/favicon-192.png" alt="" style={{ height: 13, width: 13, objectFit: "contain" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <span style={{ fontWeight: 600, color: "#888" }}>Easy Duty Rota</span>
+          <span style={{ color: "#AAA" }}>easydutyrota.com</span>
+        </span>
+      </div>
     </div>
   );
 }
