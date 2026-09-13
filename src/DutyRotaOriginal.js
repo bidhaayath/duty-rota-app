@@ -598,6 +598,10 @@ const seed = () => ({
      the option unless it asks for it. */
   posts: [],
   postsEnabled: false,
+  /* Split duties: two duties on one day — a morning and an evening with a
+     break between. Common in restaurants and security teams, unheard of on a
+     hospital ward, so it is off unless a department asks for it. */
+  splitEnabled: false,
   fridayRule: true,
   // 0 = Sunday, 1 = Monday. Sunday in the Maldives; Europe mostly runs Monday.
   weekStartsOn: 0,
@@ -641,6 +645,7 @@ const migrate = (d) => {
   // and the feature switched off, so nothing about it changes.
   if (!Array.isArray(d.posts)) d.posts = [];
   if (d.postsEnabled === undefined) d.postsEnabled = false;
+  if (d.splitEnabled === undefined) d.splitEnabled = false;
   if (!d.cellMeta) d.cellMeta = {};
   if (!d.onCall) d.onCall = {};
   if (!Array.isArray(d.nonOfficial)) d.nonOfficial = [];
@@ -1330,6 +1335,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       .rota-num { width: 18px !important; min-width: 18px !important; max-width: 18px !important; }
       .rota-name { left: 18px !important; }
       .rota-foot-label { font-size: 10px !important; }
+      /* A cell can now hold a duty, its post, a second duty and its post. The
+         rule above sizes the cell, but each line carries its own inline size,
+         so without these the second duty stayed at its desktop size and ended
+         up LARGER than the first one beside it. */
+      .dr-rota-grid .dr-cell .dr-duty2 { font-size: 10.5px !important; }
+      .dr-rota-grid .dr-cell .dr-postline { font-size: 8px !important; }
     }
     /* ── The other tabs on a phone ──
        The rota grid above is already tuned for a narrow screen. Everything
@@ -1471,12 +1482,17 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                          text: seg.span >= 3 ? st.label : st.abbrev };
               }
               const code = cby(firstCodeId(viewData, seg.date, s.id));
-              const pid = viewData.postsEnabled
-                ? (cellEntries(viewData, seg.date, s.id)[0]?.post || "") : "";
+              const ents = cellEntries(viewData, seg.date, s.id);
+              const pid = viewData.postsEnabled ? (ents[0]?.post || "") : "";
+              const nameOf = (id) => id ? ((viewData.posts || []).find((x) => x.id === id)?.name || "") : "";
+              const second = viewData.splitEnabled ? ents[1] : null;
+              const secondCode = second ? cby(second.code) : null;
               return {
                 span: 1,
                 text: code ? code.code : "",
-                post: pid ? ((viewData.posts || []).find((x) => x.id === pid)?.name || "") : "",
+                post: pid ? nameOf(pid) : "",
+                second: secondCode ? secondCode.code : "",
+                secondPost: (viewData.postsEnabled && second?.post) ? nameOf(second.post) : "",
                 bg: code ? code.color : (isNonOff(viewData, seg.date) ? "#FDF8EE" : "#FFFFFF"),
                 fg: code ? textOn(code.color) : "#4A6570",
               };
@@ -1835,10 +1851,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
 const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", "#4DB6AC", "#F06292", "#A1887F", "#9575CD", "#4DD0E1"];
 
 function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled, exchange, onExchange,
-  posts = [], postsEnabled = false, postId = "", onPickPost, postName = "" }) {
+  posts = [], postsEnabled = false, postId = "", onPickPost, postName = "",
+  splitEnabled = false, secondValue = "", secondPostId = "", secondPostName = "",
+  onPickSecond, onPickSecondPost }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState("pick"); // 'pick' | 'post' | 'note' | 'add' | 'swap'
+  const [mode, setMode] = useState("pick"); // 'pick' | 'post' | 'second' | 'post2' | 'note' | 'add' | 'swap'
   const [noteText, setNoteText] = useState(note || "");
   const [nc, setNc] = useState({ code: "", label: "", color: NEW_CODE_COLORS[0], counts: "morning" });
   const wrapRef = useRef(null);
@@ -1846,6 +1864,22 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
   const [pos, setPos] = useState(null);
 
   const current = codes.find((c) => c.id === value);
+  const secondCode = codes.find((c) => c.id === secondValue);
+
+  /* What the day originally held, read back for the panel: every duty with its
+     post, joined by a plus so a split day reads as one thing. Falls back to the
+     single duty for marks made before the whole cell was recorded. */
+  const describeOriginal = (ex) => {
+    const list = (ex.originalEntries && ex.originalEntries.length)
+      ? ex.originalEntries
+      : (ex.originalCode ? [{ code: ex.originalCode, post: ex.originalPost || "" }] : []);
+    if (!list.length) return "nothing";
+    return list.map((e) => {
+      const c = codes.find((x) => x.id === e.code);
+      const pn = (postsEnabled && e.post) ? (posts.find((x) => x.id === e.post) || {}).name : "";
+      return `${c ? c.code : "—"}${pn ? ` — ${pn}` : ""}`;
+    }).join(" + ");
+  };
   const q = query.trim().toLowerCase();
   const filtered = q ? codes.filter((c) => c.code.toLowerCase().includes(q)) : codes;
   const ordered = q
@@ -1885,6 +1919,19 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
     close();
   };
   const pickPost = (pid) => { onPickPost && onPickPost(pid); close(); };
+  const usesSplit = splitEnabled && hasCode;
+  /* Stays on the panel: the post list for this duty appears underneath, so
+     the whole decision is made in one place. Clearing it closes, since there
+     is then nothing left to choose. */
+  /* Pick the duty, then its posts appear. Two short steps, the same as the
+     first duty. An in-between version put an "Add post" button here instead,
+     which turned one decision into three taps for no gain. */
+  const pickSecond = (id) => {
+    onPickSecond && onPickSecond(id);
+    if (id && postsEnabled && posts.length) { setMode("post2"); return; }
+    close();
+  };
+  const pickSecondPost = (pid) => { onPickSecondPost && onPickSecondPost(pid); close(); };
 
   useEffect(() => {
     if (!open) return;
@@ -1944,10 +1991,25 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
             anything styled by a CSS class would vanish from the exported
             picture without any error to warn you. */}
         {postName && (
-          <div style={{
+          <div className="dr-postline" style={{
             fontSize: 9.5, fontWeight: 600, lineHeight: 1.2, marginTop: 1,
             opacity: 0.9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>{postName}</div>
+        )}
+        {/* The second duty of a split day, divided from the first by a hairline
+            so the two read as separate shifts rather than one long label. */}
+        {secondCode && (
+          <div style={{
+            marginTop: 3, paddingTop: 3, borderTop: "1px solid rgba(0,0,0,0.14)",
+          }}>
+            <div className="dr-duty2" style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.15 }}>{secondCode.code}</div>
+            {secondPostName && (
+              <div className="dr-postline" style={{
+                fontSize: 9.5, fontWeight: 600, lineHeight: 1.2, marginTop: 1,
+                opacity: 0.9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{secondPostName}</div>
+            )}
+          </div>
         )}
         {/* small blue dot marks a cell that has a note */}
         {note && <span title="Has a note" style={{ position: "absolute", top: 2, right: 2, width: 7, height: 7, borderRadius: "50%", background: "#2F6DB5", border: "1px solid #fff" }} />}
@@ -2001,6 +2063,20 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
                 </button>
                 <button onClick={() => setMode("add")} style={{ ...btnMini, background: T.mist, color: T.ink, border: `1px solid ${T.line}` }}>+ New code</button>
 
+                {usesSplit && (
+                  <button onClick={() => setMode("second")} style={{
+                    ...btnMini,
+                    background: secondValue ? "#EAF6F3" : T.mist,
+                    color: secondValue ? "#12655C" : T.ink,
+                    border: `1px solid ${secondValue ? "#BFE2DA" : T.line}`,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {secondValue
+                      ? `\u25CF 2nd: ${(codes.find((c) => c.id === secondValue) || {}).code || ""}`
+                      : "+ 2nd duty"}
+                  </button>
+                )}
+
                 {usesPosts && hasCode && (
                   <button onClick={() => setMode("post")} style={{
                     ...btnMini,
@@ -2015,7 +2091,10 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 
                 <button onClick={() => setMode("swap")} style={{
                   ...btnMini,
-                  gridColumn: (usesPosts && hasCode) ? "auto" : "1 / -1",
+                  // Two per row; this one stretches when the count is odd so
+                  // the block never ends with a gap.
+                  gridColumn: ((usesPosts && hasCode ? 1 : 0) + (usesSplit ? 1 : 0)) % 2 === 0
+                    ? "1 / -1" : "auto",
                   background: exchange ? EXCHANGE_BY[exchange.requestedBy].bg : T.mist,
                   color: exchange ? EXCHANGE_BY[exchange.requestedBy].color : T.ink,
                   border: `1px solid ${T.line}`, display: "flex", alignItems: "center",
@@ -2046,6 +2125,69 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
                     ...btnMini, textAlign: "left", padding: "8px 11px",
                     border: postId === x.id ? `2px solid ${T.lagoon}` : `1px solid ${T.line}`,
                     background: postId === x.id ? "#EAF6F3" : "#fff",
+                    color: T.ink, fontWeight: 700,
+                  }}>{x.name}</button>
+                ))}
+              </div>
+              <button onClick={close} style={{
+                ...btnMini, width: "100%", marginTop: 8, background: T.mist,
+                color: T.ink, border: `1px solid ${T.line}`,
+              }}>Done</button>
+            </div>
+          )}
+
+          {/* The second duty of a split day, and its own post. Same two steps
+              as the first duty, so there is nothing new to learn. */}
+          {/* The second duty and its post on one panel. Two separate steps was
+              a tap and a mode change for something a manager thinks of as one
+              decision — "he also works an evening, on the cashier". The first
+              duty keeps its two steps because its list is the main one and
+              adding posts underneath would push it off a phone screen. */}
+          {mode === "second" && (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 2 }}>Second duty</div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
+                Also worked on this day
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                <button onClick={() => pickSecond("")} style={{
+                  ...btnMini, padding: "7px 11px", minWidth: 44,
+                  border: `1px dashed ${T.line}`, background: "#fff", color: T.inkSoft,
+                }}>—</button>
+                {codes.filter((c) => c.id !== value).map((c) => (
+                  <button key={c.id} onClick={() => pickSecond(c.id)} style={{
+                    ...btnMini, padding: "7px 11px", minWidth: 44,
+                    border: secondValue === c.id ? `2px solid ${T.ink}` : "1px solid transparent",
+                    background: c.color, color: textOn(c.color),
+                  }}>{c.code}</button>
+                ))}
+              </div>
+
+              <button onClick={close} style={{
+                ...btnMini, width: "100%", marginTop: 10, background: T.lagoon,
+                color: "#fff", border: "none", fontWeight: 700,
+              }}>Done</button>
+            </div>
+          )}
+
+          {/* The post list for the second duty, opened from the button above. */}
+          {mode === "post2" && (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 2 }}>Post for the second duty</div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
+                Where are they stationed for it?
+              </div>
+              <div style={{ display: "grid", gap: 5, maxHeight: 210, overflowY: "auto" }}>
+                <button onClick={() => pickSecondPost("")} style={{
+                  ...btnMini, textAlign: "left", padding: "8px 11px",
+                  border: `1px dashed ${T.line}`, background: !secondPostId ? "#EAF6F3" : "#fff",
+                  color: T.inkSoft, fontWeight: 600,
+                }}>No post</button>
+                {posts.map((x) => (
+                  <button key={x.id} onClick={() => pickSecondPost(x.id)} style={{
+                    ...btnMini, textAlign: "left", padding: "8px 11px",
+                    border: secondPostId === x.id ? `2px solid ${T.lagoon}` : `1px solid ${T.line}`,
+                    background: secondPostId === x.id ? "#EAF6F3" : "#fff",
                     color: T.ink, fontWeight: 700,
                   }}>{x.name}</button>
                 ))}
@@ -2101,7 +2243,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
               <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>Duty changed from original</div>
               <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8, lineHeight: 1.5 }}>
                 {exchange
-                  ? `Currently marked as: ${EXCHANGE_BY[exchange.requestedBy].label}. Originally ${codes.find((c) => c.id === exchange.originalCode)?.code || "—"}${exchange.originalPost && postsEnabled ? ` — ${(posts.find((x) => x.id === exchange.originalPost) || {}).name || ""}` : ""}.`
+                  ? `Currently marked as: ${EXCHANGE_BY[exchange.requestedBy].label}. Originally ${describeOriginal(exchange)}.`
                   : `Records that this duty differs from what was originally rostered. The current duty (${current ? current.code : "—"}) is kept as the original.`}
               </div>
               {!exchange && (
@@ -2165,13 +2307,13 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         const ex = meta && meta.exchange;
         if (!ex) return;
         if (!day) day = { ...(cells[date] || {}) };
-        if (ex.originalCode) {
-          // Restore the original post alongside the original duty, or the
-           // view would show today's post against yesterday's duty.
-          day[sid] = ex.originalPost
-            ? [{ code: ex.originalCode, post: ex.originalPost }]
-            : ex.originalCode;
-        } else delete day[sid];
+        /* Prefer the full record; fall back to the single duty for marks made
+           before the whole cell was stored. */
+        const orig = (ex.originalEntries && ex.originalEntries.length)
+          ? ex.originalEntries
+          : (ex.originalCode ? [{ code: ex.originalCode, post: ex.originalPost || "" }] : []);
+        if (orig.length === 0) { delete day[sid]; return; }
+        day[sid] = (orig.length === 1 && !orig[0].post) ? orig[0].code : orig;
       });
       if (day) cells[date] = day;
     });
@@ -2267,18 +2409,50 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
   /* The post is stored on the duty, not beside it, so the two can never
      drift apart. A cell with a duty and no post collapses back to a plain
      code id, which keeps ordinary rotas in the shape they have always had. */
-  const setCellPost = (date, staffId, postId) => {
+  /* Which duty in the cell the post belongs to. A split day is two separate
+     assignments — Front Gate in the morning, Security Room in the evening —
+     so each duty carries its own post rather than sharing one. */
+  const setCellPost = (date, staffId, postId, index = 0) => {
     if (!staffEditable(staffId)) {
       alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their duties.");
       return;
     }
     update((d) => {
       const entries = entriesOf((d.cells[date] || {})[staffId]);
-      if (!entries.length) return d;          // no duty, nothing to attach to
-      const next = entries.map((e, i) => (i === 0 ? { ...e, post: postId || "" } : e));
+      if (!entries.length || index >= entries.length) return d;
+      const next = entries.map((e, i) => (i === index ? { ...e, post: postId || "" } : e));
       d.cells[date][staffId] = (next.length === 1 && !next[0].post) ? next[0].code : next;
       return d;
     });
+  };
+
+  /* The second duty of a split day. Passing an empty code removes it and the
+     cell collapses back to a single duty — and to a plain code id if that duty
+     has no post, so a rota that stops using split duties goes back to the
+     simplest shape rather than carrying an empty list about. */
+  const setCellSecond = (date, staffId, codeId) => {
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their duties.");
+      return "";
+    }
+    const first = cellEntries(data, date, staffId)[0];
+    if (!first) return "";                    // nothing to be second to
+    // The second duty starts on the post the person was last on, same as the
+    // first one does, and can be changed straight after.
+    const carried = codeId ? defaultPostFor(staffId, date) : "";
+    update((d) => {
+      const entries = entriesOf((d.cells[date] || {})[staffId]);
+      if (!entries.length) return d;
+      if (!codeId) {
+        const kept = [entries[0]];
+        d.cells[date][staffId] = kept[0].post ? kept : kept[0].code;
+        return d;
+      }
+      const existingPost = entries[1]?.post || carried;
+      d.cells[date][staffId] = [entries[0], { code: codeId, post: existingPost }];
+      return d;
+    });
+    return codeId ? (cellEntries(data, date, staffId)[1]?.post || carried) : "";
   };
 
   const setCellNote = (date, staffId, note) => {
@@ -2329,14 +2503,21 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         delete entry.exchange;
       } else {
         const existing = entry.exchange;
+        const before = entriesOf((d.cells[date] || {})[staffId]);
         entry.exchange = {
-          originalCode: existing ? existing.originalCode : firstCodeId(d, date, staffId),
-          /* The post is part of what was originally rostered. A guard moved
-             from Front Gate to Security Room on the same morning shift has
-             genuinely been changed, and recording only the duty code would
-             show "original M, now M" — a change with nothing to see. */
-          originalPost: existing ? (existing.originalPost || "")
-            : (entriesOf((d.cells[date] || {})[staffId])[0]?.post || ""),
+          /* The whole cell as it stood, not just its first duty. A split day
+             rostered as M + E and later replaced by a single N would otherwise
+             record only the M, and "see original" would show a day the person
+             never actually had.
+
+             originalCode and originalPost are kept alongside it so exchanges
+             marked before this existed still read correctly — there is no
+             migration, old marks simply have no originalEntries. */
+          originalEntries: existing
+            ? (existing.originalEntries || null)
+            : before.map((e) => ({ code: e.code, post: e.post || "" })),
+          originalCode: existing ? existing.originalCode : (before[0]?.code || ""),
+          originalPost: existing ? (existing.originalPost || "") : (before[0]?.post || ""),
           requestedBy: who,
         };
       }
@@ -2539,6 +2720,21 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     const cellPostName = cellPostId
                       ? ((data.posts || []).find((x) => x.id === cellPostId)?.name || "")
                       : "";
+                    /* The second duty of a split day. Like posts, it is only shown
+                       when the department has split duties switched on, and it
+                       follows "see original" so the two never disagree. */
+                    /* In "see original" mode the second duty comes from what was
+                       recorded, so the whole original day is shown rather than
+                       half of it. */
+                    const secondEntry = !data.splitEnabled ? null
+                      : (showOriginal && ex)
+                        ? ((ex.originalEntries || [])[1] || null)
+                        : (cellEntries(data, date, s.id)[1] || null);
+                    const secondId = secondEntry?.code || "";
+                    const secondPostId = data.postsEnabled ? (secondEntry?.post || "") : "";
+                    const secondPostName = secondPostId
+                      ? ((data.posts || []).find((x) => x.id === secondPostId)?.name || "")
+                      : "";
                     const code = codeById(codeId);
                     const bg = code ? code.color : isNonOff(data, date) ? "#FDF8EE" : "#fff";
                     if (showOriginal) {
@@ -2554,10 +2750,23 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                             {code ? code.code : "\u2014"}
                             {/* Inline styles only — the image export drops classes. */}
                             {cellPostName && (
-                              <div style={{
+                              <div className="dr-postline" style={{
                                 fontSize: 9.5, fontWeight: 600, lineHeight: 1.2, marginTop: 1,
                                 opacity: 0.9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                               }}>{cellPostName}</div>
+                            )}
+                            {secondId && (
+                              <div style={{ marginTop: 3, paddingTop: 3, borderTop: "1px solid rgba(0,0,0,0.14)" }}>
+                                <div className="dr-duty2" style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.15 }}>
+                                  {codeById(secondId)?.code || ""}
+                                </div>
+                                {secondPostName && (
+                                  <div className="dr-postline" style={{
+                                    fontSize: 9.5, fontWeight: 600, lineHeight: 1.2, marginTop: 1,
+                                    opacity: 0.9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                                  }}>{secondPostName}</div>
+                                )}
+                              </div>
                             )}
                           </div>
                         </td>
@@ -2574,7 +2783,13 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                           postsEnabled={!!data.postsEnabled}
                           postId={cellPostId}
                           postName={cellPostName}
-                          onPickPost={(pid) => setCellPost(date, s.id, pid)}
+                          onPickPost={(pid) => setCellPost(date, s.id, pid, 0)}
+                          splitEnabled={!!data.splitEnabled}
+                          secondValue={secondId}
+                          secondPostId={secondPostId}
+                          secondPostName={secondPostName}
+                          onPickSecond={(id) => setCellSecond(date, s.id, id)}
+                          onPickSecondPost={(pid) => setCellPost(date, s.id, pid, 1)}
                           cellBg={bg}
                           cellFg={code ? textOn(code.color) : T.inkSoft}
                           hasCode={!!code}
@@ -2672,7 +2887,7 @@ function Records({ data, range, setRange, onExport }) {
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", ...(data.splitEnabled ? ["Split"] : []), "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2714,6 +2929,13 @@ function Records({ data, range, setRange, onExport }) {
                     <td style={{ ...td, textAlign: "center" }}>{r.other}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.release}</td>
                     <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{r.totalDuty}</td>
+                    {/* Days worked twice. Shown only where split duties are in
+                        use, because it explains why the shift columns add up to
+                        more than the days: 9 + 7 = 16 against 14 days is not a
+                        mistake, it is two split days. */}
+                    {data.splitEnabled && (
+                      <td style={{ ...td, textAlign: "center", color: r.splitDays ? T.ink : T.inkSoft }}>{r.splitDays}</td>
+                    )}
                     <td style={{ ...td, textAlign: "center" }}>{r.off}</td>
                     <td style={{ ...td, textAlign: "center" }}>{r.fridayOff}</td>
                     <td style={{ ...td, textAlign: "center", fontWeight: 700, color: r.annualDays ? "#0B6A60" : T.ink }}>{r.annualDays}</td>
@@ -3037,6 +3259,11 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
                   const pPostName = pPostId
                     ? ((data.posts || []).find((x) => x.id === pPostId)?.name || "")
                     : "";
+                  const pSecondEntry = data.splitEnabled ? cellEntries(data, seg.date, s.id)[1] : null;
+                  const pSecond = pSecondEntry ? codeById(pSecondEntry.code) : null;
+                  const pSecondPost = (data.postsEnabled && pSecondEntry?.post)
+                    ? ((data.posts || []).find((x) => x.id === pSecondEntry.post)?.name || "")
+                    : "";
                   return (
                     <td key={seg.date} style={{ ...ptd, background: code ? code.color : "#fff", color: code ? textOn(code.color) : "#999", fontWeight: 700, position: "relative" }}>
                       {code ? code.code : ""}
@@ -3048,8 +3275,36 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
                           {pPostName}
                         </div>
                       )}
+                      {/* The second duty of a split day. Inline styles only —
+                          the image export copies inline styles and drops classes. */}
+                      {pSecond && (
+                        <div style={{ marginTop: 2, paddingTop: 2, borderTop: "1px solid rgba(0,0,0,0.18)" }}>
+                          {/* Same size as the first duty: the two are equal shifts,
+                              and shrinking the second made it look like a footnote. */}
+                          <div style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.15 }}>{pSecond.code}</div>
+                          {pSecondPost && (
+                            <div style={{ fontSize: 7.5, fontWeight: 600, lineHeight: 1.15, opacity: 0.92 }}>
+                              {pSecondPost}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {/* S = staff asked for the change, M = manager changed it */}
-                      {ex && <sup style={{ fontSize: 8, marginLeft: 1 }}>{ex.requestedBy === "manager" ? "M" : "S"}</sup>}
+                      {/* The changed-duty mark sits in the corner rather than in
+                          the flow of the cell. As a superscript it trailed the
+                          content, and on a split day it dropped onto its own line
+                          under the second duty — where a lone "S" or "M" reads as
+                          another duty code. All inline: the image export keeps
+                          inline styles and drops classes. */}
+                      {ex && (
+                        <span style={{
+                          position: "absolute", top: 1, right: 2,
+                          fontSize: 7, fontWeight: 800, lineHeight: 1,
+                          padding: "1px 2px", borderRadius: 3,
+                          background: "rgba(255,255,255,0.72)", color: "#3B2C05",
+                          border: "1px solid rgba(0,0,0,0.12)",
+                        }}>{ex.requestedBy === "manager" ? "M" : "S"}</span>
+                      )}
                     </td>
                   );
                 })}
@@ -3096,7 +3351,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
       </table>
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
         Legend: {data.codes.map((c) => `${c.code} = ${c.label}`).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave
-        <br />Superscript <strong>S</strong> = duty changed at staff request · <strong>M</strong> = duty changed by manager
+        <br />A boxed <strong>S</strong> or <strong>M</strong> in the corner of a duty = changed duty · S at staff request · M by the manager
       </div>
       {noteList.length > 0 && (
         <div style={{ marginTop: 10, border: "1px solid #ccc", borderRadius: 6, padding: "8px 10px" }}>
@@ -3120,7 +3375,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
 
 function RecordsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", ...(data.splitEnabled ? ["Split"] : []), "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
       <div className="rp-head">
@@ -3153,6 +3408,7 @@ function RecordsPrint({ data, from, to }) {
               <td style={ptd}>{r.other}</td>
               <td style={ptd}>{r.release}</td>
               <td style={{ ...ptd, fontWeight: 700 }}>{r.totalDuty}</td>
+              {data.splitEnabled && <td style={ptd}>{r.splitDays}</td>}
               <td style={ptd}>{r.off}</td>
               <td style={ptd}>{r.fridayOff}</td>
               <td style={ptd}>{r.annualDays}</td>
@@ -3788,11 +4044,17 @@ const insightsForStaff = (data, staff, from, to) => {
       perCode[cid].total++;
       perCode[cid].byDow[parseD(date).getDay()]++;
     });
-    /* Non-official is the payment figure, so it counts the DAY once.
-       Charging it to the first duty only means adding the per-code
-       numbers up still gives the correct day count, instead of
-       double-counting a split duty. */
-    if (isNonOff(data, date)) perCode[entries[0].code].nonOfficial++;
+    /* This column answers a per-code question: was THIS duty worked on a
+       non-official day. If someone worked N/OFF and M(R) on the same Friday,
+       both were, so both count — charging it only to the first duty left the
+       second one reading zero on a day it was plainly worked.
+
+       This is not the payment figure and never adds up to it. The number that
+       feeds payment is days on duty, counted once per day in recordsFor, and
+       nothing here is ever summed across codes. */
+    if (isNonOff(data, date)) {
+      entries.forEach((e) => { perCode[e.code].nonOfficial++; });
+    }
   });
   return { perCode, leaveDays, emptyDays, workingDays: dates.length };
 };
@@ -4652,6 +4914,21 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
           {data.postsEnabled
             ? "Each duty can also record where the person is stationed \u2014 Front Gate, Security Room, Cashier. Set the list up on the Duty Codes tab."
             : "Off by default. Turn this on if you need to record where someone is stationed as well as which duty they work \u2014 common for security teams, airports and restaurants. Turning it off later only hides posts; nothing recorded is deleted."}
+        </div>
+      </Card>
+
+      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Split duties</h2>
+      <Card>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+          <input type="checkbox" checked={!!data.splitEnabled}
+            onChange={(e) => update((d) => { d.splitEnabled = e.target.checked; return d; })}
+            style={{ accentColor: T.lagoon, width: 16, height: 16 }} />
+          Allow two duties on the same day
+        </label>
+        <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 6 }}>
+          {data.splitEnabled
+            ? "A day can hold two duties \u2014 a morning and an evening, say. Both count towards the shift totals and towards coverage, but the day itself counts once for days on duty and for non-official day payment."
+            : "Off by default. Turn this on if someone can work twice in one day, such as a split shift in a restaurant or a double on a security roster. Turning it off later only hides the second duty; nothing recorded is deleted."}
         </div>
       </Card>
 

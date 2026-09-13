@@ -182,6 +182,13 @@ export default function Dashboard({
         // that is non-official in one and ordinary in the other.
         onCall: rota.onCall || {},
         posts: rota.posts || [],
+        /* The department's own switches. This screen reads the saved rota
+           directly, so without them it would happily show a second duty or a
+           post that the manager has turned off — the employee seeing more than
+           the person who set the rota. Hidden, not deleted: switching back on
+           brings everything straight back. */
+        postsEnabled: !!rota.postsEnabled,
+        splitEnabled: !!rota.splitEnabled,
         nonOfficial: rota.nonOfficial || [],
         fridayRule: rota.fridayRule !== false,
       };
@@ -221,12 +228,17 @@ export default function Dashboard({
       if (nonOff) anyNonOfficial = true;
       if (onCall) anyOnCall = true;
       // One entry per duty, so a split shift shows both.
-      entriesOf((m.cells[dateStr] || {})[m.staffId]).forEach((entry) => {
+      const dayEntries = entriesOf((m.cells[dateStr] || {})[m.staffId]);
+      // Only the first duty unless this department uses split duties.
+      const visible = m.splitEnabled ? dayEntries : dayEntries.slice(0, 1);
+      visible.forEach((entry) => {
         const code = m.codes.find((c) => c.id === entry.code);
         if (!code && !entry.code) return;
         // Cells store the post id, so the name is looked up here. A post that
         // has since been deleted resolves to nothing and simply is not shown.
-        const post = (m.posts || []).find((x) => x.id === entry.post);
+        const post = m.postsEnabled
+          ? (m.posts || []).find((x) => x.id === entry.post)
+          : null;
         duties.push({
           postName: post ? post.name : "",
           text: code ? code.code : "?",
@@ -240,7 +252,7 @@ export default function Dashboard({
         });
       });
       // On call with no duty rostered still deserves a line in the panel.
-      if (onCall && !entriesOf((m.cells[dateStr] || {})[m.staffId]).length) {
+      if (onCall && !dayEntries.length) {
         duties.push({
           text: "", label: "", post: "", postName: "", color: T.mist,
           deptName: m.deptName, nonOfficial: nonOff, onCall: true, onCallOnly: true,
