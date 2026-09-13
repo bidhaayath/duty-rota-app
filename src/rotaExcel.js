@@ -59,7 +59,7 @@ const safeFileName = (s) =>
  *   days        [{ date, dayName, dayLabel, nonOff }]
  *   totalHeads  [string]  e.g. ["M","A","N","OD","RD","OFF"]
  *   rows        [{ num, name, designation, cells, totals, nonOfficialDuty }]
- *                 cells: [{ span, text, post, bg, fg, muted }]
+ *                 cells: [{ span, text, post, second, secondPost, bg, fg, muted }]
  *                 totals: [number] aligned with totalHeads
  *   onCall      [string]  one per day, "" when nobody
  *   staff       [{ name, designation, email, contact, recc, licence,
@@ -132,8 +132,11 @@ export async function exportRotaToExcel(model) {
   /* Staff rows. */
   rows.forEach((r, ri) => {
     const row = ws.getRow(HEAD + 1 + ri);
-    // A row with any post needs the height for two lines of text.
-    row.height = r.cells.some((c) => c.post) ? 30 : 20;
+    /* Tall enough for the busiest cell in the row: a duty, its post, a second
+       duty and its post is four lines. */
+    const maxLines = r.cells.reduce((n, c) => Math.max(n,
+      (c.text ? 1 : 0) + (c.post ? 1 : 0) + (c.second ? 1 : 0) + (c.secondPost ? 1 : 0)), 1);
+    row.height = maxLines > 1 ? 12 + maxLines * 11 : 20;
 
     row.getCell(1).value = r.num;
     row.getCell(1).font = { size: 9, color: { argb: "FF4A6570" } };
@@ -150,12 +153,18 @@ export async function exportRotaToExcel(model) {
       const span = Math.max(1, seg.span || 1);
       const cell = row.getCell(col);
       if (span > 1) ws.mergeCells(row.number, col, row.number, col + span - 1);
-      /* Duty on the first line, post underneath, in one cell. Two rows per
-         person would double the height of every sheet and make combining
+      /* Everything about the day stacks inside one cell: the duty, its post,
+         then a second duty and its post where the day is a split one. Two rows
+         per person would double the height of every sheet and make combining
          several departments much harder, which is the whole point of this
          export for the person receiving it. */
-      cell.value = seg.post ? `${seg.text || ""}\n${seg.post}` : (seg.text || "");
-      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: !!seg.post };
+      const lines = [];
+      if (seg.text) lines.push(seg.text);
+      if (seg.post) lines.push(seg.post);
+      if (seg.second) lines.push(seg.second);
+      if (seg.secondPost) lines.push(seg.secondPost);
+      cell.value = lines.join("\n");
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: lines.length > 1 };
       cell.font = {
         bold: !seg.muted, size: 10,
         italic: !!seg.muted,
