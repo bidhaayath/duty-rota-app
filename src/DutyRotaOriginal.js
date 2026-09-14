@@ -227,9 +227,14 @@ const doSaveRotaFor = async (deptId, rotaData, onConflict) => {
           console.warn("Rota save refused (not a version conflict): write did not apply.");
           return true;
         }
-        console.warn("Rota save conflict: version mismatch, discarding this save.");
+        /* Returning plain false here made the caller show the connection-error
+           banner — "check your internet, do not close this tab" — beside the
+           conflict banner that was already explaining the real situation.
+           Two messages, one of them wrong and alarming. A conflict is not a
+           failure to reach the server, so it says so. */
+        console.warn("Rota save conflict: version mismatch, the edit is held for recovery.");
         if (onConflict) onConflict();
-        return false;
+        return "conflict";
       }
       if (!error) rotaVersions.set(deptId, known + 1);
     } else {
@@ -924,14 +929,25 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         switchingDept.current = true;
         setDeptId(deps[0].id);
         const saved = await loadRotaFor(deps[0].id);
-        setData(saved ? migrate(saved) : seed());
+        const first = saved ? migrate(saved) : seed();
+        /* Same treatment as every other load. Without it this one path still
+           saved on open, and syncedRef stayed empty — which would have made
+           the app offer to restore work nobody had done. A brand-new account
+           lands here with a seeded rota; not writing it is correct, and their
+           first real edit creates the row. */
+        markSynced(first);
+        justLoadedRef.current = first;
+        setData(first);
         switchingDept.current = false;
       } else {
         // Departments unreachable — legacy mode so nobody is locked out.
         // Server-only load; the shared localStorage fallback would cross
         // accounts, so it’s intentionally not consulted here.
         const saved = await loadUserRota();
-        setData(saved ? migrate(saved) : seed());
+        const legacy = saved ? migrate(saved) : seed();
+        markSynced(legacy);
+        justLoadedRef.current = legacy;
+        setData(legacy);
       }
     })();
   }, []);
@@ -939,20 +955,133 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   // Guards against re-entry if several queued saves conflict in quick
   // succession — only the first should trigger a reload.
   const reloadingRef = useRef(false);
+  const [othersEditing, setOthersEditing] = useState(false);
+  /* The rota exactly as it last came from, or went to, the server. Offering
+     to restore work has to mean "you changed something and it was not saved",
+     not "your screen differs from theirs". Without this, refreshing while up
+     to date offered to put back changes the person never made. */
+  const syncedRef = useRef(null);
+  /* The rota that has just been loaded from the server and put on screen.
+
+     Opening a department used to save it straight back. switchingDept is set
+     false on the line after setData, but React runs effects after rendering,
+     so by the time the autosave effect looked at the flag it was already
+     false — the effect saw fresh data and wrote it out again. Every open
+     bumped the version, which is why simply viewing a rota in a second
+     browser made the first one stale and produced conflicts nobody caused.
+
+     Comparing by identity rather than a flag closes the timing gap: this is
+     the exact object we just loaded, so there is nothing to save. */
+  const justLoadedRef = useRef(null);
+  const hasUnsavedWork = (mine) => {
+    if (!mine) return false;
+    if (!syncedRef.current) return true;   // nothing to compare with — keep it
+    try { return JSON.stringify(mine) !== syncedRef.current; }
+    catch (e) { return true; }
+  };
+  const markSynced = (d) => {
+    try { syncedRef.current = d ? JSON.stringify(d) : null; }
+    catch (e) { syncedRef.current = null; }
+  };
+  /* The edit that lost the race, held so it can be put back. Previously a
+     conflict showed an alert and loaded the other version, and whatever the
+     person had just done existed nowhere afterwards — a month of rota could
+     go for having pressed save a second later than someone else. */
+  const [lostEdit, setLostEdit] = useState(null);
+
   const handleSaveConflict = async () => {
     if (reloadingRef.current) return;
     reloadingRef.current = true;
-    window.alert("Someone else updated this rota. Your screen will now load their version.");
+    // Keep a copy of what was on screen before their version replaces it.
+    setData((mine) => { if (hasUnsavedWork(mine)) setLostEdit(mine); return mine; });
     switchingDept.current = true;
     setData(null);
     const fresh = await loadRotaFor(deptId);
-    setData(fresh ? migrate(fresh) : seed());
+    const loaded = fresh ? migrate(fresh) : seed();
+    markSynced(loaded);
+    justLoadedRef.current = loaded;
+    setData(loaded);
+    // Their version is now the one on screen, so the warning above it would
+    // be stale — the recovery banner takes over from here.
+    setOthersEditing(false);
     switchingDept.current = false;
     reloadingRef.current = false;
   };
 
+  /* Put the kept edit back. It saves over their version, which is why the
+     button says so plainly rather than calling itself "restore". */
+  const restoreLostEdit = () => {
+    if (!lostEdit) return;
+    setData(lostEdit);
+    setLostEdit(null);
+  };
+
+  /* Load the newest version on demand. Anything unsaved is kept first, so
+     pressing this can never be the thing that loses someone their work — it
+     behaves exactly as a save conflict does, but at a moment of their
+     choosing rather than by surprise. */
+  const [refreshing, setRefreshing] = useState(false);
+  const reloadLatest = async () => {
+    if (!deptId || refreshing) return;
+    setRefreshing(true);
+    setData((mine) => { if (hasUnsavedWork(mine)) setLostEdit(mine); return mine; });
+    switchingDept.current = true;
+    const fresh = await loadRotaFor(deptId);
+    const loaded = fresh ? migrate(fresh) : seed();
+    markSynced(loaded);
+    justLoadedRef.current = loaded;
+    setData(loaded);
+    setOthersEditing(false);
+    switchingDept.current = false;
+    setRefreshing(false);
+  };
+
+  /* ── Someone else is in here ──
+     A quiet check every half minute for a version newer than the one this
+     screen is working from. It cannot prevent a collision, but it turns one
+     into a warning beforehand rather than a surprise afterwards: told early,
+     most people simply message the other person and take turns.
+
+     One small read per department every 30 seconds, and only while a rota is
+     actually open — the tab is skipped entirely when hidden, so a forgotten
+     tab in a background window costs nothing. */
+  /* Depends on whether a rota is open, not on its contents. Watching the data
+     itself tore the timer down and built it again on every single edit, so the
+     thirty seconds never elapsed for anyone who was actually typing — the one
+     person the warning is for. */
+  const rotaIsOpen = !!data;
+  useEffect(() => {
+    if (!deptId || !rotaIsOpen) return undefined;
+    let alive = true;
+    const check = async () => {
+      if (document.hidden) return;
+      const known = rotaVersions.get(deptId);
+      if (known == null) return;
+      try {
+        const { data: rows } = await supabase
+          .from("rotas").select("version").eq("department_id", deptId)
+          // Same ordering as the load and the save, or this could read a
+          // different row and report a conflict that is not there.
+          .order("version", { ascending: false })
+          .order("created_at", { ascending: true })
+          .limit(1);
+        const server = rows && rows[0] ? rows[0].version : null;
+        if (alive) setOthersEditing(server != null && server > known);
+      } catch (e) { /* offline or blocked — say nothing rather than guess */ }
+    };
+    const id = setInterval(check, 30000);
+    return () => { alive = false; clearInterval(id); };
+  }, [deptId, rotaIsOpen]);
+
   useEffect(() => {
     if (!data || switchingDept.current) return;
+    // Exactly what the server just gave us — saving it back would write for
+    // no reason and make every other open copy look out of date.
+    // Deliberately not cleared here. In development React runs effects twice,
+    // and clearing on the first pass would let the second one save after all.
+    // The next real edit produces a different object, so the check fails then
+    // and the save happens as it should.
+    if (data === justLoadedRef.current) return;
     const myAttempt = ++saveAttempt.current;
     setSaveStatus("saving");
     const run = deptId ? saveRotaFor(deptId, data, handleSaveConflict) : saveUserRota(data);
@@ -960,7 +1089,12 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       // If another save started while this one was in flight, its result
       // is the one that matters — ignore this older, now-stale result.
       if (saveAttempt.current !== myAttempt) return;
-      setSaveStatus(ok ? "saved" : "error");
+      // A save that landed makes this the server's copy too.
+      if (ok === true) markSynced(data);
+      /* A conflict is already explained by its own banner, and the work is
+         held rather than lost — so the indicator simply goes quiet instead of
+         reporting an error that would contradict it. */
+      setSaveStatus(ok === "conflict" ? "idle" : (ok ? "saved" : "error"));
     });
     // handleSaveConflict is recreated each render but always closes over the
     // current deptId, so it's intentionally left out of this dependency list.
@@ -976,11 +1110,20 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
 
   const switchDept = async (id) => {
     if (id === deptId) return;
+    /* A held edit belongs to the department it was made in. Carrying it across
+       would offer to "put back" one department's rota on top of another's,
+       which would not restore anything — it would overwrite. Leaving is the
+       moment that offer expires. */
+    setLostEdit(null);
+    setOthersEditing(false);
     switchingDept.current = true;
     setData(null);
     setDeptId(id);
     const saved = await loadRotaFor(id);
-    setData(saved ? migrate(saved) : seed());
+    const opened = saved ? migrate(saved) : seed();
+    markSynced(opened);
+    justLoadedRef.current = opened;
+    setData(opened);
     switchingDept.current = false;
   };
 
@@ -1018,9 +1161,15 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       return;
     }
     setDepartments((prev) => [...prev, d]);
+    // Same as switching: a held edit belongs to the department it was made
+    // in and must not follow you into a brand-new one.
+    setLostEdit(null);
+    setOthersEditing(false);
     switchingDept.current = true;
     setData(null);
     setDeptId(d.id);
+    /* Deliberately not marked as just-loaded: a new department has no rota
+       row yet, and letting this first save through is what creates it. */
     setData(seed());
     switchingDept.current = false;
   };
@@ -1865,6 +2014,65 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
             </a>
           </div>
         )}
+        {/* The edit that lost a save race, offered back rather than lost.
+            Both options are spelled out, because "restore" would not make
+            clear that putting yours back writes over theirs. */}
+        {lostEdit && (
+          <div className="dr-anim-in no-print" style={{
+            background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 10,
+            padding: "12px 15px", marginBottom: 14, fontSize: 13.5, color: "#6B4A0C",
+            display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap",
+          }}>
+            <AlertTriangle size={17} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: "1 1 260px", lineHeight: 1.6 }}>
+              <strong>Someone else saved this rota while you were working.</strong>
+              {" "}Their version is on screen now. Your changes have not been lost —
+              you can put them back, which will save over theirs.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={restoreLostEdit} style={{
+                fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                background: "#A5731B", color: "#fff", border: "none",
+                borderRadius: 8, padding: "8px 14px", whiteSpace: "nowrap",
+              }}>Put my changes back</button>
+              <button onClick={() => setLostEdit(null)} style={{
+                fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                background: "transparent", color: "#6B4A0C",
+                border: "1px solid #E7D9B8", borderRadius: 8, padding: "8px 14px", whiteSpace: "nowrap",
+              }}>Keep theirs</button>
+            </div>
+          </div>
+        )}
+
+        {/* Said before the collision rather than after it, and said loudly:
+            continuing to edit from an out-of-date screen is how one person
+            writes over another's afternoon. */}
+        {othersEditing && !lostEdit && (
+          <div className="dr-anim-in no-print" style={{
+            background: "#FDEEEC", border: "1.5px solid #E4604E", borderRadius: 10,
+            padding: "13px 16px", marginBottom: 14, fontSize: 13.5, color: "#8C2F20",
+            display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap",
+            boxShadow: "0 3px 14px rgba(228,96,78,0.18)",
+          }}>
+            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1, color: "#E4604E" }} />
+            <div style={{ flex: "1 1 280px", lineHeight: 1.6 }}>
+              <strong>This rota has been updated by someone else.</strong>
+              {" "}You are looking at an earlier version. Refresh to load their
+              changes before you continue — otherwise your next save will replace
+              what they have done.
+            </div>
+            <button onClick={reloadLatest} disabled={refreshing} style={{
+              fontFamily: "inherit", fontSize: 13, fontWeight: 700,
+              cursor: refreshing ? "default" : "pointer",
+              background: "#E4604E", color: "#fff", border: "none",
+              borderRadius: 8, padding: "9px 16px", whiteSpace: "nowrap",
+              display: "inline-flex", alignItems: "center", gap: 6,
+            }}>
+              <RotateCcw size={14} /> {refreshing ? "Refreshing…" : "Refresh now"}
+            </button>
+          </div>
+        )}
+
         <WelcomeGuide data={data} update={update} setTab={setTab} />
         {tab === "rota" && <WeekRota data={data} update={update} staffEditable={staffEditable} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
