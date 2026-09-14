@@ -124,7 +124,11 @@ function Paywall({ onSeePlans, everPaid, paidTier, paidUntil }) {
     : 'Your rota and all your data are safe — you can still view everything and export PDFs, but editing is paused. Subscribe to continue right where you left off.';
 
   return (
-    <div className="dr-anim-in" style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
+    /* no-print: a lapsed-plan notice belongs on the screen, not in the
+       customer's paperwork. These exports are handed to heads of department
+       and other organisations, and a "your plan has ended" banner across the
+       top of a duty rota is an awkward thing to have to explain. */
+    <div className="dr-anim-in no-print" style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
         <div style={{ flex: '1 1 320px' }}>
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>{heading}</div>
