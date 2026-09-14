@@ -4,7 +4,7 @@ import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
   AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
-  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette
+  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -696,9 +696,12 @@ const migrate = (d) => {
 };
 
 /* ─────────────────── Shared UI ─────────────────── */
-const Card = ({ children, style, className }) => (
-  <div className={["dr-card", className].filter(Boolean).join(" ")} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
-);
+/* forwardRef so a caller can point at the underlying element — the chart
+   exports capture a Card directly. A plain function component drops a ref
+   silently, so the capture would simply find nothing. */
+const Card = React.forwardRef(({ children, style, className }, ref) => (
+  <div ref={ref} className={["dr-card", className].filter(Boolean).join(" ")} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
+));
 const Btn = ({ children, onClick, kind = "primary", small, style, disabled }) => {
   const kinds = {
     primary: { background: T.lagoon, color: "#fff" },
@@ -1255,6 +1258,53 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
       .rp-head { flex-direction: column; gap: 8px; }
       .rp-logo { position: static; height: 46px; max-width: 62%; }
     }
+    /* ── Statistics surfaces ──
+       Frosted cards over the page tint, matching the sign-in screen and the
+       dashboard. The charts themselves stay on a plain surface: recharts draws
+       onto the card, and blurring what sits behind a line graph makes it
+       harder to read for no gain. */
+    .dr-stat {
+      background: rgba(255,255,255,0.66) !important;
+      -webkit-backdrop-filter: blur(16px) saturate(150%);
+      backdrop-filter: blur(16px) saturate(150%);
+      border: 1px solid rgba(255,255,255,0.8) !important;
+      box-shadow: 0 6px 22px rgba(20,43,51,0.06), inset 0 1px 0 rgba(255,255,255,0.9);
+    }
+    .dr-stat-lead {
+      background: linear-gradient(135deg, rgba(214,239,233,0.78), rgba(255,255,255,0.6)) !important;
+      border: 1px solid rgba(15,139,126,0.28) !important;
+    }
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .dr-stat { background: #fff !important; }
+    }
+
+    /* One orchestrated entrance when the figures first appear, rather than a
+       transition on everything. The cards arrive in sequence, left to right,
+       and nothing moves again until the range changes. */
+    @keyframes dr-stat-in {
+      from { opacity: 0; transform: translateY(10px) scale(0.985); }
+      to   { opacity: 1; transform: none; }
+    }
+    .dr-stat-row .dr-stat {
+      opacity: 0;
+      animation: dr-stat-in 460ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .dr-stat-row .dr-stat:nth-child(1) { animation-delay: 0ms; }
+    .dr-stat-row .dr-stat:nth-child(2) { animation-delay: 70ms; }
+    .dr-stat-row .dr-stat:nth-child(3) { animation-delay: 140ms; }
+    .dr-stat-row .dr-stat:nth-child(4) { animation-delay: 210ms; }
+    .dr-stat-row .dr-stat:nth-child(5) { animation-delay: 280ms; }
+    .dr-stat-row .dr-stat:nth-child(6) { animation-delay: 350ms; }
+    @media (prefers-reduced-motion: reduce) {
+      .dr-stat-row .dr-stat { animation: none; opacity: 1; }
+    }
+    /* A picture must never catch a card mid-entrance. */
+    .dr-shooting .dr-stat-row .dr-stat { animation: none !important; opacity: 1 !important; }
+
+    /* The per-chart Save buttons are hidden while a picture is being taken,
+       otherwise every exported chart has a Save button drawn in its corner. */
+    .dr-shooting .dr-chart-save { visibility: hidden !important; }
+
     /* ── Long ranges print tighter ──
        A month is 31 columns plus eight totals. At the sizes that suit a week
        that needs two sheets, and the columns are so narrow the headers collide.
@@ -3017,6 +3067,51 @@ function Records({ data, range, setRange, onExport }) {
 
 /* ─────────────────── Statistics ─────────────────── */
 function Stats({ data, range, setRange, onExport }) {
+  /* Saving a single chart as a picture. A manager wanting to paste "who is on
+     leave" into a WhatsApp message should not have to send the whole page and
+     ask people to look at the third chart down. */
+  const pageRef = useRef(null);
+  const cardRefs = useRef({});
+  const [savingKey, setSavingKey] = useState(null);
+
+  const saveShot = async (key, node, filename) => {
+    if (!node) return;
+    setSavingKey(key);
+    document.body.classList.add("dr-shooting");
+    try {
+      const url = await toPng(node, {
+        pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true,
+        width: Math.ceil(Math.max(node.scrollWidth, node.offsetWidth)),
+        height: Math.ceil(Math.max(node.scrollHeight, node.offsetHeight)),
+      });
+      const a = document.createElement("a");
+      a.download = `${(data.title || "rota").replace(/[^\w-]+/g, "_")}_${filename}.png`;
+      a.href = url;
+      a.click();
+    } catch (e) {
+      window.alert("Sorry, couldn't save that as a picture. Try the PDF export instead.");
+    } finally {
+      document.body.classList.remove("dr-shooting");
+      setSavingKey(null);
+    }
+  };
+
+  /* Sits in the corner of a chart. Hidden from the picture it is saving,
+     otherwise every exported chart has a Save button drawn on it. */
+  const SaveChart = ({ cardKey, filename }) => (
+    <button
+      className="dr-chart-save no-print"
+      title="Save this chart as a picture"
+      onClick={() => saveShot(cardKey, cardRefs.current[cardKey], filename)}
+      style={{
+        fontFamily: "inherit", fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+        display: "inline-flex", alignItems: "center", gap: 5,
+        background: "transparent", border: `1px solid ${T.line}`, color: T.inkSoft,
+        borderRadius: 7, padding: "4px 9px",
+      }}>
+      <ImageDown size={13} /> {savingKey === cardKey ? "Saving…" : "Save"}
+    </button>
+  );
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
@@ -3065,54 +3160,122 @@ function Stats({ data, range, setRange, onExport }) {
     off: rows.reduce((a, r) => a + r.off, 0),
   };
 
-  const StatCard = ({ label, value, color = T.ink }) => (
-    <Card style={{ flex: "1 1 140px", minWidth: 140 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: T.inkSoft, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontFamily: "Sora, sans-serif", fontSize: 26, fontWeight: 700, color }}>{value}</div>
-    </Card>
-  );
+  /* The figures a manager is asked for when reporting upward: how many
+     non-official days fell in the period, how much leave of each kind was
+     taken, how many staff there were, and who joined or left. These describe
+     the department; the older totals describe the rota, which is why they now
+     sit at the foot of the page. */
+  const summary = useMemo(() => {
+    if (!valid) return null;
+    const dates = datesBetween(range.from, range.to);
+    // Non-official DAYS, not duties: how many gold days the period contained,
+     // whether or not anybody was rostered on them.
+    const nonOffDays = dates.filter((d) => isNonOff(data, d)).length;
+    const inRange = (d) => d && d >= range.from && d <= range.to;
+    return {
+      nonOffDays,
+      staffCount: rows.length,
+      /* Staff on annual leave, counted exactly as the chart counts it — how
+         many people had an annual leave period overlapping this range, not how
+         many days were taken. That is the figure a manager needs when working
+         out whether the ward can be covered. */
+      onAnnual: rows.filter((r) => (r.staff.leavePeriods || []).some(
+        (pd) => pd.type === "annual" && pd.start <= range.to && pd.end >= range.from)).length,
+      annualDays: rows.reduce((a, r) => a + r.annualDays, 0),
+      joined: (data.staff || []).filter((s) => inRange(s.startDate)).length,
+      left: (data.staff || []).filter((s) => inRange(s.endDate)).length,
+      /* How many people were on duty on an average day: every duty worked,
+         divided by the days in the range. The figure a manager compares against
+         what the ward is supposed to run on. */
+      avgPerDay: dates.length
+        ? Math.round((rows.reduce((a, r) => a + r.dutyShifts, 0) / dates.length) * 10) / 10
+        : 0,
+    };
+  }, [data, rows, range, valid]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", justifyContent: "space-between" }}>
         <RangePicker range={range} setRange={setRange} />
-        <Btn kind="ghost" small onClick={onExport} disabled={!valid}><Printer size={14} /> Export PDF</Btn>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn kind="ghost" small disabled={!valid}
+            onClick={() => saveShot("page", pageRef.current, "statistics")}>
+            <ImageDown size={14} /> {savingKey === "page" ? "Saving…" : "Save page"}
+          </Btn>
+          <Btn kind="ghost" small onClick={onExport} disabled={!valid}><Printer size={14} /> Export PDF</Btn>
+        </div>
       </div>
       {!valid ? <div style={{ fontSize: 13, color: T.coral }}>Pick a valid date range.</div> : <>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <StatCard label="Total duty shifts" value={totals.duty} />
-          <StatCard label="Non-official duties" value={totals.nonOff} color="#A5731B" />
-          <StatCard label="Leave days" value={totals.leave} color={T.dusk} />
-          <StatCard label="Off days" value={totals.off} />
+      <div ref={pageRef} style={{ display: "flex", flexDirection: "column", gap: 16, background: "transparent" }}>
+        {/* The four figures a manager checks first. Staff on annual leave
+           leads: it is the one that decides whether the next month can be
+           covered at all. The rest are counts, not essays — the breakdowns
+           live in the charts below, so nothing here repeats them. */}
+        <div className="dr-stat-row" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <Card className="dr-stat dr-stat-lead" style={{ flex: "2 1 240px", minWidth: 210 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "#0B6A60", marginBottom: 4 }}>
+              On annual leave
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
+              <CountUp value={summary.onAnnual} style={{ fontFamily: "Sora, sans-serif", fontSize: 34, fontWeight: 700, color: T.lagoon, lineHeight: 1 }} />
+              <span style={{ fontSize: 12, color: T.inkSoft }}>
+                of {summary.staffCount} staff
+              </span>
+            </div>
+          </Card>
+
+          {[["Staff", summary.staffCount, T.ink,
+             /* Spelled out. "+1 · −2" is quicker to write and slower to read,
+                and this line is read far more often than it is written. */
+             [summary.joined ? `${summary.joined} joined` : "",
+              summary.left ? `${summary.left} left` : ""].filter(Boolean).join(", ") || null],
+            ["Staff on duty", summary.avgPerDay, T.lagoon, "on an average day"],
+            ["Non-official days", summary.nonOffDays, "#A5731B", null],
+          ].map(([label, value, colour, note]) => (
+            <Card key={label} className="dr-stat" style={{ flex: "1 1 140px", minWidth: 130 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>{label}</div>
+              <CountUp value={value} decimals={String(value).includes(".") ? 1 : 0}
+                style={{ display: "block", fontFamily: "Sora, sans-serif", fontSize: 26, fontWeight: 700, color: value ? colour : T.line, lineHeight: 1.1 }} />
+              {note && <div style={{ fontSize: 10.5, color: T.inkSoft, marginTop: 3, lineHeight: 1.35 }}>{note}</div>}
+            </Card>
+          ))}
         </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "1 1 100%", minWidth: 320 }}>
-            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Duties per staff</h3>
-            <ResponsiveContainer width="100%" height={320}>
+          <Card ref={(el) => { cardRefs.current["duties"] = el; }} style={{ flex: "1 1 100%", minWidth: 320 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Duties per staff</h3>
+              <SaveChart cardKey="duties" filename="duties_per_staff" />
+            </div>
+            <ResponsiveContainer width="100%" height={360}>
               <BarChart data={dutyByStaff} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
                 {/* Names are rotated upright: with a long staff list they collide
                     when laid flat, and recharts silently drops the ones that
                     don't fit. interval={0} keeps every name on the axis. */}
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-90} textAnchor="end" height={72} />
+                {/* 72px was not enough for a name turned on its side, so longer
+                   ones were cut off at the bottom of the chart. */}
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-90} textAnchor="end" height={110} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip />
+                <Tooltip cursor={{ fill: "rgba(15,139,126,0.06)" }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Morning" stackId="a" fill="#F4B860" />
-                <Bar dataKey="Afternoon" stackId="a" fill="#8FBF6B" />
-                {data.eveningEnabled && <Bar dataKey="Evening" stackId="a" fill="#E58E77" />}
-                <Bar dataKey="Night" stackId="a" fill="#6FA8DC" />
-                <Bar dataKey="Other duty" stackId="a" fill="#8E7CC3" />
-                <Bar dataKey="Release" stackId="a" fill="#C08552" radius={[4, 4, 0, 0]} />
+                <Bar animationDuration={900} animationEasing="ease-out" animationBegin={0} dataKey="Morning" stackId="a" fill="#F4B860" />
+                <Bar animationDuration={900} animationEasing="ease-out" animationBegin={90} dataKey="Afternoon" stackId="a" fill="#8FBF6B" />
+                {data.eveningEnabled && <Bar animationDuration={900} animationEasing="ease-out" animationBegin={180} dataKey="Evening" stackId="a" fill="#E58E77" />}
+                <Bar animationDuration={900} animationEasing="ease-out" animationBegin={270} dataKey="Night" stackId="a" fill="#6FA8DC" />
+                <Bar animationDuration={900} animationEasing="ease-out" animationBegin={360} dataKey="Other duty" stackId="a" fill="#8E7CC3" />
+                <Bar animationDuration={900} animationEasing="ease-out" animationBegin={450} dataKey="Release" stackId="a" fill="#C08552" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
         </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "1 1 280px", minWidth: 260 }}>
-            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Staff on leave (by type)</h3>
+          <Card ref={(el) => { cardRefs.current["leavetype"] = el; }} style={{ flex: "1 1 280px", minWidth: 260 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Staff on leave (by type)</h3>
+              <SaveChart cardKey="leavetype" filename="staff_on_leave" />
+            </div>
             {!anyLeaveByType ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
             ) : (
@@ -3123,7 +3286,7 @@ function Stats({ data, range, setRange, onExport }) {
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-40} textAnchor="end" height={66} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                   <Tooltip formatter={(v) => [`${v} staff`, "On leave"]} />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                  <Bar animationDuration={900} animationEasing="ease-out" dataKey="value" radius={[4, 4, 0, 0]}>
                     {leaveTypeData.map((x) => <Cell key={x.name} fill={x.color} />)}
                   </Bar>
                 </BarChart>
@@ -3131,8 +3294,11 @@ function Stats({ data, range, setRange, onExport }) {
             )}
           </Card>
 
-          <Card style={{ flex: "1 1 280px", minWidth: 260 }}>
-            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(days by category)</span></h3>
+          <Card ref={(el) => { cardRefs.current["leavetaken"] = el; }} style={{ flex: "1 1 280px", minWidth: 260 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(days by category)</span></h3>
+              <SaveChart cardKey="leavetaken" filename="leave_taken" />
+            </div>
             {!anyLeaveCodes ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No leave recorded in this range.</div>
             ) : (
@@ -3142,7 +3308,7 @@ function Stats({ data, range, setRange, onExport }) {
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-40} textAnchor="end" height={66} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                   <Tooltip formatter={(v) => [`${v}×`, "Taken"]} />
-                  <Bar dataKey="value" fill="#6C7BD9" radius={[4, 4, 0, 0]} />
+                  <Bar animationDuration={900} animationEasing="ease-out" dataKey="value" fill="#6C7BD9" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -3150,8 +3316,11 @@ function Stats({ data, range, setRange, onExport }) {
         </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "1 1 100%", minWidth: 300 }}>
-            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Non-official duties per staff <span style={{ fontSize: 12, color: "#A5731B", fontWeight: 600 }}>(paid days)</span></h3>
+          <Card ref={(el) => { cardRefs.current["nonoff"] = el; }} style={{ flex: "1 1 100%", minWidth: 300 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Non-official duties per staff <span style={{ fontSize: 12, color: "#A5731B", fontWeight: 600 }}>(paid days)</span></h3>
+              <SaveChart cardKey="nonoff" filename="non_official_duties" />
+            </div>
             {nonOffByStaff.length === 0 ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>No staff in this range.</div>
             ) : (
@@ -3161,7 +3330,7 @@ function Stats({ data, range, setRange, onExport }) {
                   <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} interval={0} />
                   <Tooltip formatter={(v) => [`${v} day(s)`, "Non-official duty"]} />
-                  <Bar dataKey="days" fill="#D9A93F" radius={[0, 4, 4, 0]} />
+                  <Bar animationDuration={900} animationEasing="ease-out" dataKey="days" fill="#D9A93F" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -3169,8 +3338,11 @@ function Stats({ data, range, setRange, onExport }) {
         </div>
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Card style={{ flex: "1 1 100%", minWidth: 320 }}>
-            <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>Daily coverage</h3>
+          <Card ref={(el) => { cardRefs.current["coverage"] = el; }} style={{ flex: "1 1 100%", minWidth: 320 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Daily coverage</h3>
+              <SaveChart cardKey="coverage" filename="daily_coverage" />
+            </div>
             {coverage === null ? (
               <div style={{ fontSize: 13, color: T.inkSoft, padding: "40px 0", textAlign: "center" }}>Range too long for a daily chart — pick 3 months or less.</div>
             ) : (
@@ -3179,21 +3351,77 @@ function Stats({ data, range, setRange, onExport }) {
                   <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
+                  <Tooltip cursor={{ fill: "rgba(15,139,126,0.06)" }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Line type="monotone" dataKey="Morning" stroke="#E8A33D" dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="Afternoon" stroke="#6E9E4C" dot={false} strokeWidth={2} />
-                  {data.eveningEnabled && <Line type="monotone" dataKey="Evening" stroke="#D0694F" dot={false} strokeWidth={2} />}
-                  <Line type="monotone" dataKey="Night" stroke="#4A82BC" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="Morning" stroke="#E8A33D" dot={false} strokeWidth={2} animationDuration={1200} animationEasing="ease-out" animationBegin={0} activeDot={{ r: 5, strokeWidth: 0 }} />
+                  <Line type="monotone" dataKey="Afternoon" stroke="#6E9E4C" dot={false} strokeWidth={2} animationDuration={1200} animationEasing="ease-out" animationBegin={120} activeDot={{ r: 5, strokeWidth: 0 }} />
+                  {data.eveningEnabled && <Line type="monotone" dataKey="Evening" stroke="#D0694F" dot={false} strokeWidth={2} animationDuration={1200} animationEasing="ease-out" animationBegin={240} activeDot={{ r: 5, strokeWidth: 0 }} />}
+                  <Line type="monotone" dataKey="Night" stroke="#4A82BC" dot={false} strokeWidth={2} animationDuration={1200} animationEasing="ease-out" animationBegin={360} activeDot={{ r: 5, strokeWidth: 0 }} />
                 </LineChart>
               </ResponsiveContainer>
             )}
           </Card>
         </div>
+
+        {/* The rota-level counters. Useful for comparing one month against
+           another, but not what anyone opens this tab to find, so they sit at
+           the foot of the page rather than competing with the figures above. */}
+        <Card>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: T.inkSoft, marginBottom: 10 }}>
+            Rota totals
+          </div>
+          <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
+            {[["Duty shifts", totals.duty, "every duty worked, counting a split day twice"],
+              ["Leave days", totals.leave, "all leave of every kind"],
+              ["Off days", totals.off, "days rostered off"]].map(([l, v, note]) => (
+              <div key={l} style={{ minWidth: 150 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: T.inkSoft, marginBottom: 2 }}>{l}</div>
+                <div style={{ fontFamily: "Sora, sans-serif", fontSize: 22, fontWeight: 700, color: T.ink }}>{v}</div>
+                <div style={{ fontSize: 10.5, color: T.inkSoft, marginTop: 2, lineHeight: 1.4 }}>{note}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
       </>}
     </div>
   );
 }
+
+/* A number that counts up to its value rather than snapping to it. Used on
+   the statistics cards, where it gives the figures a moment of weight and
+   makes it obvious something was recalculated when the date range changes.
+
+   It counts from wherever it currently is, not from zero, so changing the
+   range slides 20 → 18 instead of dropping to nothing and climbing back.
+   Anyone who has asked for reduced motion just gets the number. */
+const CountUp = ({ value, decimals = 0, ms = 520, style }) => {
+  const target = Number(value) || 0;
+  const [shown, setShown] = useState(target);
+  const from = useRef(target);
+
+  useEffect(() => {
+    const reduced = typeof window !== "undefined" && window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || from.current === target) {
+      setShown(target); from.current = target; return undefined;
+    }
+    const start = from.current;
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (t) => {
+      const p = Math.min(1, (t - t0) / ms);
+      const eased = 1 - Math.pow(1 - p, 3);        // ease-out, no overshoot
+      setShown(start + (target - start) * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+      else from.current = target;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+
+  return <span style={style}>{shown.toFixed(decimals)}</span>;
+};
 
 /* ─────────────────── Print views ─────────────────── */
 const pth = { border: "1px solid #999", padding: "5px 7px", fontSize: 10.5, fontWeight: 700, textAlign: "center", background: "#E8E8E8" };
@@ -3207,6 +3435,19 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
      smaller text — so a month prints on one page instead of two, without the
      reader having to find the scale box in the print dialog. */
   const compact = days.length > 14;
+  /* A minimum width for the grid, worked out from the number of columns.
+
+     Without it the table is simply width:100%, so on a phone it squeezes into
+     360px: the columns collapse and the duty codes spill out of their cells.
+     The image export then captures exactly that mess, which is why an export
+     made in portrait came out broken while the same export in landscape was
+     fine — the only difference was how much width the table was given.
+
+     With a minimum, the page scrolls sideways on a phone instead of crushing,
+     and both the PNG and the PDF come out the same whichever way the phone is
+     held. On a desktop the container is wider than this, so nothing changes. */
+  const gridMinWidth = 150 + days.length * (compact ? 34 : 74)
+    + (rotaOnly ? 0 : (data.eveningEnabled ? 8 : 7) * 34);
   // Collect notes shown this week, numbered, to list under the rota
   const noteList = [];
   const noteNum = (date, staffId) => {
@@ -3240,7 +3481,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
           Note: on a monthly range this makes every day column equal and
           narrow. That is accepted — the weekly rota is what people print and
           pin up, and it is the case this option is for. */}
-      <table className={`rota-grid${compact ? " rota-compact" : ""}`} style={{ borderCollapse: "collapse", width: "100%", ...(rotaOnly ? { tableLayout: "fixed" } : null) }}>
+      <table className={`rota-grid${compact ? " rota-compact" : ""}`} style={{ borderCollapse: "collapse", width: "100%", minWidth: gridMinWidth, ...(rotaOnly ? { tableLayout: "fixed" } : null) }}>
         <thead>
           <tr>
             <th style={{ ...pth, width: 24 }}>#</th>
@@ -3581,6 +3822,25 @@ function StatsPrint({ data, from, to }) {
     leave: rows.reduce((a, r) => a + r.annualDays + r.maternityDays + r.sl + r.frl + r.ml + r.otherLeave, 0),
     off: rows.reduce((a, r) => a + r.off, 0),
   };
+
+  /* The same four figures the Statistics tab now leads with. An export that
+     reports different headline numbers from the screen it was taken from is
+     worse than no export: whoever receives it has no way to tell which is
+     right. The older totals still appear, at the foot, exactly as on screen. */
+  const headline = (() => {
+    const inRange = (d) => d && d >= from && d <= to;
+    return {
+      onAnnual: rows.filter((r) => (r.staff.leavePeriods || []).some(
+        (pd) => pd.type === "annual" && pd.start <= to && pd.end >= from)).length,
+      staffCount: rows.length,
+      avgPerDay: dates.length
+        ? Math.round((rows.reduce((a, r) => a + r.dutyShifts, 0) / dates.length) * 10) / 10
+        : 0,
+      nonOffDays: dates.filter((d) => isNonOff(data, d)).length,
+      joined: (data.staff || []).filter((s) => inRange(s.startDate)).length,
+      left: (data.staff || []).filter((s) => inRange(s.endDate)).length,
+    };
+  })();
   // breakInside keeps a chart card whole — without it a tall card leaves an
   // empty box on one page and its chart on the next.
   const box = { border: "1px solid #BBB", borderRadius: 8, padding: 10, background: "#fff", breakInside: "avoid", pageBreakInside: "avoid" };
@@ -3600,10 +3860,17 @@ function StatsPrint({ data, from, to }) {
       </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        {[["Total duty shifts", totals.duty], ["Non-official duties", totals.nonOff], ["Leave days", totals.leave], ["Off days", totals.off]].map(([l, v]) => (
+        {[["On annual leave", headline.onAnnual, `of ${headline.staffCount} staff`],
+          ["Staff", headline.staffCount,
+            [headline.joined ? `${headline.joined} joined` : "",
+             headline.left ? `${headline.left} left` : ""].filter(Boolean).join(", ")],
+          ["Staff on duty", headline.avgPerDay, "on an average day"],
+          ["Non-official days", headline.nonOffDays, ""],
+        ].map(([l, v, note]) => (
           <div key={l} style={{ ...box, flex: 1, textAlign: "center" }}>
             <div style={{ fontSize: 10.5, color: "#666", fontWeight: 600 }}>{l}</div>
             <div style={{ fontFamily: "Sora, sans-serif", fontSize: 20, fontWeight: 700 }}>{v}</div>
+            {note && <div style={{ fontSize: 9, color: "#888", marginTop: 1 }}>{note}</div>}
           </div>
         ))}
       </div>
@@ -3688,6 +3955,18 @@ function StatsPrint({ data, from, to }) {
               <Line type="monotone" dataKey="Night" stroke="#4A82BC" dot={false} strokeWidth={2} isAnimationActive={false} />
             </LineChart>
           )}
+        </div>
+      </div>
+      {/* The same rota totals that sit at the foot of the tab. */}
+      <div style={{ ...box, marginTop: 12, breakInside: "avoid" }}>
+        <div style={{ fontSize: 10.5, color: "#666", fontWeight: 600, marginBottom: 6 }}>Rota totals</div>
+        <div style={{ display: "flex", gap: 22, flexWrap: "wrap", fontSize: 11 }}>
+          {[["Duty shifts", totals.duty], ["Leave days", totals.leave], ["Off days", totals.off]].map(([l, v]) => (
+            <div key={l}>
+              <span style={{ color: "#666" }}>{l}: </span>
+              <strong style={{ fontFamily: "Sora, sans-serif" }}>{v}</strong>
+            </div>
+          ))}
         </div>
       </div>
       <div style={{
