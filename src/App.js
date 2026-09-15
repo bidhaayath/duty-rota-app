@@ -165,7 +165,13 @@ function LegalFooter() {
       <a href="/terms" target="_blank" rel="noopener noreferrer" style={link}>Terms of Service</a>
       <a href="/refunds" target="_blank" rel="noopener noreferrer" style={link}>Refunds &amp; Cancellation</a>
       <a href="mailto:support@easydutyrota.com" style={link}>support@easydutyrota.com</a>
-      <span style={{ color: '#8AA0A8', fontSize: 12 }}>SHAB INVESTMENT</span>
+      {/* The copyright line asserts ownership and names the owner. It needs no
+          registration — copyright exists from the moment the work is written —
+          but saying so plainly removes any question about who the app belongs
+          to. The year updates itself so it never goes stale. */}
+      <span style={{ color: '#8AA0A8', fontSize: 12 }}>
+        &copy; {new Date().getFullYear()} SHAB INVESTMENT. All rights reserved.
+      </span>
     </div>
   );
 }
