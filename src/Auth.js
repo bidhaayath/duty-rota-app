@@ -93,6 +93,11 @@ const okBox = {
   marginBottom: '15px', fontSize: '12.5px', lineHeight: 1.6,
 };
 
+// How long someone must wait before asking for another sign-up code.
+// Supabase itself refuses a resend within about a minute, so the button
+// simply counts down instead of letting them hit that error.
+const RESEND_WAIT_SECONDS = 60;
+
 /* Slow-drifting colour behind the glass. Nothing here is interactive, and
    it is switched off for anyone who prefers reduced motion. */
 function GlassBackdrop() {
@@ -189,13 +194,15 @@ const urlError = () => {
 
 export default function Auth() {
   const startingError = urlError();
-  // mode: 'login' | 'signup' | 'forgot' | 'reset'
+  // mode: 'login' | 'signup' | 'verify' | 'forgot' | 'reset'
   const [mode, setMode] = useState(
     recoveryPending() ? 'reset' : startingError ? 'forgot' : 'login'
   );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
+  const [code, setCode] = useState('');
+  const [resendIn, setResendIn] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(startingError);
   const [notice, setNotice] = useState('');
@@ -211,6 +218,13 @@ export default function Auth() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Count down the "Send a new code" wait, one second at a time.
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const t = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
 
   const switchMode = (m) => {
     // Leaving the reset screen without setting a password? The recovery link
@@ -228,11 +242,41 @@ export default function Auth() {
     setNotice('');
     setPassword('');
     setPassword2('');
+    setCode('');
+  };
+
+  // Move to the "enter your code" screen, keeping the email they typed.
+  const goToVerify = (message) => {
+    setMode('verify');
+    setCode('');
+    setPassword('');
+    setPassword2('');
+    setResendIn(RESEND_WAIT_SECONDS);
+    setNotice(message);
   };
 
   const handleLogin = async () => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
+      // Signed up but never entered their code: send a fresh one and take
+      // them straight to the code screen instead of a dead end.
+      if (/email not confirmed/i.test(error.message)) {
+        const { error: resendError } = await supabase.auth.resend({ type: 'signup', email });
+        goToVerify(
+          'Your email address is not confirmed yet. We have sent a 6-digit code to ' + email +
+          '. Enter it below to finish. If you do not see the email within a few minutes, ' +
+          'check your Junk or Spam folder.'
+        );
+        if (resendError) {
+          setNotice('');
+          throw new Error(
+            'Your email address is not confirmed yet, and we could not send a new code just now. ' +
+            'If you already have a code from an earlier email, enter it below, or wait a minute ' +
+            'and tap "Send a new code".'
+          );
+        }
+        return;
+      }
       // Friendlier wording than Supabase's default
       if (/invalid login credentials/i.test(error.message)) {
         throw new Error('Email or password is incorrect. Try again, or use "Forgot password?" below.');
@@ -251,14 +295,67 @@ export default function Auth() {
       throw error;
     }
     // If email confirmation is OFF, Supabase returns a session and App.js
-    // will switch screens automatically. If it is ON, tell them to check email.
-    if (!data.session) {
-      setNotice(
-        'Account created. Check your email for a confirmation link to finish signing up. ' +
-        'If you do not see it within a few minutes, look in your spam or junk folder.'
-      );
-      setPassword('');
+    // will switch screens automatically — nothing more to do here.
+    if (data.session) return;
+
+    // With confirmation ON, Supabase does not say "already exists" (so
+    // strangers cannot test which emails are registered). Instead it returns
+    // a user with no identities and sends no email. Catch that here so the
+    // person is not left waiting for a code that will never come.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      throw new Error('An account already exists for this email. Try logging in instead.');
     }
+
+    goToVerify(
+      'We have sent a 6-digit code to ' + email + '. Enter it below to finish creating your account. ' +
+      'If you do not see the email within a few minutes, check your Junk or Spam folder.'
+    );
+  };
+
+  const handleVerify = async () => {
+    const token = code.replace(/\D/g, '');
+    if (token.length !== 6) throw new Error('Enter the 6-digit code from the email.');
+
+    // 'email' is Supabase's current name for this check; 'signup' is the
+    // older name. Try the current one first and fall back once, so the code
+    // works whichever one this project expects.
+    let { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+    if (error) {
+      const retry = await supabase.auth.verifyOtp({ email, token, type: 'signup' });
+      if (!retry.error) error = null;
+    }
+    if (error) {
+      if (/expired|invalid/i.test(error.message)) {
+        throw new Error(
+          'That code is incorrect or has expired. Check the newest email from us, ' +
+          'or tap "Send a new code".'
+        );
+      }
+      throw error;
+    }
+    // Verifying signs them in. App.js sees the new session and opens the app.
+    setNotice('Email confirmed. Taking you to your rota…');
+  };
+
+  const resendCode = async () => {
+    if (resendIn > 0 || loading || !email) return;
+    setError('');
+    setNotice('');
+    const { error } = await supabase.auth.resend({ type: 'signup', email });
+    if (error) {
+      setError(
+        /seconds|rate|too many/i.test(error.message)
+          ? 'Please wait a minute before asking for another code.'
+          : 'We could not send a new code: ' + error.message
+      );
+      return;
+    }
+    setCode('');
+    setResendIn(RESEND_WAIT_SECONDS);
+    setNotice(
+      'A new code has been sent to ' + email + '. Only the newest code will work. ' +
+      'Check your Junk or Spam folder if it does not arrive within a few minutes.'
+    );
   };
 
   const handleForgot = async () => {
@@ -303,6 +400,7 @@ export default function Auth() {
     try {
       if (mode === 'login') await handleLogin();
       else if (mode === 'signup') await handleSignUp();
+      else if (mode === 'verify') await handleVerify();
       else if (mode === 'forgot') await handleForgot();
       else if (mode === 'reset') await handleReset();
     } catch (err) {
@@ -314,12 +412,14 @@ export default function Auth() {
   const titles = {
     login: 'Log in',
     signup: 'Create your account',
+    verify: 'Confirm your email',
     forgot: 'Reset your password',
     reset: 'Choose a new password',
   };
   const buttonText = {
     login: 'Log in',
     signup: 'Create account',
+    verify: 'Confirm email',
     forgot: 'Send reset link',
     reset: 'Save new password',
   };
@@ -348,7 +448,7 @@ export default function Auth() {
         {notice && <div style={okBox}>✓ {notice}</div>}
 
         <form onSubmit={submit}>
-          {mode !== 'reset' && (
+          {mode !== 'reset' && mode !== 'verify' && (
             <input
               type="email"
               placeholder="Email"
@@ -369,6 +469,25 @@ export default function Auth() {
               required
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
               className="edr-in" style={{ ...input, marginBottom: mode === 'login' ? '8px' : '20px' }}
+            />
+          )}
+
+          {mode === 'verify' && (
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="6-digit code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              required
+              maxLength={6}
+              autoFocus
+              className="edr-in"
+              style={{
+                ...input, marginBottom: '20px', textAlign: 'center',
+                fontSize: '22px', fontWeight: 700, letterSpacing: '6px',
+              }}
             />
           )}
 
@@ -421,6 +540,30 @@ export default function Auth() {
             </p>
           )}
         </form>
+
+        {mode === 'verify' && (
+          <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: 'rgba(255,255,255,0.80)', lineHeight: 1.9 }}>
+            Didn't get it?{' '}
+            <button
+              type="button"
+              onClick={resendCode}
+              disabled={resendIn > 0 || loading}
+              className="edr-link"
+              style={{
+                ...linkBtn,
+                opacity: resendIn > 0 || loading ? 0.55 : 1,
+                cursor: resendIn > 0 || loading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {resendIn > 0 ? `Send a new code (${resendIn}s)` : 'Send a new code'}
+            </button>
+            <br />
+            Wrong email?{' '}
+            <button type="button" onClick={() => switchMode('signup')} className="edr-link" style={linkBtn}>
+              Start again
+            </button>
+          </div>
+        )}
 
         {mode === 'login' && (
           <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '13px', color: 'rgba(255,255,255,0.80)' }}>
