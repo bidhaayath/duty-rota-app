@@ -68,12 +68,31 @@ function getBaseUrl(req) {
 
 // Who is asking? The app sends the person's Supabase login token; Supabase
 // confirms it is real. No valid token, no payment.
+// If the check fails, the reason is written to the Vercel log — never the
+// token or the secret key itself, only the error, the project address and
+// which kind of key was supplied.
 async function getUserFromRequest(cfg, req) {
   const header = req.headers.authorization || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) return null;
+  if (!match) {
+    console.error('Login check: no Bearer token received');
+    return null;
+  }
   const { data, error } = await getAdmin(cfg).auth.getUser(match[1]);
-  if (error || !data || !data.user) return null;
+  if (error || !data || !data.user) {
+    const key = cfg.serviceKey || '';
+    const keyType = key.startsWith('sb_secret_') ? 'sb_secret'
+      : key.startsWith('sb_publishable_') ? 'PUBLISHABLE (wrong key)'
+      : key.startsWith('eyJ') ? 'legacy jwt'
+      : 'unknown';
+    console.error(
+      'Login check failed:',
+      error ? `${error.status || ''} ${error.message}` : 'no user returned',
+      '| Supabase host:', (cfg.supabaseUrl || '').replace(/^https?:\/\//, ''),
+      '| key type:', keyType
+    );
+    return null;
+  }
   return data.user;
 }
 
