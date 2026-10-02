@@ -53,7 +53,7 @@ module.exports = async (req, res) => {
     try {
       tx = await bmlRequest(cfg, 'POST', '/public/v2/transactions', {
         amount: started.amount_laari,
-        currency: 'USD', // TEMPORARY diagnostic - change back to MVR
+        currency: 'MVR',
         localId: started.local_id,
         customerReference: `Easy Duty Rota ${tier} ${cycle}`,
         redirectUrl: `${base}/`,
