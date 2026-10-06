@@ -147,22 +147,6 @@ const whatsappHelp = () => {
 
 const Tick = () => <span style={{ color: T.teal, fontWeight: 800, marginRight: 7 }}>✓</span>;
 
-/* Card scheme marks. Drawn here rather than loaded as image files so the
-   checkout dialog never depends on an external request.                */
-const VisaMark = () => (
-  <span title="Visa" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 48, height: 30, border: `1px solid ${T.line}`, borderRadius: 5, background: '#fff' }}>
-    <span style={{ fontSize: 13.5, fontWeight: 900, fontStyle: 'italic', color: '#1A1F71', letterSpacing: 0.5 }}>VISA</span>
-  </span>
-);
-const MastercardMark = () => (
-  <span title="Mastercard" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 48, height: 30, border: `1px solid ${T.line}`, borderRadius: 5, background: '#fff' }}>
-    <svg width="32" height="20" viewBox="0 0 32 20" role="img" aria-label="Mastercard">
-      <circle cx="12.5" cy="10" r="8" fill="#EB001B" />
-      <circle cx="19.5" cy="10" r="8" fill="#F79E1B" fillOpacity="0.85" />
-    </svg>
-  </span>
-);
-
 function DevList({ items, note }) {
   /* The muted in-development block. Deliberately styled unlike the live
      features — grey background, no checkmarks — so an unavailable feature
@@ -639,11 +623,11 @@ export default function Billing({ onExit, email }) {
         <div style={card}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>How to subscribe</div>
           <p style={{ fontSize: 13, color: T.soft, lineHeight: 1.7, margin: 0 }}>
-            Choose a plan above, check the details and pay by Visa or Mastercard through Bank of
-            Maldives. Your plan is activated as soon as the payment is confirmed, and your duty rota
-            and all your data remain unchanged. Subscriptions do not renew automatically — you choose
-            a plan again when your period ends. If you would prefer to pay by bank transfer, message
-            us on WhatsApp.
+            Choose a plan above, check the details and pay by card through Bank of Maldives. Your
+            plan is activated as soon as the payment is confirmed, and your duty rota and all your
+            data remain unchanged. Subscriptions do not renew automatically — you choose a plan
+            again when your period ends. If you would prefer to pay by bank transfer, message us on
+            WhatsApp.
           </p>
         </div>
 
@@ -681,14 +665,17 @@ export default function Billing({ onExit, email }) {
       {/* ── Checkout dialog ──
          The last screen before the bank. It states exactly what will be
          charged, in the currency the card is charged in, who the merchant
-         is, and requires the terms to be accepted before paying.        */}
+         is, and requires the terms to be accepted before paying.
+
+         boxSizing keeps the padding inside the width — without it the
+         dialog is wider than a phone screen and the right edge is cut off. */}
       {co && (
         <div
           onClick={closeCheckout}
           style={{
             position: 'fixed', inset: 0, background: 'rgba(10,30,34,0.55)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 16, zIndex: 1000, overflowY: 'auto',
+            padding: 16, zIndex: 1000, overflowY: 'auto', boxSizing: 'border-box',
           }}
         >
           <div
@@ -696,6 +683,7 @@ export default function Billing({ onExit, email }) {
             style={{
               background: '#fff', borderRadius: 12, width: '100%', maxWidth: 420,
               padding: 20, boxShadow: '0 10px 40px rgba(0,0,0,0.25)', margin: 'auto',
+              boxSizing: 'border-box',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 14 }}>
@@ -710,7 +698,7 @@ export default function Billing({ onExit, email }) {
               </button>
             </div>
 
-            <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 14, marginBottom: 14 }}>
+            <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 14, marginBottom: 14, boxSizing: 'border-box' }}>
               <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>
                 Easy Duty Rota {co.label} — {co.annual ? 'annual' : 'monthly'}
               </div>
@@ -735,12 +723,16 @@ export default function Billing({ onExit, email }) {
               )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <VisaMark />
-              <MastercardMark />
-              <span style={{ fontSize: 11.5, color: T.soft, lineHeight: 1.5 }}>
+            {/* Card scheme logos supplied by BML. */}
+            <div style={{ marginBottom: 12 }}>
+              <img
+                src="/payment-logos.png"
+                alt="Accepted payment cards"
+                style={{ height: 26, maxWidth: '100%', display: 'block' }}
+              />
+              <div style={{ fontSize: 11.5, color: T.soft, lineHeight: 1.5, marginTop: 6 }}>
                 Paid securely through Bank of Maldives
-              </span>
+              </div>
             </div>
 
             <div style={{ fontSize: 12, color: T.soft, lineHeight: 1.7, marginBottom: 12 }}>
@@ -765,7 +757,7 @@ export default function Billing({ onExit, email }) {
             </label>
 
             {payError && (
-              <div style={{ background: T.badBg, border: `1px solid ${T.badLine}`, color: T.bad, borderRadius: 8, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.6, marginBottom: 12 }}>
+              <div style={{ background: T.badBg, border: `1px solid ${T.badLine}`, color: T.bad, borderRadius: 8, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.6, marginBottom: 12, boxSizing: 'border-box' }}>
                 {payError}
                 <div style={{ marginTop: 8 }}>
                   <button
@@ -783,7 +775,7 @@ export default function Billing({ onExit, email }) {
               disabled={!agreed || paying || blocked}
               style={{
                 width: '100%', padding: '12px', borderRadius: 8, border: 'none',
-                fontFamily: 'inherit', fontSize: 14, fontWeight: 800,
+                fontFamily: 'inherit', fontSize: 14, fontWeight: 800, boxSizing: 'border-box',
                 background: !agreed || paying || blocked ? '#EEF4F3' : T.teal,
                 color: !agreed || paying || blocked ? T.soft : '#fff',
                 cursor: !agreed || paying || blocked ? 'default' : 'pointer',
@@ -797,7 +789,7 @@ export default function Billing({ onExit, email }) {
               disabled={paying}
               style={{
                 width: '100%', padding: '10px', marginTop: 8, borderRadius: 8,
-                border: 'none', background: 'none', color: T.soft,
+                border: 'none', background: 'none', color: T.soft, boxSizing: 'border-box',
                 fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
                 cursor: paying ? 'default' : 'pointer',
               }}
