@@ -26,6 +26,22 @@ const recoveryPending = () => {
   try { return sessionStorage.getItem(RECOVERY_FLAG) === '1'; } catch { return false; }
 };
 
+/* ─────────────── Returning from the payment page ───────────────
+   BML sends the customer back to the site root with transactionId, state and
+   signature in the address. None of that is trusted: anyone can type
+   state=CONFIRMED into their own address bar. We take only the transaction id
+   and ask our own server, which asks BML directly.
+
+   The webhook has usually already activated the plan by the time the customer
+   gets back. This is the safety net for when BML's notification is slow, and
+   it is what lets us tell the customer what happened.                     */
+const paymentReturnId = () => {
+  const p = new URLSearchParams(window.location.search || '');
+  const id = p.get('transactionId');
+  // Same shape check the server uses, so obvious rubbish never reaches it.
+  return id && /^[A-Za-z0-9_-]{6,64}$/.test(id) ? id : null;
+};
+
 /* ─────────────── Trial & subscription ───────────────
    Access is decided by the database, not here. The my_subscription() RPC
    returns the SAME can_write value that the row-level security policies use
@@ -89,7 +105,7 @@ function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans })
         {everPaid ? (
           <>
             Your {tierName || 'plan'} ends{endsOn ? ` on ${endsOn}` : ''} — {days} left.
-            {' '}Send your transfer to keep editing.
+            {' '}Renew to keep editing.
           </>
         ) : (
           <>Your free trial ends in {days}.</>
@@ -146,6 +162,97 @@ function Paywall({ onSeePlans, everPaid, paidTier, paidUntil }) {
   );
 }
 
+/* ─────────────── Payment result ───────────────
+   Shown on its own, full screen, when the customer comes back from the bank.
+   Three outcomes: it worked, it did not, or the bank has not finished telling
+   us yet — in which case the customer can check again rather than be left
+   guessing. Never claims a payment succeeded on the strength of the address
+   bar; everything here comes from our server's answer.                   */
+function PaymentResult({ status, paidUntil, onDone, onSeePlans, onCheckAgain }) {
+  const endsOn = paidUntil
+    ? new Date(paidUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+
+  const views = {
+    checking: {
+      icon: '…', tint: '#0F8B7E',
+      title: 'Checking your payment',
+      body: 'One moment while we confirm this with the bank.',
+    },
+    success: {
+      icon: '✓', tint: '#0F8B7E',
+      title: 'Payment successful',
+      body: `Thank you — your plan is active${endsOn ? ` until ${endsOn}` : ''}. ` +
+            'Please keep your payment confirmation for your records.',
+    },
+    pending: {
+      icon: '•', tint: '#8A5A0F',
+      title: 'Payment not confirmed yet',
+      body: 'The bank has not finished processing this payment. It usually takes a ' +
+            'few moments. You can check again, or carry on and look at your plan later — ' +
+            'nothing is lost either way.',
+    },
+    failed: {
+      icon: '×', tint: '#8A2E1E',
+      title: 'Payment not completed',
+      body: 'This payment was not completed, so nothing has been charged and your plan ' +
+            'is unchanged. You can try again from the plans page, or message us on ' +
+            'WhatsApp if you would like help.',
+    },
+    error: {
+      icon: '!', tint: '#8A5A0F',
+      title: 'We could not check this payment',
+      body: 'Something went wrong while checking with the bank. If money has left your ' +
+            'account, your plan will still be activated — please check your plan page in ' +
+            'a few minutes, or message us on WhatsApp.',
+    },
+  };
+  const v = views[status] || views.error;
+
+  return (
+    <div style={{ background: '#F5F9F8', minHeight: '100vh', fontFamily: 'Arial, sans-serif', color: '#142B33', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, boxSizing: 'border-box' }}>
+      <div style={{ background: '#fff', border: '1px solid #DCE8E6', borderRadius: 12, padding: 24, width: '100%', maxWidth: 420, textAlign: 'center', boxSizing: 'border-box' }}>
+        <div style={{ width: 54, height: 54, borderRadius: 27, background: '#EEF4F3', color: v.tint, fontSize: 26, fontWeight: 800, lineHeight: '54px', margin: '0 auto 14px' }}>
+          {v.icon}
+        </div>
+        <div style={{ fontSize: 19, fontWeight: 800, marginBottom: 8 }}>{v.title}</div>
+        <p style={{ fontSize: 13.5, color: '#6B8A93', lineHeight: 1.7, margin: '0 0 20px' }}>{v.body}</p>
+
+        {status === 'checking' ? null : (
+          <>
+            <button onClick={onDone} style={{
+              width: '100%', padding: 12, borderRadius: 8, border: 'none', boxSizing: 'border-box',
+              background: '#0F8B7E', color: '#fff', fontFamily: 'inherit', fontSize: 14, fontWeight: 800, cursor: 'pointer',
+            }}>
+              Continue to my rota
+            </button>
+
+            {status === 'pending' && (
+              <button onClick={onCheckAgain} style={{
+                width: '100%', padding: 11, marginTop: 8, borderRadius: 8, boxSizing: 'border-box',
+                border: '1px solid #0F8B7E', background: '#fff', color: '#0F8B7E',
+                fontFamily: 'inherit', fontSize: 13.5, fontWeight: 800, cursor: 'pointer',
+              }}>
+                Check again
+              </button>
+            )}
+
+            {(status === 'failed' || status === 'error') && (
+              <button onClick={onSeePlans} style={{
+                width: '100%', padding: 11, marginTop: 8, borderRadius: 8, boxSizing: 'border-box',
+                border: '1px solid #0F8B7E', background: '#fff', color: '#0F8B7E',
+                fontFamily: 'inherit', fontSize: 13.5, fontWeight: 800, cursor: 'pointer',
+              }}>
+                Go to my plan
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────── Legal footer ───────────────
    The policy pages are static HTML in /public, served outside React, so these
    are ordinary links rather than routes. They open in a new tab so nobody
@@ -195,6 +302,12 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showBilling, setShowBilling] = useState(false);
+  // The transaction the customer has just come back from, taken from the
+  // address once and then removed from it, so a refresh does not repeat the
+  // whole result screen.
+  const [returnTxn, setReturnTxn] = useState(() => paymentReturnId());
+  const [payResult, setPayResult] = useState(null); // null | checking | success | pending | failed | error
+  const [payPaidUntil, setPayPaidUntil] = useState(null);
   // Owner, manager or employee. null means this account has no membership
   // row, which is every account created before invites existed — those get
   // full access, exactly as they always have.
@@ -235,6 +348,60 @@ export default function App() {
       try { sessionStorage.setItem(RECOVERY_FLAG, '1'); } catch { /* ignore */ }
     }
   }, []);
+
+  // Take the payment details out of the address straight away. The result is
+  // held in state from here on, so refreshing the page or sharing the link
+  // cannot replay it.
+  useEffect(() => {
+    if (!returnTxn) return;
+    window.history.replaceState({}, '', window.location.pathname);
+  }, [returnTxn]);
+
+  /* Ask our own server what really happened. It re-queries BML rather than
+     believing the address bar, and only answers about this person's own
+     payment. The webhook has usually already activated the plan; this both
+     catches the case where it has not and tells the customer the outcome. */
+  const checkPayment = useCallback(async () => {
+    if (!returnTxn) return;
+    setPayResult('checking');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) { setPayResult('error'); return; }
+
+      const res = await fetch('/api/bml/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ transactionId: returnTxn }),
+      });
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+
+      if (!res.ok || !data) { setPayResult('error'); return; }
+
+      if (data.activated || data.alreadyActive || data.state === 'CONFIRMED') {
+        setPayPaidUntil(data.paidUntil || null);
+        setPayResult('success');
+        refreshSub(); // lift any paywall without waiting for a reload
+        return;
+      }
+      if (['CANCELLED', 'FAILED', 'VOIDED'].includes(data.state)) {
+        setPayResult('failed');
+        return;
+      }
+      setPayResult('pending'); // still with the bank
+    } catch (e) {
+      console.error('Payment check failed:', e);
+      setPayResult('error');
+    }
+  }, [returnTxn, refreshSub]);
+
+  // Only once we know who is signed in, since the check is tied to the person.
+  useEffect(() => {
+    if (!returnTxn || !session?.user?.id) return;
+    if (payResult) return; // already checked or checking
+    checkPayment();
+  }, [returnTxn, session?.user?.id, payResult, checkPayment]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -366,6 +533,20 @@ export default function App() {
   }
 
   if (!session || recovering) return <Auth />;
+
+  // The payment result comes before everything else: someone who has just paid
+  // wants to know whether it worked, not to be dropped back into the rota.
+  if (returnTxn && payResult) {
+    return (
+      <PaymentResult
+        status={payResult}
+        paidUntil={payPaidUntil}
+        onCheckAgain={checkPayment}
+        onDone={() => { setReturnTxn(null); setPayResult(null); refreshSub(); }}
+        onSeePlans={() => { setReturnTxn(null); setPayResult(null); refreshSub(); setShowBilling(true); }}
+      />
+    );
+  }
 
   if (showAdmin && isAdmin) return <Admin onExit={() => setShowAdmin(false)} />;
 
