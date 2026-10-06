@@ -32,13 +32,32 @@ const prettyDate = (iso) => {
 
 const titleCase = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 
-/* Only two statuses exist in practice: paid and cancelled. Anything else is
+/* A pending row is a payment that was started but never finished — the
+   customer reached the bank and then closed the page, or their card was
+   declined and they gave up. Nothing was charged.
+
+   Those rows are useful for an hour (someone may still be paying in another
+   tab) and only confusing afterwards: a year-old "Pending MVR 775.00" reads
+   like an unpaid bill. So anything older than an hour is left out, and the
+   recent ones are labelled "In progress" rather than "Pending", which sounds
+   like something is owed.                                                 */
+const PENDING_VISIBLE_MS = 60 * 60 * 1000; // one hour
+
+const isStale = (r) => {
+  if (String(r.status || "").toLowerCase() !== "pending") return false;
+  const started = new Date(r.created_at || r.paid_at || 0).getTime();
+  if (!started) return true;
+  return Date.now() - started > PENDING_VISIBLE_MS;
+};
+
+/* Only two statuses matter in practice: paid and cancelled. Anything else is
    shown as-is rather than hidden, so nothing goes silently missing. */
 const statusStyle = (status) => {
   const s = String(status || "").toLowerCase();
   if (s === "paid") return { bg: "#EAF6F3", border: "#BFE2DA", text: "#12655C", label: "Paid" };
   if (s === "cancelled") return { bg: "#F3F5F5", border: "#DDE4E3", text: "#6A7C81", label: "Cancelled" };
-  if (s === "pending") return { bg: "#FDF6E7", border: "#EFDFB8", text: "#8A6A1F", label: "Pending" };
+  if (s === "failed") return { bg: "#F3F5F5", border: "#DDE4E3", text: "#6A7C81", label: "Not completed" };
+  if (s === "pending") return { bg: "#FDF6E7", border: "#EFDFB8", text: "#8A6A1F", label: "In progress" };
   return { bg: "#F3F5F5", border: "#DDE4E3", text: "#6A7C81", label: titleCase(status) };
 };
 
@@ -64,11 +83,18 @@ export default function SubscriptionHistory({ onBack }) {
 
       if (cancelled) return;
       if (error) { setFailed(true); setLoading(false); return; }
-      setRows(data || []);
+      // Abandoned attempts are filtered here rather than in the query, so the
+      // database keeps the full record for support and reconciliation — only
+      // the customer's view is tidied.
+      setRows((data || []).filter((r) => !isStale(r)));
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
+
+  const hasInProgress = rows.some(
+    (r) => String(r.status || "").toLowerCase() === "pending"
+  );
 
   return (
     <div className="dr-fade-in" style={{
@@ -145,6 +171,7 @@ export default function SubscriptionHistory({ onBack }) {
             }}>
               {rows.map((r, i) => {
                 const st = statusStyle(r.status);
+                const s = String(r.status || "").toLowerCase();
                 return (
                   <div key={r.id} style={{
                     display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -173,8 +200,8 @@ export default function SubscriptionHistory({ onBack }) {
                       }}>{st.label}</span>
                       <div style={{
                         fontSize: 14.5, fontWeight: 700, whiteSpace: "nowrap",
-                        color: String(r.status).toLowerCase() === "paid" ? T.ink : T.inkSoft,
-                        textDecoration: String(r.status).toLowerCase() === "cancelled" ? "line-through" : "none",
+                        color: s === "paid" ? T.ink : T.inkSoft,
+                        textDecoration: (s === "cancelled" || s === "failed") ? "line-through" : "none",
                       }}>{money(r.amount_laari)}</div>
                     </div>
                   </div>
@@ -185,6 +212,14 @@ export default function SubscriptionHistory({ onBack }) {
             <div style={{ padding: "14px 18px 0", fontSize: 13, color: T.inkSoft }}>
               {rows.length} {rows.length === 1 ? "record" : "records"}
             </div>
+
+            {hasInProgress && (
+              <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "10px 18px 0", lineHeight: 1.6 }}>
+                "In progress" means a payment was started but has not been confirmed by the
+                bank yet. Nothing has been charged, and it disappears on its own if it was
+                not completed.
+              </p>
+            )}
           </>
         )}
 

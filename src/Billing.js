@@ -10,13 +10,14 @@ import supabase from './supabaseClient';
    - A feature that is not live NEVER gets a normal checkmark. It appears
      in a muted "In development" section with no promised date.
    - Prices come from plan_limits in the database — the cards, the
-     comparison table and the checkout message all read the same source,
+     comparison table and the checkout dialog all read the same source,
      so they cannot disagree.
    - Feature flags below control the phase. Flip premiumLaunchPricing to
      true (and update the database prices) only when Smart Roster is live.
 
-   Upgrading currently opens WhatsApp. When a payment gateway arrives,
-   only startCheckout() changes.                                        */
+   Choosing a plan opens the checkout dialog, which hands over to the BML
+   payment page. The card is charged in MVR, so the checkout dialog shows
+   the MVR amount as the charge and USD underneath as the reference.    */
 
 const WHATSAPP = '9607666261'; // +960 Maldives
 
@@ -86,6 +87,10 @@ const card = {
 
 const usd = (cents) => (cents == null ? null : `$${(cents / 100).toFixed(2)}`);
 const mvr = (laari) => (laari == null ? null : `MVR ${Math.round(laari / 100).toLocaleString('en-US')}`);
+/* The checkout dialog must show the exact amount the card will be charged,
+   to the laari — not the rounded reference figure used on the cards.    */
+const mvrExact = (laari) => (laari == null ? null
+  : `MVR ${(laari / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : '—');
 
 /* Savings are calculated from the USD source prices, never from rounded
@@ -102,18 +107,41 @@ const annualSavingUsd = (p) => {
   };
 };
 
-// One place that decides what "choose this plan" does. Swap the body for a
-// checkout redirect once the payment gateway is live; nothing else changes.
-const startCheckout = (label, cycle, p, isCycleSwitch) => {
-  const total = cycle === 'annual' ? usd(p?.price_annual_usd_cents) : usd(p?.price_monthly_usd_cents);
-  const terms = cycle === 'annual' ? `annual (${total} billed yearly)` : `monthly (${total}/month)`;
-  const msg = isCycleSwitch
-    ? `Hi! I'm on DutyRota ${label} and I'd like to switch to ${terms}.`
-    : `Hi! I'd like to subscribe to DutyRota ${label} — ${terms}.`;
+/* Wording for refusals that cannot be fixed by trying again — the pay
+   button is switched off for these, so the customer is not invited to
+   press it a second time for the same message.                        */
+const DOWNGRADE_MESSAGE =
+  'You are currently on a higher plan. A change to a smaller plan takes effect when your paid period ends, so there is nothing to pay today. Message us on WhatsApp if you would like us to arrange it.';
+
+/* Plain-English wording for every way the payment can be refused before
+   the customer reaches the bank. Anything unrecognised falls back to the
+   last line, so a new reason can never show a raw code to a customer.  */
+const checkoutErrorMessage = (status, data) => {
+  const reason = (data && (data.error || data.reason)) || '';
+  const map = {
+    downgrade_wait: DOWNGRADE_MESSAGE,
+    not_signed_in:
+      'Your session has expired. Please sign in again and try once more.',
+    payments_not_configured:
+      'Card payment is not switched on yet. Please message us on WhatsApp to subscribe.',
+    gateway_unavailable:
+      'The bank\'s payment service did not respond. Please try again in a few minutes, or message us on WhatsApp.',
+    server_error:
+      'Something went wrong on our side. Please try again, or message us on WhatsApp.',
+  };
+  if (map[reason]) return map[reason];
+  if (status === 401) return map.not_signed_in;
+  if (status === 503) return map.payments_not_configured;
+  if (status === 502) return map.gateway_unavailable;
+  return 'We could not start the payment. Please try again, or message us on WhatsApp and we will help.';
+};
+
+const contactSales = () => {
+  const msg = "Hi! I'd like to ask about a custom Easy Duty Rota plan for my organisation.";
   window.open(`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(msg)}`, '_blank', 'noreferrer');
 };
-const contactSales = () => {
-  const msg = "Hi! I'd like to ask about a custom DutyRota plan for my organisation.";
+const whatsappHelp = () => {
+  const msg = 'Hi! I need some help subscribing to Easy Duty Rota.';
   window.open(`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(msg)}`, '_blank', 'noreferrer');
 };
 
@@ -144,6 +172,12 @@ export default function Billing({ onExit, email }) {
   const [error, setError] = useState('');
   const [openFaq, setOpenFaq] = useState(null);
 
+  // Checkout dialog state. `checkout` holds the plan the customer picked.
+  const [checkout, setCheckout] = useState(null);
+  const [agreed, setAgreed] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [payError, setPayError] = useState('');
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -167,6 +201,57 @@ export default function Billing({ onExit, email }) {
   const state = sub?.state;
   const currentTier = sub?.paid_tier || null;
   const daysLeft = sub?.days_remaining ?? null;
+
+  // One place that decides what "choose this plan" does: it opens the
+  // checkout dialog. Nothing is sent anywhere until the customer agrees
+  // to the terms and presses the pay button.
+  const openCheckout = (p, forCycle, isCycleSwitch) => {
+    setAgreed(false);
+    setPayError('');
+    setPaying(false);
+    setCheckout({ plan: p, cycle: forCycle, isCycleSwitch });
+  };
+
+  const closeCheckout = () => {
+    if (paying) return; // don't let it close mid-redirect
+    setCheckout(null);
+    setPayError('');
+    setAgreed(false);
+  };
+
+  /* Ask our own server to start the payment. The server decides the price
+     from plan_limits and the rules (renewal, upgrade, downgrade), creates
+     the pending payment and hands back the bank's payment page address.  */
+  const payNow = async () => {
+    if (!checkout || !agreed || paying) return;
+    setPaying(true);
+    setPayError('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        setPayError('Your session has expired. Please sign in again and try once more.');
+        setPaying(false);
+        return;
+      }
+      const res = await fetch('/api/bml/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tier: checkout.plan.tier, cycle: checkout.cycle }),
+      });
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+      if (res.ok && data && data.url) {
+        window.location.href = data.url; // over to the bank
+        return;
+      }
+      setPayError(checkoutErrorMessage(res.status, data));
+      setPaying(false);
+    } catch (e) {
+      setPayError('We could not reach the payment service. Please check your internet connection and try again.');
+      setPaying(false);
+    }
+  };
 
   const banner = (() => {
     if (!sub) return null;
@@ -213,13 +298,33 @@ export default function Billing({ onExit, email }) {
       'Smart Roster automates the repetitive parts of building a duty rota while leaving the final schedule in your control. It is included with Plus, Pro and Custom. Basic and Standard use manual rota creation.'],
     ['How does annual billing work?',
       'Annual plans are charged once for the full year. The displayed monthly amount is the monthly equivalent of the annual charge.'],
-    ['Why is the MVR amount approximate?',
-      'USD is the primary price. The MVR amount is a reference and may differ slightly depending on the payment method or bank exchange rate.'],
+    ['Which currency am I charged in?',
+      'USD is the primary price shown on this page. Your card is charged in Maldivian rufiyaa, and the exact rufiyaa amount is shown before you pay. If your card was issued outside the Maldives, your own bank converts that amount, so the figure on your statement may differ slightly.'],
     ['Can I change plans later?',
       'Yes. Upgrades take effect immediately and start a new billing period from that day. Downgrades take effect when your current paid period ends, so you keep everything you have already paid for.'],
     ['Can I cancel at any time?',
       'Yes — message us on WhatsApp. Your access continues until the end of the period you have paid for, and your rota and data remain safe throughout.'],
   ];
+
+  // Some refusals can never succeed by trying again (a downgrade, for
+  // example), so the pay button is switched off rather than inviting
+  // another press that produces the same message.
+  const blocked = payError === DOWNGRADE_MESSAGE;
+
+  // Everything the checkout dialog needs, worked out once.
+  const co = (() => {
+    if (!checkout) return null;
+    const p = checkout.plan;
+    const annual = checkout.cycle === 'annual';
+    return {
+      label: p.label || p.tier,
+      annual,
+      totalMvr: mvrExact(annual ? p.price_annual_laari : p.price_monthly_laari),
+      totalUsd: usd(annual ? p.price_annual_usd_cents : p.price_monthly_usd_cents),
+      period: annual ? 'One payment for 12 months' : 'One payment for 1 month',
+      isCycleSwitch: checkout.isCycleSwitch,
+    };
+  })();
 
   return (
     <div style={{ background: T.bg, minHeight: '100vh', fontFamily: 'Arial, sans-serif', color: T.ink }}>
@@ -382,7 +487,7 @@ export default function Billing({ onExit, email }) {
                 </div>
 
                 <button
-                  onClick={() => startCheckout(p.label || p.tier, cycle, p, isCycleSwitch)}
+                  onClick={() => openCheckout(p, cycle, isCycleSwitch)}
                   disabled={isCurrentExact}
                   style={{
                     width: '100%', padding: '11px 12px', borderRadius: 8, border: 'none',
@@ -405,8 +510,9 @@ export default function Billing({ onExit, email }) {
 
         {/* 4 — Billing and currency note */}
         <p style={{ fontSize: 11.5, color: T.soft, textAlign: 'center', margin: '14px 0 22px', lineHeight: 1.6 }}>
-          Prices are displayed in USD. MVR amounts are approximate reference values and may differ
-          slightly depending on the payment method or bank exchange rate.
+          Prices are displayed in USD. Payment is charged in Maldivian rufiyaa, and the exact
+          rufiyaa amount is shown before you pay. Cards issued outside the Maldives are converted
+          by your own bank, so the amount on your statement may differ slightly.
         </p>
 
         {/* 5 — Features in development banner */}
@@ -517,10 +623,11 @@ export default function Billing({ onExit, email }) {
         <div style={card}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>How to subscribe</div>
           <p style={{ fontSize: 13, color: T.soft, lineHeight: 1.7, margin: 0 }}>
-            Choose a plan above to open a WhatsApp message to us. We will confirm the payment details
-            and activate your plan, usually on the same day. Your duty rota and all your data remain
-            unchanged during activation. Prices are displayed in US dollars, with the approximate
-            rufiyaa equivalent shown underneath.
+            Choose a plan above, check the details and pay by card through Bank of Maldives. Your
+            plan is activated as soon as the payment is confirmed, and your duty rota and all your
+            data remain unchanged. Subscriptions do not renew automatically — you choose a plan
+            again when your period ends. If you would prefer to pay by bank transfer, message us on
+            WhatsApp.
           </p>
         </div>
 
@@ -554,6 +661,149 @@ export default function Billing({ onExit, email }) {
           preserved through any plan activation or change.
         </p>
       </div>
+
+      {/* ── Checkout dialog ──
+         The last screen before the bank. It states exactly what will be
+         charged, in the currency the card is charged in, who the merchant
+         is, and requires the terms to be accepted before paying.
+
+         boxSizing keeps the padding inside the width — without it the
+         dialog is wider than a phone screen and the right edge is cut off. */}
+      {co && (
+        <div
+          onClick={closeCheckout}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(10,30,34,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 16, zIndex: 1000, overflowY: 'auto', boxSizing: 'border-box',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 12, width: '100%', maxWidth: 420,
+              padding: 20, boxShadow: '0 10px 40px rgba(0,0,0,0.25)', margin: 'auto',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 14 }}>
+              <div style={{ fontSize: 17, fontWeight: 800 }}>Confirm your subscription</div>
+              <button
+                onClick={closeCheckout}
+                disabled={paying}
+                aria-label="Close"
+                style={{ background: 'none', border: 'none', fontSize: 20, lineHeight: 1, color: T.soft, cursor: paying ? 'default' : 'pointer', fontFamily: 'inherit', padding: 0 }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 14, marginBottom: 14, boxSizing: 'border-box' }}>
+              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>
+                Easy Duty Rota {co.label} — {co.annual ? 'annual' : 'monthly'}
+              </div>
+              <div style={{ fontSize: 12, color: T.soft, marginBottom: 12 }}>{co.period}</div>
+
+              <div style={{ fontSize: 11.5, color: T.soft, textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 800 }}>
+                Total to pay
+              </div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: T.ink, lineHeight: 1.3 }}>
+                {co.totalMvr || '—'}
+              </div>
+              {co.totalUsd && (
+                <div style={{ fontSize: 12, color: T.soft, marginTop: 2 }}>
+                  Approximately {co.totalUsd} — your card is charged in rufiyaa
+                </div>
+              )}
+
+              {co.isCycleSwitch && (
+                <div style={{ fontSize: 12, color: T.soft, marginTop: 10, lineHeight: 1.6 }}>
+                  Any days remaining on your current plan are added on top of this period.
+                </div>
+              )}
+            </div>
+
+            {/* Card scheme logos supplied by BML. */}
+            <div style={{ marginBottom: 12 }}>
+              <img
+                src="/payment-logos.png"
+                alt="Accepted payment cards"
+                style={{ height: 26, maxWidth: '100%', display: 'block' }}
+              />
+              <div style={{ fontSize: 11.5, color: T.soft, lineHeight: 1.5, marginTop: 6 }}>
+                Paid securely through Bank of Maldives
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: T.soft, lineHeight: 1.7, marginBottom: 12 }}>
+              Merchant: SHAB INVESTMENT, Maldives<br />
+              Please keep a copy of your payment confirmation for your records.
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 12.5, color: T.ink, lineHeight: 1.6, marginBottom: 14, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                disabled={paying}
+                style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, cursor: 'pointer' }}
+              />
+              <span>
+                I agree to the{' '}
+                <a href="/terms/" target="_blank" rel="noreferrer" style={{ color: T.teal, fontWeight: 700 }}>Terms of Service</a>,{' '}
+                <a href="/refunds/" target="_blank" rel="noreferrer" style={{ color: T.teal, fontWeight: 700 }}>Refund Policy</a> and{' '}
+                <a href="/privacy/" target="_blank" rel="noreferrer" style={{ color: T.teal, fontWeight: 700 }}>Privacy Policy</a>.
+              </span>
+            </label>
+
+            {payError && (
+              <div style={{ background: T.badBg, border: `1px solid ${T.badLine}`, color: T.bad, borderRadius: 8, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.6, marginBottom: 12, boxSizing: 'border-box' }}>
+                {payError}
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    onClick={whatsappHelp}
+                    style={{ background: 'none', border: 'none', padding: 0, color: T.bad, fontWeight: 800, fontSize: 12.5, textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    Message us on WhatsApp
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={payNow}
+              disabled={!agreed || paying || blocked}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 8, border: 'none',
+                fontFamily: 'inherit', fontSize: 14, fontWeight: 800, boxSizing: 'border-box',
+                background: !agreed || paying || blocked ? '#EEF4F3' : T.teal,
+                color: !agreed || paying || blocked ? T.soft : '#fff',
+                cursor: !agreed || paying || blocked ? 'default' : 'pointer',
+              }}
+            >
+              {paying ? 'Opening payment page…' : `Pay ${co.totalMvr || ''}`}
+            </button>
+
+            <button
+              onClick={closeCheckout}
+              disabled={paying}
+              style={{
+                width: '100%', padding: '10px', marginTop: 8, borderRadius: 8,
+                border: 'none', background: 'none', color: T.soft, boxSizing: 'border-box',
+                fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+                cursor: paying ? 'default' : 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+
+            <p style={{ fontSize: 11, color: T.soft, textAlign: 'center', lineHeight: 1.6, margin: '10px 0 0' }}>
+              You will be taken to Bank of Maldives to enter your card details.
+              We never see or store your card number.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
