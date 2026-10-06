@@ -107,14 +107,19 @@ const annualSavingUsd = (p) => {
   };
 };
 
+/* Wording for refusals that cannot be fixed by trying again — the pay
+   button is switched off for these, so the customer is not invited to
+   press it a second time for the same message.                        */
+const DOWNGRADE_MESSAGE =
+  'You are currently on a higher plan. A change to a smaller plan takes effect when your paid period ends, so there is nothing to pay today. Message us on WhatsApp if you would like us to arrange it.';
+
 /* Plain-English wording for every way the payment can be refused before
    the customer reaches the bank. Anything unrecognised falls back to the
    last line, so a new reason can never show a raw code to a customer.  */
 const checkoutErrorMessage = (status, data) => {
   const reason = (data && (data.error || data.reason)) || '';
   const map = {
-    downgrade_wait:
-      'You are currently on a higher plan. A change to a smaller plan takes effect when your paid period ends, so there is nothing to pay today. Message us on WhatsApp if you would like us to arrange it.',
+    downgrade_wait: DOWNGRADE_MESSAGE,
     not_signed_in:
       'Your session has expired. Please sign in again and try once more.',
     payments_not_configured:
@@ -132,11 +137,11 @@ const checkoutErrorMessage = (status, data) => {
 };
 
 const contactSales = () => {
-  const msg = "Hi! I'd like to ask about a custom DutyRota plan for my organisation.";
+  const msg = "Hi! I'd like to ask about a custom Easy Duty Rota plan for my organisation.";
   window.open(`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(msg)}`, '_blank', 'noreferrer');
 };
 const whatsappHelp = () => {
-  const msg = 'Hi! I need some help subscribing to DutyRota.';
+  const msg = 'Hi! I need some help subscribing to Easy Duty Rota.';
   window.open(`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(msg)}`, '_blank', 'noreferrer');
 };
 
@@ -316,6 +321,11 @@ export default function Billing({ onExit, email }) {
     ['Can I cancel at any time?',
       'Yes — message us on WhatsApp. Your access continues until the end of the period you have paid for, and your rota and data remain safe throughout.'],
   ];
+
+  // Some refusals can never succeed by trying again (a downgrade, for
+  // example), so the pay button is switched off rather than inviting
+  // another press that produces the same message.
+  const blocked = payError === DOWNGRADE_MESSAGE;
 
   // Everything the checkout dialog needs, worked out once.
   const co = (() => {
@@ -702,7 +712,7 @@ export default function Billing({ onExit, email }) {
 
             <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: 14, marginBottom: 14 }}>
               <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 2 }}>
-                DutyRota {co.label} — {co.annual ? 'annual' : 'monthly'}
+                Easy Duty Rota {co.label} — {co.annual ? 'annual' : 'monthly'}
               </div>
               <div style={{ fontSize: 12, color: T.soft, marginBottom: 12 }}>{co.period}</div>
 
@@ -770,13 +780,13 @@ export default function Billing({ onExit, email }) {
 
             <button
               onClick={payNow}
-              disabled={!agreed || paying}
+              disabled={!agreed || paying || blocked}
               style={{
                 width: '100%', padding: '12px', borderRadius: 8, border: 'none',
                 fontFamily: 'inherit', fontSize: 14, fontWeight: 800,
-                background: !agreed || paying ? '#EEF4F3' : T.teal,
-                color: !agreed || paying ? T.soft : '#fff',
-                cursor: !agreed || paying ? 'default' : 'pointer',
+                background: !agreed || paying || blocked ? '#EEF4F3' : T.teal,
+                color: !agreed || paying || blocked ? T.soft : '#fff',
+                cursor: !agreed || paying || blocked ? 'default' : 'pointer',
               }}
             >
               {paying ? 'Opening payment page…' : `Pay ${co.totalMvr || ''}`}
