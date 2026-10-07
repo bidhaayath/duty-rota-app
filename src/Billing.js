@@ -16,8 +16,8 @@ import supabase from './supabaseClient';
      true (and update the database prices) only when Smart Roster is live.
 
    Choosing a plan opens the checkout dialog, which hands over to the BML
-   payment page. The card is charged in MVR, so the checkout dialog shows
-   the MVR amount as the charge and USD underneath as the reference.    */
+   Payment Gateway. The card is charged in MVR, so the checkout dialog shows
+   the MVR amount as the charge and USD underneath as the reference.     */
 
 const WHATSAPP = '9607666261'; // +960 Maldives
 
@@ -125,7 +125,7 @@ const checkoutErrorMessage = (status, data) => {
     payments_not_configured:
       'Card payment is not switched on yet. Please message us on WhatsApp to subscribe.',
     gateway_unavailable:
-      'The bank\'s payment service did not respond. Please try again in a few minutes, or message us on WhatsApp.',
+      'The payment gateway did not respond. Please try again in a few minutes, or message us on WhatsApp.',
     server_error:
       'Something went wrong on our side. Please try again, or message us on WhatsApp.',
   };
@@ -221,7 +221,7 @@ export default function Billing({ onExit, email }) {
 
   /* Ask our own server to start the payment. The server decides the price
      from plan_limits and the rules (renewal, upgrade, downgrade), creates
-     the pending payment and hands back the bank's payment page address.  */
+     the pending payment and hands back the gateway's payment page address. */
   const payNow = async () => {
     if (!checkout || !agreed || paying) return;
     setPaying(true);
@@ -242,7 +242,7 @@ export default function Billing({ onExit, email }) {
       let data = null;
       try { data = await res.json(); } catch { data = null; }
       if (res.ok && data && data.url) {
-        window.location.href = data.url; // over to the bank
+        window.location.href = data.url; // over to the gateway
         return;
       }
       setPayError(checkoutErrorMessage(res.status, data));
@@ -623,9 +623,9 @@ export default function Billing({ onExit, email }) {
         <div style={card}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>How to subscribe</div>
           <p style={{ fontSize: 13, color: T.soft, lineHeight: 1.7, margin: 0 }}>
-            Choose a plan above, check the details and pay by card through Bank of Maldives. Your
-            plan is activated as soon as the payment is confirmed, and your duty rota and all your
-            data remain unchanged. Subscriptions do not renew automatically — you choose a plan
+            Choose a plan above, check the details and pay by card through the BML Payment Gateway.
+            Your plan is activated as soon as the payment is confirmed, and your duty rota and all
+            your data remain unchanged. Subscriptions do not renew automatically — you choose a plan
             again when your period ends. If you would prefer to pay by bank transfer, message us on
             WhatsApp.
           </p>
@@ -663,7 +663,7 @@ export default function Billing({ onExit, email }) {
       </div>
 
       {/* ── Checkout dialog ──
-         The last screen before the bank. It states exactly what will be
+         The last screen before the gateway. It states exactly what will be
          charged, in the currency the card is charged in, who the merchant
          is, and requires the terms to be accepted before paying.
 
@@ -731,7 +731,7 @@ export default function Billing({ onExit, email }) {
                 style={{ height: 26, maxWidth: '100%', display: 'block' }}
               />
               <div style={{ fontSize: 11.5, color: T.soft, lineHeight: 1.5, marginTop: 6 }}>
-                Paid securely through Bank of Maldives
+                Payments are processed securely by the BML Payment Gateway
               </div>
             </div>
 
@@ -798,7 +798,7 @@ export default function Billing({ onExit, email }) {
             </button>
 
             <p style={{ fontSize: 11, color: T.soft, textAlign: 'center', lineHeight: 1.6, margin: '10px 0 0' }}>
-              You will be taken to Bank of Maldives to enter your card details.
+              You will be redirected to the BML Payment Gateway to process the transaction.
               We never see or store your card number.
             </p>
           </div>
