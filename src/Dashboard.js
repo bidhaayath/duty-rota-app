@@ -546,7 +546,6 @@ export default function Dashboard({
 
           <SectionHead
             icon={Users}
-            soon={memberships.length === 0}
             note={memberships.length === 0 ? null : "Departments shared with you."}
           >My Membership</SectionHead>
           {memberships.length === 0
@@ -554,8 +553,9 @@ export default function Dashboard({
                 fontSize: 12.5, color: "rgba(255,255,255,0.75)", border: "1px dashed rgba(255,255,255,0.32)",
                 borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
               }}>
-                Sharing a department with your team is coming soon. When it
-                arrives, departments shared with you will appear here.
+                {deptPerms
+                  ? "No departments have been shared with you yet. When someone invites you to their department, it will appear here."
+                  : "Checking for shared departments…"}
               </div>
             : memberships.map((d) => (
                 <DeptRow key={d.id} id={d.id} name={d.name} tag={roleLabel(d.role)} />
