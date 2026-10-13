@@ -1876,8 +1876,8 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
               }}
             >
                   {(() => {
-                    const owned = departments.filter((d) => deptPerms.get(d.id)?.isOwner !== false);
-                    const member = departments.filter((d) => deptPerms.get(d.id)?.isOwner === false);
+                    const owned = departments.filter((d) => deptPerms?.get(d.id)?.isOwner !== false);
+                    const member = departments.filter((d) => deptPerms?.get(d.id)?.isOwner === false);
                     const renderDept = (d) => {
                       const ro = !deptEditable(d.id);
                       return (
