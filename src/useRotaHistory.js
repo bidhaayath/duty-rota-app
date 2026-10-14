@@ -204,7 +204,11 @@ export function useRotaHistory(data, setData, scopeKey, options = {}) {
       return;
     }
     if (!data) { h.last = undefined; return; }      // still loading
-    if (h.last === undefined) { h.last = data; return; }
+    /* The first rota seen is the starting point, not an edit. `null` counts
+       as nothing seen: opening a department changes scopeKey while the rota
+       is still empty, and filing that empty rota made Undo past the first
+       edit put "nothing" back — the screen then sat on "Loading rota…". */
+    if (h.last == null) { h.last = data; return; }
     if (h.last === data) return;
 
     if (h.replacing) {                              // this change WAS an undo
@@ -225,6 +229,8 @@ export function useRotaHistory(data, setData, scopeKey, options = {}) {
     const h = store.current;
     if (disabled || !h.past.length) return;
     const entry = h.past.pop();
+    // Never put an empty rota back (see above); just drop the step.
+    if (!entry.rota) { refresh(); return; }
     h.future.push({ rota: shareUnchanged(h.last, entry.rota), label: entry.label });
     h.replacing = true;
     setData(entry.rota);
@@ -235,6 +241,7 @@ export function useRotaHistory(data, setData, scopeKey, options = {}) {
     const h = store.current;
     if (disabled || !h.future.length) return;
     const entry = h.future.pop();
+    if (!entry.rota) { refresh(); return; }
     h.past.push({ rota: shareUnchanged(h.last, entry.rota), label: entry.label });
     h.replacing = true;
     setData(entry.rota);
