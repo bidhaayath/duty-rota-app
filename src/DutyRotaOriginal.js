@@ -5224,6 +5224,25 @@ function HelpTab({ data }) {
         </p>
       </Section>
 
+      <Section title="15. Ini, your rota assistant (Plus and Pro plans, owners and managers)">
+        <p style={{ marginTop: 0 }}>Write what you need in plain words, in English or mixed with Dhivehi, and Ini turns it into a checklist. Nothing changes until you press Add.</p>
+        <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>What Ini can do:</p>
+        <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}><strong>Leave:</strong> “Ali annual leave 10 to 12 November”</li>
+          <li style={{ marginBottom: 5 }}><strong>Put a duty or code in the rota:</strong> “Ali night duty on 9 November”, “Fathimath SL on the 16th”</li>
+          <li style={{ marginBottom: 5 }}><strong>Requests for Smart Roster:</strong> “Aishath wants off on the 15th”</li>
+          <li style={{ marginBottom: 5 }}><strong>Clear or swap:</strong> “Clear Mohamed 18 to 20 Nov”, “Swap Aminath and Nasha on the 21st”</li>
+          <li style={{ marginBottom: 5 }}><strong>Non-official days:</strong> “Make 24 November non-official”</li>
+          <li style={{ marginBottom: 5 }}><strong>Weekly offs:</strong> “Aminath off every Friday and Saturday in November”</li>
+          <li style={{ marginBottom: 5 }}><strong>Settings:</strong> “Nasha only does nights”, “At least 2 offs a week”</li>
+          <li><strong>Build:</strong> “Build the December roster”</li>
+        </ul>
+        <p><strong>Instruction or wish?</strong> “Ali night duty on the 9th” writes N into the rota now. “Ali wants nights on the 9th” saves a request that Smart Roster honours when it builds.</p>
+        <p><strong>Checking and undoing:</strong> read each line before pressing Add, untick anything you don’t want, and fix the person if needed. Everything you add from one note can be reverted with one Undo. Press Undo before refreshing the page, because a refresh clears the Undo list.</p>
+        <p><strong>What Ini won’t do:</strong> billing and plans, members and invites, deleting staff or departments, or changing other departments.</p>
+        <p style={{ marginBottom: 0 }}><strong>Limits:</strong> 50 notes per department per month on paid plans, and 10 during a trial.</p>
+      </Section>
+
       <Section title="Still stuck? Message us">
         <p style={{ marginTop: 0 }}>
           If something isn't working, you're not sure how to do something, or you'd like a feature
