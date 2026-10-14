@@ -93,6 +93,81 @@ test("a note that asks to build particular dates switches to those dates", async
   expect(ali.leavePeriods.some((p) => p.start === "2026-12-10" && p.end === "2026-12-12")).toBe(true);
 });
 
+test("the new reply: the department's codes and shifts are sent, a month build stays a month, and Added waits for the save", async () => {
+  const n = new Date();
+  const first = iso(new Date(n.getFullYear(), n.getMonth() + 1, 1));
+  const last = iso(new Date(n.getFullYear(), n.getMonth() + 2, 0));
+  const day = `${first.slice(0, 8)}05`;
+  global.fetch = jest.fn(() => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({
+      ok: true, unclear: [],
+      actions: [
+        { type: "add_request", staffId: "m", date: day, duty: "off" },
+        { type: "build", from: first, to: last, historyFrom: null },
+      ],
+      // The older fields come too during the changeover; they must not double up.
+      requests: [{ staffId: "m", date: day, category: "off" }], leave: [], build: true,
+      usage: { cap: 20, used: 2, remaining: 18 },
+    }),
+  }));
+  let data = makeData();
+  const update = jest.fn((fn) => { data = fn(JSON.parse(JSON.stringify(data))); });
+  const { rerender } = renderPanel(data, update);
+  await open();
+  fireEvent.change(screen.getByPlaceholderText(/Fathimath Easa/), { target: { value: "Mariyam off on the 5th, build next month" } });
+  fireEvent.click(screen.getByText("Read my note"));
+
+  await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+  const sent = JSON.parse(global.fetch.mock.calls[0][1].body);
+  expect(sent.codes).toEqual([{ id: "M", code: "M", label: "", counts: "morning" }]);
+  expect(sent.shifts).toEqual(["morning", "afternoon", "night"]);
+  expect(sent.fridayRule).toBe(false);
+
+  expect(await screen.findByText("Leave & requests")).toBeInTheDocument();
+  expect(screen.getAllByLabelText(/Off day · Mariyam/)).toHaveLength(1);
+  // Untick the build, so this is a plain save.
+  fireEvent.click(screen.getByText(/^Build the .* roster$/).closest("label").querySelector("input"));
+  fireEvent.click(screen.getByText("Add 1 item"));
+  expect(update).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/Added/)).toBeNull();
+  act(() => {
+    rerender(<AssistantPanel visible deptId="d1" data={data} update={update} T={T}
+      uid={() => "x"} dstr={iso} canBuild onMonthApplied={jest.fn()} />);
+  });
+  expect(await screen.findByText("Added 1 duty request.")).toBeInTheDocument();
+  expect(data.dutyRequests).toHaveLength(1);
+  expect(startMonthBuild).not.toHaveBeenCalled();
+});
+
+test("a save that is refused says so and keeps the checklist", async () => {
+  jest.useFakeTimers();
+  try {
+    global.fetch = jest.fn(() => Promise.resolve({
+      ok: true, status: 200,
+      json: () => Promise.resolve({
+        ok: true, unclear: [],
+        actions: [{ type: "add_leave", staffId: "a", leaveType: "annual", start: "2026-12-10", end: "2026-12-12" }],
+      }),
+    }));
+    const update = jest.fn();          // refuses: the rota never changes
+    renderPanel(makeData(), update);
+    fireEvent.click(screen.getByLabelText("Ask Ini"));
+    await screen.findByText("Choose dates");
+    fireEvent.click(screen.getByText("Choose dates"));
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-12-01" } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-12-31" } });
+    fireEvent.change(screen.getByPlaceholderText(/Fathimath Easa/), { target: { value: "Ali leave 10-12 Dec" } });
+    fireEvent.click(screen.getByText("Read my note"));
+    fireEvent.click(await screen.findByText("Add 1 item"));
+    act(() => { jest.advanceTimersByTime(1600); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Nothing was saved.");
+    expect(screen.getByText("Add 1 item")).toBeInTheDocument();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 describe("the look-back line and what the build receives", () => {
   const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const D = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };

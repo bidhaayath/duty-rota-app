@@ -5,53 +5,40 @@
    leave periods and duty requests.
 
    Ini only SUGGESTS. The server function (api/ai/parse.js) reads the note and
-   sends back a list; nothing is saved until the manager has looked at every
-   line and pressed Add. That save goes through the same update() as every
-   other edit, so the plan and department locks apply, and Undo takes the
-   whole lot back in one step.
+   sends back a list of actions; nothing is saved until the manager has
+   looked at every line and pressed Add. That save goes through the same
+   update() as every other edit, so the plan and department locks apply, and
+   Undo takes the whole lot back in one step.
 
-   The checks on each duty request repeat the ones in RequestsTab.js
-   (issuesFor and the clash check in add). They are copied rather than shared
-   so that tab did not have to change. If one set of checks changes, change
-   the other to match.
+   What each action means — its words, its checks, how it is saved — lives
+   in the catalogue (src/iniActions/). This panel only shows the lines, lets
+   the manager tick and correct them, and saves them. Adding an action means
+   adding a catalogue entry, not changing this file.
 
    Hidden from print, PDF and image exports: those screens replace the page
    this sits on, and the no-print class covers printing the page itself.
 
-   Ini's actions. Reading a note (above) is one. Building a whole month is
-   another: monthBuild.js prepares it with the same configuration Smart
-   Roster uses, monthBuildRunner.js runs the engine in the background, and
-   MonthPreview.js shows the month and applies it. Building runs entirely in
-   the browser and never uses a note from the month's allowance. Each new
-   action should follow the same shape: its own module, with this panel only
-   offering it and showing the result.                                    */
+   Building a whole month is the one action this panel carries out itself,
+   after everything else is saved: monthBuild.js prepares it with the same
+   configuration Smart Roster uses, monthBuildRunner.js runs the engine in
+   the background, and MonthPreview.js shows the month and applies it.
+   Building runs entirely in the browser and never uses a note from the
+   month's allowance.                                                      */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, X, AlertTriangle, Check, Wand2 } from "lucide-react";
 import supabase from "./supabaseClient";
 import {
   prepareBuild, finishMonth, plainProblems, lookbackOptions, lookbackIdFor, lookbackSentence,
-  periodProblem, periodWords, periodLabel,
+  periodProblem, periodWords, periodLabel, isWholeMonth,
 } from "./monthBuild";
 import { startMonthBuild } from "./monthBuildRunner";
 import MonthPreview from "./MonthPreview";
+import { mergeRules } from "./rosterConfig";
+import { SHIFTS } from "./rosterEngine";
+import { GROUPS, LEAVE_TYPES, entryFor, readReply, checkLines, applyLines, savedWords } from "./iniActions";
 
 const MAX_TEXT = 1000;
-
-// The leave types the Staff tab offers, with the labels it shows.
-const LEAVE_TYPES = [
-  ["annual", "Annual leave"],
-  ["maternity", "Maternity"],
-  ["prematernity", "Pre-maternity"],
-  ["emergency", "Emergency leave"],
-  ["other", "Other extended leave"],
-];
-const LEAVE_LABEL = Object.fromEntries(LEAVE_TYPES);
-const REQUEST_LABEL = {
-  morning: "Morning duty", afternoon: "Afternoon duty", evening: "Evening duty",
-  night: "Night duty", off: "Off day",
-};
-const SHIFT_LABELS = { morning: "morning", afternoon: "afternoon", evening: "evening", night: "night" };
 
 const MSG = {
   retry: "The assistant couldn't read your note just now. Please try again in a minute.",
@@ -64,24 +51,9 @@ const MSG = {
 };
 
 /* ── Dates ── */
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July",
   "August", "September", "October", "November", "December"];
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const pad2 = (n) => String(n).padStart(2, "0");
-const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
-const dayMonth = (s) => { const d = parseISO(s); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
-const withWeekday = (s) => `${WEEKDAYS[parseISO(s).getDay()]} ${dayMonth(s)}`;
-// "10–15 Nov", "28 Nov – 3 Dec", or one day on its own.
-const rangeLabel = (a, b) => {
-  if (a === b) return dayMonth(a);
-  const x = parseISO(a), y = parseISO(b);
-  if (x.getFullYear() !== y.getFullYear()) {
-    return `${dayMonth(a)} ${x.getFullYear()} – ${dayMonth(b)} ${y.getFullYear()}`;
-  }
-  if (x.getMonth() === y.getMonth()) return `${x.getDate()}–${dayMonth(b)}`;
-  return `${dayMonth(a)} – ${dayMonth(b)}`;
-};
 const monthKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 const nextMonthKey = () => { const n = new Date(); return monthKey(new Date(n.getFullYear(), n.getMonth() + 1, 1)); };
 const monthBounds = (key) => {
@@ -107,36 +79,16 @@ const employedInRange = (s, from, to) => {
 };
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// The server's answer, turned into checklist lines. Anything outside the
-// chosen period is kept but starts unticked, so it is never added by accident.
-// When the note asks to build particular dates, those become the period.
-const isISO = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-const buildResult = (body, sent, periodFrom, periodTo) => {
-  const ownDates = body.build === true && isISO(body.buildFrom) && isISO(body.buildTo);
-  const from = ownDates ? body.buildFrom : periodFrom;
-  const to = ownDates ? body.buildTo : periodTo;
-  const known = new Set(sent.map((s) => s.id));
-  const lines = [];
-  (Array.isArray(body.leave) ? body.leave : []).forEach((l, i) => {
-    if (!known.has(l.staffId)) return;
-    const outside = l.end < from || l.start > to;
-    lines.push({ key: `l${i}`, kind: "leave", staffId: l.staffId, type: l.type,
-      start: l.start, end: l.end, outside, checked: !outside });
-  });
-  (Array.isArray(body.requests) ? body.requests : []).forEach((r, i) => {
-    if (!known.has(r.staffId)) return;
-    const outside = r.date < from || r.date > to;
-    lines.push({ key: `r${i}`, kind: "request", staffId: r.staffId, date: r.date,
-      category: r.category, outside, checked: !outside });
-  });
-  const unclear = (Array.isArray(body.unclear) ? body.unclear : []).map((u) => String(u || "").trim()).filter(Boolean);
-  // Whether the note asked for the month to be built, and from when its
-  // fairness should look back. The server has already checked the date.
-  const historyFrom = isISO(body.historyFrom) ? body.historyFrom : null;
-  return {
-    staff: sent, lines, unclear, build: body.build === true, historyFrom,
-    buildFrom: ownDates ? body.buildFrom : null, buildTo: ownDates ? body.buildTo : null,
-  };
+/* What the server is told about the department, besides the staff: its
+   own duty codes (Ini may only use those) and the shifts the ward runs —
+   the shifts with a minimum or maximum in Smart Roster's coverage, the
+   same settings the generator works from. */
+const codesFor = (data) => ((data && data.codes) || [])
+  .filter((c) => c && c.id && (c.code || "").trim())
+  .map((c) => ({ id: c.id, code: c.code.trim(), label: c.label || "", counts: c.counts || "" }));
+const shiftsFor = (data) => {
+  const cov = mergeRules((data && data.rosterRules) || {}).coverage;
+  return SHIFTS.filter((sh) => (cov[sh]?.min || 0) > 0 || (cov[sh]?.max || 0) > 0);
 };
 
 export default function AssistantPanel({
@@ -169,7 +121,9 @@ export default function AssistantPanel({
   const [buildOn, setBuildOn] = useState(true);         // the "Build the … roster" checklist line
   const [building, setBuilding] = useState(false);
   const [buildProblems, setBuildProblems] = useState(null);
-  const [pendingBuild, setPendingBuild] = useState(null); // waiting for the note's items to save
+  // Waiting for the ticked lines to land: { before, words, requests, build }
+  const [pendingSave, setPendingSave] = useState(null);
+  const [saveProblem, setSaveProblem] = useState("");
   const [preview, setPreview] = useState(null);
   const buildSeq = useRef(0);
   const job = useRef(null);
@@ -186,7 +140,7 @@ export default function AssistantPanel({
     setError(""); setResult(null); setSaved(null); setMonth(nextMonthKey());
     setPeriodMode("month"); setRangeFrom(""); setRangeTo("");
     setLookChoice("usual"); setNoteFrom(null); setKeepExisting(true); setBuildOn(true);
-    setBuilding(false); setBuildProblems(null); setPendingBuild(null); setPreview(null);
+    setBuilding(false); setBuildProblems(null); setPendingSave(null); setSaveProblem(""); setPreview(null);
     // stopBuild only touches refs, so it does not need to be listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deptId]);
@@ -287,95 +241,36 @@ export default function AssistantPanel({
     );
   };
 
-  /* After "Add N items and build": the items are saved through update(),
-     which hands back a NEW rota object once it has landed. The month is
-     built from that one, so it includes them. If nothing arrives the save
-     was refused (update() says why), and nothing is built. */
+  /* After Add: the lines are saved through update(), which hands back a NEW
+     rota object once it has landed. Only then does Ini say they were added
+     — and, when the build line is ticked, build from that rota, so the
+     month includes them. If nothing arrives the save was refused (update()
+     says why), and the checklist stays as it was. */
   useEffect(() => {
-    if (!pendingBuild) return undefined;
-    if (data === pendingBuild.before) {
+    if (!pendingSave) return undefined;
+    if (data === pendingSave.before) {
       const timer = setTimeout(() => {
-        setPendingBuild(null);
-        setBuildProblems(["Nothing was saved, so the month was not built."]);
+        setPendingSave(null);
+        setSaveProblem(pendingSave.build ? "Nothing was saved, so the month was not built." : "Nothing was saved.");
       }, 1500);
       return () => clearTimeout(timer);
     }
-    setPendingBuild(null);
-    startBuild(data);
+    setPendingSave(null);
+    setResult(null);
+    setSaved({ words: pendingSave.words, requests: pendingSave.requests });
+    if (pendingSave.build) startBuild(data);
     return undefined;
     // startBuild reads the current choices; only a new rota should trigger it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, pendingBuild]);
+  }, [data, pendingSave]);
 
   /* ── The checks on each line ──
      Worked out afresh on every render, so changing the person on a line, or
-     ticking a leave line, updates the warnings straight away. */
-  const lines = useMemo(() => {
-    if (!result || !data) return [];
-    const byId = {};
-    (data.staff || []).forEach((s) => { byId[s.id] = s; });
-    const existing = data.dutyRequests || [];
-
-    // Smart Roster settings, read only — the same reading as RequestsTab.js.
-    const rules = data.rosterRules || {};
-    const coverage = rules.coverage || null;
-    const skipStaff = rules.skipStaff || [];
-    const staffShifts = rules.staffShifts || {};
-    const wardRuns = (sh) => !coverage || (coverage[sh]?.min || 0) > 0 || (coverage[sh]?.max || 0) > 0;
-    const onLeave = (s, date) => (s?.leavePeriods || []).some((lp) => date >= lp.start && date <= lp.end);
-
-    const leaveInNote = result.lines.filter((l) => l.kind === "leave" && l.checked && staffEditable(l.staffId));
-    const taken = new Set();
-
-    return result.lines.map((l) => {
-      const who = byId[l.staffId];
-      const warnings = [];
-      let blocked = "";
-      if (!who) blocked = "This person is no longer on the rota, so this cannot be added.";
-      else if (!staffEditable(l.staffId)) blocked = `${who.name} is view-only on your current plan, so this cannot be added.`;
-
-      if (l.kind === "leave") {
-        if (who) {
-          (who.leavePeriods || [])
-            .filter((p) => p.start <= l.end && p.end >= l.start)
-            .forEach((p) => {
-              const name = p.type === "other" && p.label ? p.label : (LEAVE_LABEL[p.type] || "leave");
-              warnings.push(`overlaps ${name.toLowerCase()} already recorded (${rangeLabel(p.start, p.end)})`);
-            });
-        }
-      } else {
-        // The clash check from RequestsTab.add: one request per person per date.
-        const key = `${l.staffId}|${l.date}`;
-        if (!blocked && existing.some((r) => r.staffId === l.staffId && r.date === l.date)) {
-          blocked = `${who.name} already has a request on this date, so this one cannot be added. Delete that one on the Duty Requests tab first if you want to change it.`;
-        } else if (!blocked && taken.has(key)) {
-          blocked = "A line above already asks for this person on this date.";
-        }
-        if (!blocked && l.checked) taken.add(key);
-
-        // issuesFor, from RequestsTab.js.
-        if (who) {
-          if (skipStaff.includes(l.staffId)) {
-            warnings.push("skipped in Smart Roster, so the generator will not touch this week for them");
-          }
-          if (onLeave(who, l.date)) {
-            warnings.push("on recorded leave that day — leave is left alone, so this cannot be honoured");
-          } else if (leaveInNote.some((x) => x.staffId === l.staffId && l.date >= x.start && l.date <= x.end)) {
-            warnings.push("on leave you are adding in this note — leave is left alone, so this cannot be honoured");
-          }
-          if (l.category !== "off" && !wardRuns(l.category)) {
-            warnings.push(`the ward does not run ${SHIFT_LABELS[l.category]} shifts`);
-          }
-          const only = staffShifts[l.staffId];
-          if (l.category !== "off" && only?.length && !only.includes(l.category)) {
-            warnings.push(`only set up for ${only.map((x) => SHIFT_LABELS[x]).join(" and ")} duties`);
-          }
-        }
-      }
-      if (l.outside) warnings.unshift("outside the dates you chose");
-      return { ...l, who, blocked, warnings, on: l.checked && !blocked };
-    });
-  }, [result, data, staffEditable]);
+     ticking one, updates the warnings straight away. */
+  const lines = useMemo(
+    () => (result && data ? checkLines(result.lines, { data, staffEditable }) : []),
+    [result, data, staffEditable],
+  );
 
   if (!visible || !deptId) return null;
 
@@ -389,7 +284,7 @@ export default function AssistantPanel({
     }
     const mine = ++seq.current;
     const sent = staffForMonth.map((s) => ({ id: s.id, name: s.name.trim() }));
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setSaveProblem("");
 
     let res, body;
     try {
@@ -405,6 +300,7 @@ export default function AssistantPanel({
         body: JSON.stringify({
           departmentId: deptId, text: note, from, to, staff: sent,
           leaveTypes: LEAVE_TYPES.map(([id]) => id),
+          codes: codesFor(data), shifts: shiftsFor(data), fridayRule: !!(data && data.fridayRule),
         }),
       });
       body = await res.json().catch(() => ({}));
@@ -423,18 +319,24 @@ export default function AssistantPanel({
     }
 
     if (res.ok && body.ok) {
-      const r = buildResult(body, sent, from, to);
-      setResult(r);
+      const r = readReply(body, { staffIds: sent.map((s) => s.id), from, to });
+      setResult({ ...r, staff: sent });
       setBuildOn(true);
-      // Dates the note asked to build become the period.
-      const newFrom = r.buildFrom || from;
-      if (r.buildFrom && r.buildTo) {
-        setPeriodMode("dates"); setRangeFrom(r.buildFrom); setRangeTo(r.buildTo);
+      const b = r.build;
+      // Dates the note asked to build become the period: a calendar month
+      // the picker offers as that month, anything else as chosen dates.
+      if (b && (b.from !== from || b.to !== to)) {
+        const key = b.from.slice(0, 7);
+        if (isWholeMonth(b.from, b.to) && monthOptions().some(([k]) => k === key)) {
+          setPeriodMode("month"); setMonth(key);
+        } else {
+          setPeriodMode("dates"); setRangeFrom(b.from); setRangeTo(b.to);
+        }
       }
       // A look-back the note asked for is preselected; it can still be changed.
-      if (r.historyFrom) {
-        setNoteFrom(r.historyFrom);
-        setLookChoice(lookbackIdFor(lookbackOptions(newFrom, data && data.rosterRules, r.historyFrom), r.historyFrom));
+      if (b && b.historyFrom) {
+        setNoteFrom(b.historyFrom);
+        setLookChoice(lookbackIdFor(lookbackOptions(b.from, data && data.rosterRules, b.historyFrom), b.historyFrom));
       }
       return;
     }
@@ -458,52 +360,24 @@ export default function AssistantPanel({
   const willBuild = !!(result && result.build && canBuild && buildOn && !periodErr);
 
   // One update(), so it is one step for Undo and passes the same locks as
-  // every other edit. Shapes match the Staff tab and RequestsTab.add exactly.
-  // With the build line ticked, the month is built afterwards from the rota
-  // that includes what was just added.
+  // every other edit. Each line is checked again inside it, against the rota
+  // as it is at that moment. With the build line ticked, the month is built
+  // afterwards from the rota that includes what was just saved.
   const confirm = () => {
+    setSaveProblem("");
     if (!picked.length) {
       if (willBuild) { setResult(null); startBuild(data); }
       return;
     }
-    if (willBuild) setPendingBuild({ before: data });
     const today = dstr(new Date());
-    const leave = picked.filter((l) => l.kind === "leave");
-    const reqs = picked.filter((l) => l.kind === "request");
-    update((d) => {
-      leave.forEach((l) => {
-        const i = (d.staff || []).findIndex((s) => s.id === l.staffId);
-        if (i < 0) return;
-        d.staff[i] = {
-          ...d.staff[i],
-          leavePeriods: [...(d.staff[i].leavePeriods || []),
-            { type: l.type, start: l.start, end: l.end, id: uid() }],
-        };
-      });
-      if (reqs.length) {
-        const list = [...(d.dutyRequests || [])];
-        reqs.forEach((r) => {
-          // Checked again against the rota as it is now, in case it changed.
-          if (list.some((x) => x.staffId === r.staffId && x.date === r.date)) return;
-          list.push({
-            id: uid(),
-            staffId: r.staffId,
-            date: r.date,
-            category: r.category,
-            approved: true,           // the manager confirming is the approval
-            enteredBy: "assistant",
-            enteredOn: today,
-          });
-        });
-        d.dutyRequests = list;
-      }
-      return d;
+    setPendingSave({
+      before: data, build: willBuild, words: savedWords(picked),
+      requests: picked.some((l) => entryFor(l.type)?.opensRequests),
     });
-    setSaved({ leave: leave.length, requests: reqs.length });
-    setResult(null);
+    update((d) => applyLines(d, picked, { staffEditable, uid, today }));
   };
 
-  const startAgain = () => { setSaved(null); setResult(null); setText(""); setError(""); };
+  const startAgain = () => { setSaved(null); setResult(null); setText(""); setError(""); setSaveProblem(""); };
 
   /* ── Styles ── */
   const button = (kind = "primary", disabled = false) => ({
@@ -590,13 +464,13 @@ export default function AssistantPanel({
 
   /* ── What the panel shows ── */
   let body;
-  if (building || pendingBuild) {
+  if (building || (pendingSave && pendingSave.build)) {
     body = (
       <div style={{ display: "grid", gap: 12 }}>
         <div role="status" style={{ ...note("#E3F3EF", "#BFE3DA", "#0B6A60"), display: "flex", gap: 9, alignItems: "flex-start" }}>
           <Wand2 size={17} style={{ flexShrink: 0, marginTop: 2 }} />
           <span>
-            <strong>{pendingBuild ? "Saving your items…" : `Building ${words.the}… this can take a few seconds.`}</strong>
+            <strong>{pendingSave ? "Saving your items…" : `Building ${words.the}… this can take a few seconds.`}</strong>
             {" "}The month opens here when it is ready.
           </span>
         </div>
@@ -605,19 +479,22 @@ export default function AssistantPanel({
         </p>
       </div>
     );
+  } else if (pendingSave) {
+    body = (
+      <div role="status" style={note("#E3F3EF", "#BFE3DA", "#0B6A60")}>
+        <strong>Saving your items…</strong>
+      </div>
+    );
   } else if (saved) {
-    const parts = [];
-    if (saved.leave) parts.push(plural(saved.leave, "leave period"));
-    if (saved.requests) parts.push(plural(saved.requests, "duty request"));
     body = (
       <div style={{ display: "grid", gap: 14 }}>
         <div style={{ ...note("#E3F3EF", "#BFE3DA", "#0B6A60"), display: "flex", gap: 9, alignItems: "flex-start" }}>
           <Check size={17} style={{ flexShrink: 0, marginTop: 2 }} />
-          <span><strong>Added {parts.join(" and ")}.</strong> You can take it all back with Undo at the top.</span>
+          <span><strong>Added {saved.words}.</strong> You can take it all back with Undo at the top.</span>
         </div>
         {problemsBox}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {saved.requests > 0 && onOpenRequests && (
+          {saved.requests && onOpenRequests && (
             <button type="button" style={button()} onClick={() => { setOpen(false); onOpenRequests(); }}>
               Open Duty Requests
             </button>
@@ -627,14 +504,16 @@ export default function AssistantPanel({
       </div>
     );
   } else if (result) {
-    const leaveLines = lines.filter((l) => l.kind === "leave");
-    const requestLines = lines.filter((l) => l.kind === "request");
     const staffOptions = result.staff;
 
+    // One checklist line, whatever the action: its words from the catalogue,
+    // a person picker for each person in it, its problems and warnings.
     const renderLine = (l) => {
-      const what = l.kind === "leave" ? (LEAVE_LABEL[l.type] || "Leave") : (REQUEST_LABEL[l.category] || l.category);
-      const when = l.kind === "leave" ? rangeLabel(l.start, l.end) : withWeekday(l.date);
-      const name = l.who ? l.who.name : "Unknown";
+      const entry = entryFor(l.type);
+      const fields = entry.people || [];
+      const { what, when, details, detailsLabel } = l.words;
+      const names = fields.map((f) => (l.people[f] ? l.people[f].name : "Unknown"));
+      const title = [what, names.join(" & "), when].filter(Boolean).join(" · ");
       return (
         <div key={l.key} style={{
           border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px",
@@ -646,25 +525,35 @@ export default function AssistantPanel({
               checked={l.on}
               disabled={!!l.blocked}
               onChange={(e) => setLine(l.key, { checked: e.target.checked })}
-              aria-label={`${what} · ${name} · ${when}`}
+              aria-label={title}
               style={{ width: 17, height: 17, marginTop: 2, accentColor: T.lagoon, flexShrink: 0,
                 cursor: l.blocked ? "not-allowed" : "pointer" }}
             />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: l.blocked ? T.inkSoft : T.ink, lineHeight: 1.45 }}>
-                {what} · {name} · {when}
+                {title}
               </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12, color: T.inkSoft }}>
-                Person
-                <select
-                  value={l.staffId}
-                  onChange={(e) => setLine(l.key, { staffId: e.target.value })}
-                  style={{ fontFamily: "inherit", fontSize: 12.5, padding: "4px 6px", borderRadius: 7,
-                    border: `1px solid ${T.line}`, background: "#fff", color: T.ink, maxWidth: "100%", minWidth: 0 }}
-                >
-                  {staffOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </label>
+              {fields.map((f, i) => (
+                <label key={f} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12, color: T.inkSoft }}>
+                  {fields.length > 1 ? `Person ${i + 1}` : "Person"}
+                  <select
+                    value={l[f]}
+                    onChange={(e) => setLine(l.key, { [f]: e.target.value })}
+                    style={{ fontFamily: "inherit", fontSize: 12.5, padding: "4px 6px", borderRadius: 7,
+                      border: `1px solid ${T.line}`, background: "#fff", color: T.ink, maxWidth: "100%", minWidth: 0 }}
+                  >
+                    {staffOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </label>
+              ))}
+              {details && details.length > 0 && (
+                <details style={{ marginTop: 6, fontSize: 12, color: T.inkSoft, lineHeight: 1.5 }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>{detailsLabel || `Show ${plural(details.length, "date")}`}</summary>
+                  <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                    {details.map((x, i) => <li key={i}>{x}</li>)}
+                  </ul>
+                </details>
+              )}
               {l.blocked && (
                 <div style={{ fontSize: 12, color: "#8A2E1E", lineHeight: 1.5, marginTop: 6 }}>{l.blocked}</div>
               )}
@@ -717,24 +606,23 @@ export default function AssistantPanel({
       <div style={{ display: "grid", gap: 16 }}>
         {!lines.length && !result.build && (
           <div style={note(T.mist, T.line, T.inkSoft)}>
-            Ini didn't find any leave or duty requests in your note.
+            Ini didn't find anything to add from your note.
           </div>
         )}
-        {leaveLines.length > 0 && (
-          <section>
-            <h3 style={sectionTitle}>Leave</h3>
-            <div style={{ display: "grid", gap: 8 }}>{leaveLines.map(renderLine)}</div>
-          </section>
-        )}
-        {requestLines.length > 0 && (
-          <section>
-            <h3 style={sectionTitle}>Duty requests</h3>
-            <div style={{ display: "grid", gap: 8 }}>{requestLines.map(renderLine)}</div>
-            <p style={{ fontSize: 12, color: T.inkSoft, margin: "8px 0 0", lineHeight: 1.5 }}>
-              Requests you add here are marked approved, so Smart Roster will honour them.
-            </p>
-          </section>
-        )}
+        {GROUPS.map((g) => {
+          const inGroup = lines.filter((l) => entryFor(l.type).group === g.id);
+          if (!inGroup.length) return null;
+          const footnotes = [...new Set(inGroup.map((l) => entryFor(l.type).footnote).filter(Boolean))];
+          return (
+            <section key={g.id}>
+              <h3 style={sectionTitle}>{g.title}</h3>
+              <div style={{ display: "grid", gap: 8 }}>{inGroup.map(renderLine)}</div>
+              {footnotes.map((f) => (
+                <p key={f} style={{ fontSize: 12, color: T.inkSoft, margin: "8px 0 0", lineHeight: 1.5 }}>{f}</p>
+              ))}
+            </section>
+          );
+        })}
         {buildLine}
         {result.unclear.length > 0 && (
           <section>
@@ -744,11 +632,11 @@ export default function AssistantPanel({
             </ul>
           </section>
         )}
-        {currentTab === "staff" && leaveLines.length > 0 && (
-          <div style={note("#FBF1DC", "#E7D9B8", "#6B4A0C")}>
-            If a staff member's details are open on the Staff tab, close that form without saving first.
-            Saving it afterwards would remove the leave Ini adds.
-          </div>
+        {[...new Set(lines.map((l) => entryFor(l.type).tabNote?.[currentTab]).filter(Boolean))].map((t) => (
+          <div key={t} style={note("#FBF1DC", "#E7D9B8", "#6B4A0C")}>{t}</div>
+        ))}
+        {saveProblem && (
+          <div role="alert" style={note("#FBEAE7", "#F1B8AE", "#8A2E1E")}>{saveProblem}</div>
         )}
         <div style={{
           position: "sticky", bottom: 0, background: "#fff", padding: "12px 0 4px",
@@ -759,7 +647,7 @@ export default function AssistantPanel({
               {willBuild && <Wand2 size={15} />} {confirmLabel}
             </button>
           )}
-          <button type="button" style={button("ghost")} onClick={() => setResult(null)}>Change my note</button>
+          <button type="button" style={button("ghost")} onClick={() => { setResult(null); setSaveProblem(""); }}>Change my note</button>
         </div>
       </div>
     );
