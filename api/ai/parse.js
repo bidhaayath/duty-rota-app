@@ -277,6 +277,8 @@ function buildPrompt(input, today) {
     '  way people say them ("11 January", not "2027-01-11"). The manager cannot',
     '  reply to you, so never ask them to confirm or offer to do it later. Say what was not',
     '  done and why, and that they can do it by hand or write the note again.',
+    '  When you leave days out on purpose because the person is on leave then, just say',
+    '  those days were left out because of the leave; nothing more is needed for them.',
     '',
     'Rules:',
     '- Only use the staff listed, by their ref (s1, s2...). Never invent a person.',
