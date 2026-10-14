@@ -15,8 +15,12 @@
    the manager tick and correct them, and saves them. Adding an action means
    adding a catalogue entry, not changing this file.
 
-   Hidden from print, PDF and image exports: those screens replace the page
-   this sits on, and the no-print class covers printing the page itself.
+   Hidden from print, PDF, image and Excel exports: those screens replace
+   the page this sits on, and the no-print class covers printing the page
+   itself. The button and the panel are both inside that one wrapper.
+
+   Ini's face (IniMascot.js) shows what Ini is doing; iniMood below picks
+   the mood from what is on screen.
 
    Building a whole month is the one action this panel carries out itself,
    after everything else is saved: monthBuild.js prepares it with the same
@@ -34,6 +38,7 @@ import {
 } from "./monthBuild";
 import { startMonthBuild } from "./monthBuildRunner";
 import MonthPreview from "./MonthPreview";
+import IniMascot from "./IniMascot";
 import { mergeRules } from "./rosterConfig";
 import { SHIFTS } from "./rosterEngine";
 import { GROUPS, LEAVE_TYPES, entryFor, readReply, checkLines, applyLines, savedWords } from "./iniActions";
@@ -91,6 +96,47 @@ const shiftsFor = (data) => {
   return SHIFTS.filter((sh) => (cov[sh]?.min || 0) > 0 || (cov[sh]?.max || 0) > 0);
 };
 
+/* ── Ini's mood ──
+   The button: resting, waking while it opens the panel, and pleased for a
+   moment after a built month is applied. The header: reading while Ini
+   works, startled when something on screen needs a look, pleased just
+   after a save, otherwise listening. */
+const WAKE_MS = 400;
+const DONE_MS = 4000;
+
+export function iniMood({ open = false, waking = false, reading = false, spotted = false, done = null }) {
+  if (!open) return waking ? "waking" : done === "apply" ? "done" : "resting";
+  if (reading) return "reading";
+  if (spotted) return "spotted";
+  if (done) return "done";
+  return "listening";
+}
+
+/* Only what is on screen counts: `view` is the part of the panel showing
+   ("form", "checklist", "saved", "saving" or "building"). Choosing dates
+   that cannot be built is a hint while typing, not something Ini spotted. */
+export function iniSpotted({ view, error, status, buildProblems, saveProblem, lines = [], unclear = [] }) {
+  const problems = !!(buildProblems && buildProblems.length);
+  if (view === "form") {
+    const stopped = !!status && (status.ok === false ? status.reason !== "not_on_plan" : status.remaining === 0);
+    return !!error || problems || stopped;
+  }
+  if (view === "saved") return problems;
+  if (view === "checklist") {
+    return !!saveProblem || unclear.length > 0
+      || lines.some((l) => !!l.blocked || (l.warnings && l.warnings.length > 0));
+  }
+  return false;
+}
+
+const reducedMotion = () => {
+  try {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  } catch (e) {
+    return false;
+  }
+};
+
 export default function AssistantPanel({
   visible, deptId, data, update, staffEditable = () => true, currentTab,
   onOpenBilling, onOpenRequests, T, uid, dstr,
@@ -105,6 +151,15 @@ export default function AssistantPanel({
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [saved, setSaved] = useState(null);
+  // Ini's face: waking while the panel opens; "add" or "apply" for a few
+  // seconds after a save.
+  const [waking, setWaking] = useState(false);
+  const [done, setDone] = useState(null);
+  const wakeTimer = useRef(null);
+  const stopWaking = () => {
+    if (wakeTimer.current) { clearTimeout(wakeTimer.current); wakeTimer.current = null; }
+    setWaking(false);
+  };
   // Bumped whenever an answer would no longer belong on screen (a different
   // department), so a reply that arrives late is ignored.
   const seq = useRef(0);
@@ -141,13 +196,35 @@ export default function AssistantPanel({
     setPeriodMode("month"); setRangeFrom(""); setRangeTo("");
     setLookChoice("usual"); setNoteFrom(null); setKeepExisting(true); setBuildOn(true);
     setBuilding(false); setBuildProblems(null); setPendingSave(null); setSaveProblem(""); setPreview(null);
-    // stopBuild only touches refs, so it does not need to be listed.
+    stopWaking(); setDone(null);
+    // stopBuild and stopWaking only touch refs and setters, so they do not need to be listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deptId]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => () => stopBuild(), []);
+  useEffect(() => () => { stopBuild(); if (wakeTimer.current) clearTimeout(wakeTimer.current); }, []);
 
-  useEffect(() => { if (!visible) setOpen(false); }, [visible]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!visible) { setOpen(false); stopWaking(); } }, [visible]);
+
+  // Pleased for a few seconds after a save, then back to listening.
+  useEffect(() => {
+    if (!done) return undefined;
+    const timer = setTimeout(() => setDone(null), DONE_MS);
+    return () => clearTimeout(timer);
+  }, [done]);
+
+  // Ini wakes up, then the panel opens. With reduced motion the face would
+  // only snap, so the panel opens straight away.
+  const wake = () => {
+    if (wakeTimer.current) return;
+    if (reducedMotion()) { setOpen(true); return; }
+    setWaking(true);
+    wakeTimer.current = setTimeout(() => {
+      wakeTimer.current = null;
+      setWaking(false);
+      setOpen(true);
+    }, WAKE_MS);
+  };
 
   // The allowance, checked every time the panel opens. Uses nothing up.
   useEffect(() => {
@@ -259,6 +336,7 @@ export default function AssistantPanel({
     setResult(null);
     setSaved({ words: pendingSave.words, requests: pendingSave.requests });
     if (pendingSave.build) startBuild(data);
+    else setDone("add");
     return undefined;
     // startBuild reads the current choices; only a new rota should trigger it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -693,7 +771,7 @@ export default function AssistantPanel({
             Your note
             <textarea
               value={text}
-              onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT))}
+              onChange={(e) => { setText(e.target.value.slice(0, MAX_TEXT)); setDone(null); }}
               maxLength={MAX_TEXT}
               rows={7}
               disabled={busy}
@@ -788,9 +866,20 @@ export default function AssistantPanel({
     );
   }
 
+  // The same order as the body above.
+  const view = building || (pendingSave && pendingSave.build) ? "building"
+    : pendingSave ? "saving" : saved ? "saved" : result ? "checklist" : "form";
+  const face = {
+    waking, done,
+    reading: busy || view === "building",
+    spotted: iniSpotted({ view, error, status, buildProblems, saveProblem, lines, unclear: result ? result.unclear : [] }),
+  };
+
   return (
     <div className="no-print ini-root">
       <style>{`
+        .ini-fab:focus { outline: none; }
+        .ini-fab:focus-visible { outline: 3px solid ${T.lagoon}; outline-offset: 3px; }
         .ini-panel { width: 400px; max-width: 100vw; animation: ini-in 240ms cubic-bezier(0.22, 1, 0.36, 1); }
         .ini-backdrop { animation: ini-fade 200ms ease-out; }
         @keyframes ini-in { from { transform: translateX(100%); } to { transform: none; } }
@@ -810,20 +899,22 @@ export default function AssistantPanel({
       `}</style>
 
       {!open && !preview && (
+        // White, so Ini stands out over coloured rota cells.
         <button
           type="button"
+          className="ini-fab"
           aria-label="Ask Ini"
           title="Ask Ini"
-          onClick={() => setOpen(true)}
+          onClick={wake}
           style={{
             position: "fixed", right: 16, bottom: 16, zIndex: 900,
-            width: 50, height: 50, borderRadius: "50%", border: "none", cursor: "pointer",
-            background: T.lagoon, color: "#fff",
+            width: 50, height: 50, padding: 0, borderRadius: "50%", border: "1px solid #D5E0D8", cursor: "pointer",
+            background: "#fff",
             display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 6px 18px rgba(20,43,51,0.25)",
+            boxShadow: "0 6px 18px rgba(20,43,51,0.18)",
           }}
         >
-          <Sparkles size={22} />
+          <IniMascot mood={iniMood({ ...face, open: false })} size={44} />
         </button>
       )}
 
@@ -850,13 +941,16 @@ export default function AssistantPanel({
               display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10,
               padding: "16px 18px 12px", borderBottom: `1px solid ${T.line}`,
             }}>
-              <div style={{ minWidth: 0 }}>
-                <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                  <Sparkles size={17} color={T.lagoon} /> Ini · your rota assistant
-                </h2>
-                {allowance && (
-                  <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 4 }}>{allowance}</div>
-                )}
+              <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
+                <IniMascot mood={iniMood({ ...face, open: true })} size={44} style={{ flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>
+                    Ini · your rota assistant
+                  </h2>
+                  {allowance && (
+                    <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 4 }}>{allowance}</div>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
@@ -886,7 +980,7 @@ export default function AssistantPanel({
           T={T}
           onDiscard={() => { setPreview(null); setOpen(true); }}
           onApplied={(f, t) => {
-            setPreview(null); setOpen(false); setSaved(null);
+            setPreview(null); setOpen(false); setSaved(null); setDone("apply");
             if (onMonthApplied) onMonthApplied(f, t);
           }}
         />

@@ -33,9 +33,12 @@ const renderPanel = (data, update = jest.fn()) => render(
   <AssistantPanel visible deptId="d1" data={data} update={update} T={T}
     uid={() => Math.random().toString(36).slice(2)} dstr={iso} canBuild onMonthApplied={jest.fn()} />,
 );
+// Ini wakes up for a moment before the panel opens, and the note box
+// appears once the allowance has been checked.
 const open = async () => {
   fireEvent.click(screen.getByLabelText("Ask Ini"));
   await screen.findByText("Choose dates");
+  await screen.findByPlaceholderText(/Fathimath Easa/);
 };
 
 test("choosing dates: defaults to the month shown, and blocks more than three months", async () => {
