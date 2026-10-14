@@ -130,7 +130,7 @@ function buildSchema(staff, leaveTypes) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['leave', 'requests', 'unclear'],
+    required: ['leave', 'requests', 'unclear', 'build', 'historyFrom'],
     properties: {
       leave: {
         type: 'array',
@@ -160,6 +160,8 @@ function buildSchema(staff, leaveTypes) {
         },
       },
       unclear: { type: 'array', items: { type: 'string' } },
+      build: { type: 'boolean' },
+      historyFrom: { anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] },
     },
   };
 }
@@ -170,7 +172,7 @@ function buildPrompt(input, today) {
     'turn it into structured entries. You never decide anything yourself: every entry is shown',
     'to the manager to confirm, so when in doubt, leave it out and explain it under "unclear".',
     '',
-    'Output three lists:',
+    'Output three lists and two settings:',
     '- leave: a period when one staff member is away (annual leave, sick leave, training,',
     '  and similar). Use the leave type that best matches; if none fits, use "other". A',
     '  single day of leave has the same start and end.',
@@ -182,6 +184,13 @@ function buildPrompt(input, today) {
     '  The manager cannot reply to you, so never ask them to confirm or offer to do it later.',
     '  Instead say what was not added and why, and that they can add it by hand or write the',
     '  note again with the full name.',
+    '- build: true if the note asks you to build, make, create or generate the roster or rota',
+    '  (for example "build the duty roster of November"); otherwise false. You do not build it',
+    '  yourself: the app does that after the manager confirms. Never mention building in unclear.',
+    '- historyFrom: if the note says how far back to look at past rosters for fairness, the',
+    '  first date to look back from ("only look back from this year" means 1 January of the',
+    '  planning period\'s year; "the last 3 months" means the 1st of the month three months',
+    '  before the planning period). Otherwise null.',
     '',
     'Rules:',
     '- Only use the staff listed, by their ref (s1, s2...). Never invent a person.',
@@ -322,7 +331,18 @@ function checkAnswer(answer, input, today) {
     if (note) unclear.push(note);
   }
 
-  return { leave, requests, unclear };
+  const build = a.build === true;
+  let historyFrom = null;
+  if (a.historyFrom != null) {
+    // Must be before the planning period, and not absurdly far back.
+    if (isRealDate(a.historyFrom) && a.historyFrom < input.from && a.historyFrom >= addDaysISO(input.from, -3 * 366)) {
+      historyFrom = a.historyFrom;
+    } else {
+      unclear.push('The note asked to look back at past rosters, but the date did not make sense, so the usual look-back is used.');
+    }
+  }
+
+  return { leave, requests, unclear, build, historyFrom };
 }
 
 const FAIL_STATUS = {
