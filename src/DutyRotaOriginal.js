@@ -2142,6 +2142,11 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
         deptId={deptId} data={data} update={update} staffEditable={staffEditable}
         currentTab={tab} onOpenBilling={onOpenBilling} onOpenRequests={() => setTab("requests")}
         T={T} uid={uid} dstr={dstr}
+        // Building a whole month uses Smart Roster, so it follows the same
+        // plan check as the Smart Roster tab. After Apply, the month itself
+        // is shown on the rota.
+        canBuild={features?.smart_roster !== false}
+        onMonthApplied={(start, end) => { setMonthRange({ start, end }); setRotaView("monthly"); setTab("rota"); }}
       />
     </div>
   );

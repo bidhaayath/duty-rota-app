@@ -16,11 +16,24 @@
    the other to match.
 
    Hidden from print, PDF and image exports: those screens replace the page
-   this sits on, and the no-print class covers printing the page itself.  */
+   this sits on, and the no-print class covers printing the page itself.
+
+   Ini's actions. Reading a note (above) is one. Building a whole month is
+   another: monthBuild.js prepares it with the same configuration Smart
+   Roster uses, monthBuildRunner.js runs the engine in the background, and
+   MonthPreview.js shows the month and applies it. Building runs entirely in
+   the browser and never uses a note from the month's allowance. Each new
+   action should follow the same shape: its own module, with this panel only
+   offering it and showing the result.                                    */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Sparkles, X, AlertTriangle, Check } from "lucide-react";
+import { Sparkles, X, AlertTriangle, Check, Wand2 } from "lucide-react";
 import supabase from "./supabaseClient";
+import {
+  prepareMonth, finishMonth, plainProblems, lookbackOptions, lookbackIdFor, lookbackSentence, monthName,
+} from "./monthBuild";
+import { startMonthBuild } from "./monthBuildRunner";
+import MonthPreview from "./MonthPreview";
 
 const MAX_TEXT = 1000;
 
@@ -111,12 +124,17 @@ const buildResult = (body, sent, from, to) => {
       category: r.category, outside, checked: !outside });
   });
   const unclear = (Array.isArray(body.unclear) ? body.unclear : []).map((u) => String(u || "").trim()).filter(Boolean);
-  return { staff: sent, lines, unclear };
+  // Whether the note asked for the month to be built, and from when its
+  // fairness should look back. The server has already checked the date.
+  const historyFrom = typeof body.historyFrom === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.historyFrom)
+    ? body.historyFrom : null;
+  return { staff: sent, lines, unclear, build: body.build === true, historyFrom };
 };
 
 export default function AssistantPanel({
   visible, deptId, data, update, staffEditable = () => true, currentTab,
   onOpenBilling, onOpenRequests, T, uid, dstr,
+  canBuild = false, onMonthApplied,
 }) {
   const [open, setOpen] = useState(false);
   // null while checking; { ok: true, cap, used, remaining } or { ok: false, reason }
@@ -131,12 +149,35 @@ export default function AssistantPanel({
   // department), so a reply that arrives late is ignored.
   const seq = useRef(0);
 
+  /* ── Building the month ── */
+  const [lookChoice, setLookChoice] = useState("usual");
+  const [noteFrom, setNoteFrom] = useState(null);       // look-back date from the last note
+  const [keepExisting, setKeepExisting] = useState(true);
+  const [buildOn, setBuildOn] = useState(true);         // the "Build the … roster" checklist line
+  const [building, setBuilding] = useState(false);
+  const [buildProblems, setBuildProblems] = useState(null);
+  const [pendingBuild, setPendingBuild] = useState(null); // waiting for the note's items to save
+  const [preview, setPreview] = useState(null);
+  const buildSeq = useRef(0);
+  const job = useRef(null);
+  const stopBuild = () => {
+    buildSeq.current += 1;
+    if (job.current) { job.current.cancel(); job.current = null; }
+  };
+
   // A different department is a fresh start: its own allowance, staff and note.
   useEffect(() => {
     seq.current += 1;
+    stopBuild();
     setOpen(false); setStatus(null); setText(""); setBusy(false);
     setError(""); setResult(null); setSaved(null); setMonth(nextMonthKey());
+    setLookChoice("usual"); setNoteFrom(null); setKeepExisting(true); setBuildOn(true);
+    setBuilding(false); setBuildProblems(null); setPendingBuild(null); setPreview(null);
+    // stopBuild only touches refs, so it does not need to be listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deptId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => stopBuild(), []);
 
   useEffect(() => { if (!visible) setOpen(false); }, [visible]);
 
@@ -169,6 +210,81 @@ export default function AssistantPanel({
     () => ((data && data.staff) || []).filter((s) => (s.name || "").trim() && employedInRange(s, from, to)),
     [data, from, to],
   );
+
+  /* ── Building the month ──
+     The look-back choices follow the month picked. A date from the note is
+     only offered while it is still before that month. */
+  const lookOpts = useMemo(
+    () => lookbackOptions(month, data && data.rosterRules, noteFrom),
+    [month, data, noteFrom],
+  );
+  const lookOpt = lookOpts.find((o) => o.id === lookChoice) || lookOpts[0];
+  const mName = monthName(month);
+
+  // Builds from `d`: the rota as it is now, or as it is once a note's items
+  // have been saved. Nothing is written here; the preview does that.
+  const startBuild = (d) => {
+    if (!d) return;
+    setBuildProblems(null);
+    if (!staffForMonth.length) {
+      setBuildProblems([`Nobody on this rota is employed in ${mName}.`]);
+      return;
+    }
+    let prep;
+    try {
+      prep = prepareMonth({
+        data: d, month, lookFrom: lookOpt ? lookOpt.from : null, keepExisting,
+        // View-only staff cannot have their cells changed, so they are
+        // planned around exactly as they stand.
+        lockedStaffIds: (d.staff || []).filter((s) => !staffEditable(s.id)).map((s) => s.id),
+      });
+    } catch (e) {
+      console.error("Ini: could not prepare the month", e);
+      setBuildProblems(["Something went wrong while getting the month ready. Nothing has been changed."]);
+      return;
+    }
+    stopBuild();
+    const mine = buildSeq.current;
+    setBuilding(true);
+    job.current = startMonthBuild(prep.config, prep.chosenCodes);
+    job.current.promise.then(
+      (out) => {
+        if (mine !== buildSeq.current) return;
+        job.current = null;
+        setBuilding(false);
+        if (!out.ok) { setBuildProblems(plainProblems(prep, out.problems)); return; }
+        setPreview({ ...finishMonth(prep, out, d), ms: out.ms });
+        setOpen(false);
+      },
+      (e) => {
+        if (mine !== buildSeq.current) return;
+        console.error("Ini: month build failed", e);
+        job.current = null;
+        setBuilding(false);
+        setBuildProblems(["Something went wrong while building. Nothing has been changed."]);
+      },
+    );
+  };
+
+  /* After "Add N items and build": the items are saved through update(),
+     which hands back a NEW rota object once it has landed. The month is
+     built from that one, so it includes them. If nothing arrives the save
+     was refused (update() says why), and nothing is built. */
+  useEffect(() => {
+    if (!pendingBuild) return undefined;
+    if (data === pendingBuild.before) {
+      const timer = setTimeout(() => {
+        setPendingBuild(null);
+        setBuildProblems(["Nothing was saved, so the month was not built."]);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+    setPendingBuild(null);
+    startBuild(data);
+    return undefined;
+    // startBuild reads the current choices; only a new rota should trigger it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, pendingBuild]);
 
   /* ── The checks on each line ──
      Worked out afresh on every render, so changing the person on a line, or
@@ -284,7 +400,17 @@ export default function AssistantPanel({
       setStatus({ ok: true, cap: usage.cap, used: usage.used, remaining: usage.remaining });
     }
 
-    if (res.ok && body.ok) { setResult(buildResult(body, sent, from, to)); return; }
+    if (res.ok && body.ok) {
+      const r = buildResult(body, sent, from, to);
+      setResult(r);
+      setBuildOn(true);
+      // A look-back the note asked for is preselected; it can still be changed.
+      if (r.historyFrom) {
+        setNoteFrom(r.historyFrom);
+        setLookChoice(lookbackIdFor(lookbackOptions(month, data && data.rosterRules, r.historyFrom), r.historyFrom));
+      }
+      return;
+    }
 
     const code = body.error;
     if (res.status === 429 || code === "limit_reached") {
@@ -301,11 +427,19 @@ export default function AssistantPanel({
     setResult((r) => ({ ...r, lines: r.lines.map((l) => (l.key === key ? { ...l, ...change } : l)) }));
 
   const picked = lines.filter((l) => l.on);
+  // The note asked for the month to be built, and the line is still ticked.
+  const willBuild = !!(result && result.build && canBuild && buildOn);
 
   // One update(), so it is one step for Undo and passes the same locks as
   // every other edit. Shapes match the Staff tab and RequestsTab.add exactly.
+  // With the build line ticked, the month is built afterwards from the rota
+  // that includes what was just added.
   const confirm = () => {
-    if (!picked.length) return;
+    if (!picked.length) {
+      if (willBuild) { setResult(null); startBuild(data); }
+      return;
+    }
+    if (willBuild) setPendingBuild({ before: data });
     const today = dstr(new Date());
     const leave = picked.filter((l) => l.kind === "leave");
     const reqs = picked.filter((l) => l.kind === "request");
@@ -365,35 +499,84 @@ export default function AssistantPanel({
     ? `${status.remaining} of ${status.cap} notes left this month`
     : "";
 
+  /* ── The build controls, shared by the note form and the checklist ── */
+  const lookControl = (
+    <label style={{ display: "grid", gap: 5, fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
+      <span>{lookbackSentence(lookOpt, month)}</span>
+      <select
+        value={lookOpt ? lookOpt.id : "usual"}
+        onChange={(e) => setLookChoice(e.target.value)}
+        disabled={building}
+        aria-label="How far back fairness looks"
+        style={{ fontFamily: "inherit", fontSize: 13, padding: "7px 9px", borderRadius: 8,
+          border: `1px solid ${T.line}`, background: "#fff", color: T.ink, cursor: "pointer" }}
+      >
+        {lookOpts.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+    </label>
+  );
+  const keepControl = (
+    <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: T.ink, lineHeight: 1.45, cursor: "pointer" }}>
+      <input
+        type="checkbox"
+        checked={keepExisting}
+        disabled={building}
+        onChange={(e) => setKeepExisting(e.target.checked)}
+        style={{ width: 16, height: 16, marginTop: 2, accentColor: T.lagoon, flexShrink: 0 }}
+      />
+      <span>
+        Keep duties already on the rota (only fill empty days)
+        {!keepExisting && (
+          <span style={{ display: "block", fontSize: 12, color: "#8A5A0F", marginTop: 2 }}>
+            Duties already in {mName} will be replaced. You will see how many before anything is written.
+          </span>
+        )}
+      </span>
+    </label>
+  );
+  const problemsBox = buildProblems && buildProblems.length > 0 && (
+    <div role="alert" style={note("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
+      <strong>The {mName} roster could not be built. Nothing has been changed.</strong>
+      <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+        {buildProblems.map((p, i) => <li key={i} style={{ marginBottom: 3 }}>{p}</li>)}
+      </ul>
+    </div>
+  );
+  const buildSection = canBuild && (
+    <section style={{ borderTop: `1px solid ${T.line}`, paddingTop: 14, display: "grid", gap: 10 }}>
+      <h3 style={{ ...sectionTitle, margin: 0 }}>Build the whole month</h3>
+      <p style={{ fontSize: 12.5, color: T.inkSoft, margin: 0, lineHeight: 1.55 }}>
+        Ini builds {mName} with your Smart Roster settings. This does not use a note. Nothing changes on
+        the rota until you have checked the month and pressed Apply.
+      </p>
+      {lookControl}
+      {keepControl}
+      <div>
+        <button type="button" style={button("primary", building)} disabled={building} onClick={() => startBuild(data)}>
+          <Wand2 size={15} /> Build {mName} roster
+        </button>
+      </div>
+      {problemsBox}
+    </section>
+  );
+
   /* ── What the panel shows ── */
   let body;
-  if (status === null) {
-    body = <p style={{ fontSize: 13.5, color: T.inkSoft }}>Checking your allowance…</p>;
-  } else if (status.ok === false) {
-    if (status.reason === "not_on_plan") {
-      body = (
-        <div style={{ ...note("#FBF1DC", "#E7D9B8", "#6B4A0C"), padding: "16px 16px" }}>
-          <div style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
-            Ini is on the Plus and Pro plans
-          </div>
-          <p style={{ margin: "0 0 14px" }}>
-            Write a note in your own words, like "Fathimath is on annual leave 10th to 15th", and Ini
-            fills in the leave and duty requests for you to check. Upgrade this department's plan to use it.
-          </p>
-          {onOpenBilling && (
-            <button type="button" style={button()} onClick={() => { setOpen(false); onOpenBilling(); }}>
-              See plans
-            </button>
-          )}
+  if (building || pendingBuild) {
+    body = (
+      <div style={{ display: "grid", gap: 12 }}>
+        <div role="status" style={{ ...note("#E3F3EF", "#BFE3DA", "#0B6A60"), display: "flex", gap: 9, alignItems: "flex-start" }}>
+          <Wand2 size={17} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>
+            <strong>{pendingBuild ? "Saving your items…" : `Building ${mName}… this can take a few seconds.`}</strong>
+            {" "}The month opens here when it is ready.
+          </span>
         </div>
-      );
-    } else {
-      const msg = status.reason === "not_allowed" ? MSG.notAllowed
-        : status.reason === "no_department" ? MSG.noDept
-          : status.reason === "not_signed_in" ? MSG.signIn
-            : MSG.retry;
-      body = <div style={note(T.mist, T.line, T.inkSoft)}>{msg}</div>;
-    }
+        <p style={{ fontSize: 12, color: T.inkSoft, margin: 0, lineHeight: 1.55 }}>
+          You can close this panel and keep using the rota while Ini works.
+        </p>
+      </div>
+    );
   } else if (saved) {
     const parts = [];
     if (saved.leave) parts.push(plural(saved.leave, "leave period"));
@@ -404,6 +587,7 @@ export default function AssistantPanel({
           <Check size={17} style={{ flexShrink: 0, marginTop: 2 }} />
           <span><strong>Added {parts.join(" and ")}.</strong> You can take it all back with Undo at the top.</span>
         </div>
+        {problemsBox}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {saved.requests > 0 && onOpenRequests && (
             <button type="button" style={button()} onClick={() => { setOpen(false); onOpenRequests(); }}>
@@ -472,9 +656,38 @@ export default function AssistantPanel({
       );
     };
 
+    /* The note asked for the month to be built: one more ticked line, with
+       the look-back and the keep choice under it. */
+    const buildLine = result.build && (canBuild ? (
+      <section>
+        <h3 style={sectionTitle}>Build</h3>
+        <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px", display: "grid", gap: 10 }}>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={buildOn}
+              onChange={(e) => setBuildOn(e.target.checked)}
+              style={{ width: 17, height: 17, marginTop: 2, accentColor: T.lagoon, flexShrink: 0 }}
+            />
+            <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.45 }}>Build the {mName} roster</span>
+          </label>
+          {buildOn && <div style={{ display: "grid", gap: 10, paddingLeft: 27 }}>{lookControl}{keepControl}</div>}
+        </div>
+      </section>
+    ) : (
+      <div style={note(T.mist, T.line, T.inkSoft)}>
+        Your note asks for the roster to be built. Building a whole month uses Smart Roster, which is not on
+        this department's plan.
+      </div>
+    ));
+    const confirmLabel = picked.length
+      ? (willBuild ? `Add ${plural(picked.length, "item")} and build ${mName}` : `Add ${plural(picked.length, "item")}`)
+      : (willBuild ? `Build ${mName}` : "Add 0 items");
+    const canConfirm = picked.length > 0 || willBuild;
+
     body = (
       <div style={{ display: "grid", gap: 16 }}>
-        {!lines.length && (
+        {!lines.length && !result.build && (
           <div style={note(T.mist, T.line, T.inkSoft)}>
             Ini didn't find any leave or duty requests in your note.
           </div>
@@ -494,6 +707,7 @@ export default function AssistantPanel({
             </p>
           </section>
         )}
+        {buildLine}
         {result.unclear.length > 0 && (
           <section>
             <h3 style={sectionTitle}>Not added</h3>
@@ -512,60 +726,102 @@ export default function AssistantPanel({
           position: "sticky", bottom: 0, background: "#fff", padding: "12px 0 4px",
           borderTop: `1px solid ${T.line}`, display: "flex", gap: 8, flexWrap: "wrap",
         }}>
-          {lines.length > 0 && (
-            <button type="button" style={button("primary", !picked.length)} disabled={!picked.length} onClick={confirm}>
-              Add {plural(picked.length, "item")}
+          {(lines.length > 0 || willBuild) && (
+            <button type="button" style={button("primary", !canConfirm)} disabled={!canConfirm} onClick={confirm}>
+              {willBuild && <Wand2 size={15} />} {confirmLabel}
             </button>
           )}
           <button type="button" style={button("ghost")} onClick={() => setResult(null)}>Change my note</button>
         </div>
       </div>
     );
-  } else if (status.remaining === 0) {
-    body = <div style={note(T.mist, T.line, T.inkSoft)}>{MSG.limit}</div>;
   } else {
+    /* The note form, with the month build under it. Building does not need
+       the note allowance, so it stays available when the notes are used up
+       or while the allowance is still being checked. */
+    let noteArea;
+    if (status === null) {
+      noteArea = <p style={{ fontSize: 13.5, color: T.inkSoft, margin: 0 }}>Checking your note allowance…</p>;
+    } else if (status.ok === false) {
+      if (status.reason === "not_on_plan") {
+        noteArea = (
+          <div style={{ ...note("#FBF1DC", "#E7D9B8", "#6B4A0C"), padding: "16px 16px" }}>
+            <div style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+              Ini is on the Plus and Pro plans
+            </div>
+            <p style={{ margin: "0 0 14px" }}>
+              Write a note in your own words, like "Fathimath is on annual leave 10th to 15th", and Ini
+              fills in the leave and duty requests for you to check. Upgrade this department's plan to use it.
+            </p>
+            {onOpenBilling && (
+              <button type="button" style={button()} onClick={() => { setOpen(false); onOpenBilling(); }}>
+                See plans
+              </button>
+            )}
+          </div>
+        );
+      } else {
+        const msg = status.reason === "not_allowed" ? MSG.notAllowed
+          : status.reason === "no_department" ? MSG.noDept
+            : status.reason === "not_signed_in" ? MSG.signIn
+              : MSG.retry;
+        noteArea = <div style={note(T.mist, T.line, T.inkSoft)}>{msg}</div>;
+      }
+    } else if (status.remaining === 0) {
+      noteArea = <div style={note(T.mist, T.line, T.inkSoft)}>{MSG.limit}</div>;
+    } else {
+      noteArea = (
+        <>
+          <label style={{ display: "grid", gap: 5, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
+            Your note
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT))}
+              maxLength={MAX_TEXT}
+              rows={7}
+              disabled={busy}
+              placeholder="Fathimath Easa is on annual leave 10th to 15th. Mariyam needs the 20th off. Ali wants nights on the 3rd and 4th."
+              style={{ fontFamily: "inherit", fontSize: 14, lineHeight: 1.55, padding: "10px 11px",
+                borderRadius: 9, border: `1px solid ${T.line}`, color: T.ink, resize: "vertical", minHeight: 130 }}
+            />
+            <span style={{ justifySelf: "end", fontWeight: 500, fontSize: 11.5 }}>{text.length}/{MAX_TEXT}</span>
+          </label>
+          {error && (
+            <div role="alert" style={{ ...note("#FBEAE7", "#F1B8AE", "#8A2E1E"), display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+              <span>{error}</span>
+            </div>
+          )}
+          <div>
+            <button type="button" style={button("primary", busy || !text.trim())} disabled={busy || !text.trim()} onClick={read}>
+              <Sparkles size={15} /> {busy ? "Reading your note…" : "Read my note"}
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: T.inkSoft, margin: 0, lineHeight: 1.55 }}>
+            Nothing is saved until you check the list Ini makes and press Add.
+          </p>
+        </>
+      );
+    }
+    const showMonth = canBuild || (status !== null && status.ok !== false && status.remaining !== 0);
     body = (
       <div style={{ display: "grid", gap: 12 }}>
-        <label style={{ display: "grid", gap: 5, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
-          Planning for
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            disabled={busy}
-            style={{ fontFamily: "inherit", fontSize: 14, padding: "9px 10px", borderRadius: 9,
-              border: `1px solid ${T.line}`, background: "#fff", color: T.ink, cursor: "pointer" }}
-          >
-            {monthOptions().map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </select>
-        </label>
-        <label style={{ display: "grid", gap: 5, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
-          Your note
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT))}
-            maxLength={MAX_TEXT}
-            rows={7}
-            disabled={busy}
-            placeholder="Fathimath Easa is on annual leave 10th to 15th. Mariyam needs the 20th off. Ali wants nights on the 3rd and 4th."
-            style={{ fontFamily: "inherit", fontSize: 14, lineHeight: 1.55, padding: "10px 11px",
-              borderRadius: 9, border: `1px solid ${T.line}`, color: T.ink, resize: "vertical", minHeight: 130 }}
-          />
-          <span style={{ justifySelf: "end", fontWeight: 500, fontSize: 11.5 }}>{text.length}/{MAX_TEXT}</span>
-        </label>
-        {error && (
-          <div role="alert" style={{ ...note("#FBEAE7", "#F1B8AE", "#8A2E1E"), display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
-            <span>{error}</span>
-          </div>
+        {showMonth && (
+          <label style={{ display: "grid", gap: 5, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
+            Planning for
+            <select
+              value={month}
+              onChange={(e) => { setMonth(e.target.value); setBuildProblems(null); }}
+              disabled={busy || building}
+              style={{ fontFamily: "inherit", fontSize: 14, padding: "9px 10px", borderRadius: 9,
+                border: `1px solid ${T.line}`, background: "#fff", color: T.ink, cursor: "pointer" }}
+            >
+              {monthOptions().map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+            </select>
+          </label>
         )}
-        <div>
-          <button type="button" style={button("primary", busy || !text.trim())} disabled={busy || !text.trim()} onClick={read}>
-            <Sparkles size={15} /> {busy ? "Reading your note…" : "Read my note"}
-          </button>
-        </div>
-        <p style={{ fontSize: 12, color: T.inkSoft, margin: 0, lineHeight: 1.55 }}>
-          Nothing is saved until you check the list Ini makes and press Add.
-        </p>
+        {noteArea}
+        {buildSection}
       </div>
     );
   }
@@ -647,6 +903,22 @@ export default function AssistantPanel({
             </div>
           </aside>
         </>
+      )}
+
+      {/* The built month, full screen. Discard goes back to the panel;
+          Apply writes it and then shows the month on the rota. */}
+      {preview && data && (
+        <MonthPreview
+          proposal={preview}
+          data={data}
+          update={update}
+          T={T}
+          onDiscard={() => { setPreview(null); setOpen(true); }}
+          onApplied={(f, t) => {
+            setPreview(null); setOpen(false); setSaved(null);
+            if (onMonthApplied) onMonthApplied(f, t);
+          }}
+        />
       )}
     </div>
   );
