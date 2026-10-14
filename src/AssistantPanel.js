@@ -907,6 +907,15 @@ export default function AssistantPanel({
         @keyframes ini-in { from { transform: translateX(100%); } to { transform: none; } }
         @keyframes ini-fade { from { opacity: 0; } to { opacity: 1; } }
         @media (max-width: 640px) { .ini-panel { width: 100vw; } }
+        /* iPhones zoom the whole page in when a text box smaller than 16px
+           is tapped, and stay zoomed — so the month preview then opened
+           off the edges of the screen. The app makes every box 12px on a
+           phone; Ini's own boxes stay at 16px so nothing zooms. */
+        @media (max-width: 900px) {
+          .ini-root .ini-panel textarea, .ini-root .ini-panel select, .ini-root .ini-panel input {
+            font-size: 16px !important;
+          }
+        }
         @media (prefers-reduced-motion: reduce) { .ini-panel, .ini-backdrop { animation: none; } }
         @media print { .ini-root { display: none !important; } }
       `}</style>

@@ -64,20 +64,51 @@ const listOf = (items, max = 6) =>
 const PHONE_CSS = `
   .mp-actions-bottom, .mp-summary-toggle { display: none; }
   @media (min-width: 900px) { .mp-sheet { margin: 24px; border-radius: 14px; overflow: hidden; } }
+  /* Phones. Exactly the screen wide and never wider: every box is
+     border-box, nothing may grow past its parent (a grid or flex child
+     otherwise grows to fit its widest content), and only the grid itself
+     scrolls sideways, inside its own box. */
   @media (max-width: 699px) {
-    .mp-overlay { overflow-y: auto; -webkit-overflow-scrolling: touch; display: block !important; }
-    .mp-sheet { display: block !important; min-height: 100%; }
-    .mp-body { overflow: visible !important; padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)) !important; }
+    .mp-overlay, .mp-overlay * { box-sizing: border-box; }
+    .mp-overlay {
+      display: block !important; left: 0 !important; right: 0 !important;
+      width: 100% !important; max-width: 100vw !important;
+      overflow-x: hidden !important; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    }
+    .mp-sheet {
+      display: block !important; width: 100% !important; max-width: 100% !important;
+      min-width: 0 !important; margin: 0 !important; border-radius: 0 !important;
+      min-height: 100%; overflow-x: hidden;
+    }
+    .mp-head { padding: 12px !important; }
+    .mp-head > div { flex: 1 1 100%; min-width: 0; }
+    .mp-title { white-space: normal !important; overflow-wrap: anywhere; font-size: 16px !important; line-height: 1.3; }
+    .mp-body {
+      overflow: visible !important; width: 100%; min-width: 0;
+      grid-template-columns: minmax(0, 1fr) !important;
+      padding: 12px 12px calc(84px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+    .mp-body > * { min-width: 0; max-width: 100%; }
+    .mp-body { overflow-wrap: anywhere; }
+    .mp-gridbox { overflow-wrap: normal; }
     .mp-actions-top { display: none !important; }
     .mp-actions-bottom {
-      display: flex; gap: 8px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
-      background: #fff; border-top: 1px solid #DCE8E6; box-shadow: 0 -4px 16px rgba(20,43,51,0.10);
-      padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+      display: flex; gap: 8px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+      width: 100%; background: #fff; border-top: 1px solid #DCE8E6; box-shadow: 0 -4px 16px rgba(20,43,51,0.10);
+      padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
     }
-    .mp-actions-bottom button { flex: 1; justify-content: center; }
-    .mp-summary-toggle { display: flex; }
+    .mp-actions-bottom button { flex: 1 1 0; min-width: 0; justify-content: center; }
+    .mp-summary-toggle { display: flex; width: 100%; white-space: normal; }
+    .mp-summary-toggle span { overflow-wrap: anywhere; }
     .mp-details:not(.open) { display: none !important; }
-    .mp-gridbox { max-height: none !important; overflow-y: visible !important; }
+    .mp-gridbox { width: 100%; max-width: 100%; max-height: none !important; overflow-x: auto !important; overflow-y: visible !important; }
+    /* The grid cells keep their own size: the app shrinks every table on a
+       phone, which is right for its other tabs but not for this grid. */
+    .mp-overlay .mp-gridbox table.mp-grid td { padding: 0 !important; }
+    .mp-overlay .mp-gridbox table.mp-grid th { padding: 6px 3px !important; }
+    .mp-overlay .mp-gridbox table.mp-grid td.mp-name,
+    .mp-overlay .mp-gridbox table.mp-grid th.mp-name { padding: 0 6px !important; }
+    .mp-gridbox .mp-name-text { white-space: nowrap; }
     .mp-name { min-width: 0 !important; padding: 0 6px !important; }
     .mp-name-text { max-width: 88px; overflow: hidden; text-overflow: ellipsis; }
   }
@@ -290,10 +321,10 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
       <div className="mp-sheet" style={{ background: "#fff", width: "100%", maxWidth: 1400, display: "flex",
         flexDirection: "column", boxShadow: "0 10px 40px rgba(20,43,51,0.25)" }}>
 
-        <header style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between",
+        <header className="mp-head" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between",
           flexWrap: "wrap", padding: "14px 18px", borderBottom: `1px solid ${T.line}` }}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>Roster for {label} · not applied yet</h2>
+            <h2 className="mp-title" style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>Roster for {label} · not applied yet</h2>
             <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 3 }}>
               {proposal.ms != null && `Built in ${(proposal.ms / 1000).toFixed(1)} seconds · `}
               {plural(writes.length, "cell")} will change
@@ -401,7 +432,7 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
             <span className="mp-hover-hint">On a computer, hover over a changed cell to see what it holds now.</span>
           </div>
           <div className="mp-gridbox" style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 10, maxHeight: "70vh" }}>
-            <table style={{ borderCollapse: "separate", borderSpacing: 2, fontSize: 12 }}>
+            <table className="mp-grid" style={{ borderCollapse: "separate", borderSpacing: 2, fontSize: 12 }}>
               <thead>
                 <tr>
                   <th className="mp-name" style={{ ...th, left: 0, zIndex: 3, textAlign: "left", padding: "6px 10px", minWidth: 120 }}>Staff</th>
