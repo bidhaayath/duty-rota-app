@@ -130,7 +130,7 @@ function buildSchema(staff, leaveTypes) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['leave', 'requests', 'unclear', 'build', 'historyFrom'],
+    required: ['leave', 'requests', 'unclear', 'build', 'buildFrom', 'buildTo', 'historyFrom'],
     properties: {
       leave: {
         type: 'array',
@@ -161,6 +161,8 @@ function buildSchema(staff, leaveTypes) {
       },
       unclear: { type: 'array', items: { type: 'string' } },
       build: { type: 'boolean' },
+      buildFrom: { anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] },
+      buildTo: { anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] },
       historyFrom: { anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] },
     },
   };
@@ -187,6 +189,9 @@ function buildPrompt(input, today) {
     '- build: true if the note asks you to build, make, create or generate the roster or rota',
     '  (for example "build the duty roster of November"); otherwise false. You do not build it',
     '  yourself: the app does that after the manager confirms. Never mention building in unclear.',
+    '- buildFrom and buildTo: if the note asks to build only certain dates (for example "build',
+    '  the roster from 15th November to 14th December"), the first and last date. Otherwise',
+    '  null for both, which means the whole planning period.',
     '- historyFrom: if the note says how far back to look at past rosters for fairness, the',
     '  first date to look back from ("only look back from this year" means 1 January of the',
     '  planning period\'s year; "the last 3 months" means the 1st of the month three months',
@@ -332,6 +337,17 @@ function checkAnswer(answer, input, today) {
   }
 
   const build = a.build === true;
+  // A chosen stretch of dates to build. Up to about three months, the most the
+  // app will build in one go; anything odd falls back to the planning period.
+  let buildFrom = null, buildTo = null;
+  if (build && (a.buildFrom != null || a.buildTo != null)) {
+    const f = a.buildFrom, t = a.buildTo;
+    if (inRange(f) && inRange(t) && f <= t && t <= addDaysISO(f, 91)) {
+      buildFrom = f; buildTo = t;
+    } else {
+      unclear.push('The dates to build did not make sense (or covered more than three months), so the whole planning period is used.');
+    }
+  }
   let historyFrom = null;
   if (a.historyFrom != null) {
     // Must be before the planning period, and not absurdly far back.
@@ -342,7 +358,7 @@ function checkAnswer(answer, input, today) {
     }
   }
 
-  return { leave, requests, unclear, build, historyFrom };
+  return { leave, requests, unclear, build, buildFrom, buildTo, historyFrom };
 }
 
 const FAIL_STATUS = {
