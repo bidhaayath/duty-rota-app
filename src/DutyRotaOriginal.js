@@ -5134,10 +5134,11 @@ function HelpTab({ data }) {
 
       <Section title="10. Reports & printing">
         <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many leave days were taken in each category (SL, FRL, ML, Other leave).</p>
-        <p>On any of these, the <strong>Export PDF</strong> button opens an export view with two choices:</p>
+        <p>On any of these, the <strong>Export PDF</strong> button opens an export view with these choices:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 5 }}><strong>Print / Save as PDF</strong> — a clean printable version for your records or the noticeboard. Best done from a computer; wide monthly ranges print in landscape automatically.</li>
-          <li><strong>Save as image</strong> — downloads the same layout as a picture, ready to share on WhatsApp. This is usually the easier option on a phone. Available for ranges up to 30 days.</li>
+          <li style={{ marginBottom: 5 }}><strong>Save as image</strong> — downloads the same layout as a picture, ready to share on WhatsApp. This is usually the easier option on a phone. Available for ranges up to 30 days.</li>
+          <li><strong>Export Excel</strong> — when you export the rota itself, downloads it as a spreadsheet you can open in Excel or Google Sheets.</li>
         </ul>
         <p style={{ marginBottom: 0 }}>Your logo, if you have set one, appears on both.</p>
       </Section>
@@ -5224,7 +5225,7 @@ function HelpTab({ data }) {
         </p>
       </Section>
 
-      <Section title="15. Ini, your rota assistant (Plus and Pro plans, owners and managers)">
+      <Section title="15. Ini, your rota assistant (Plus, Pro and Custom plans, owners and managers)">
         <p style={{ marginTop: 0 }}>Write what you need in plain words, in English or mixed with Dhivehi, and Ini turns it into a checklist. Nothing changes until you press Add.</p>
         <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>What Ini can do:</p>
         <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
@@ -5240,7 +5241,7 @@ function HelpTab({ data }) {
         <p><strong>Instruction or wish?</strong> “Ali night duty on the 9th” writes N into the rota now. “Ali wants nights on the 9th” saves a request that Smart Roster honours when it builds.</p>
         <p><strong>Checking and undoing:</strong> read each line before pressing Add, untick anything you don’t want, and fix the person if needed. Everything you add from one note can be reverted with one Undo. Press Undo before refreshing the page, because a refresh clears the Undo list.</p>
         <p><strong>What Ini won’t do:</strong> billing and plans, members and invites, deleting staff or departments, or changing other departments.</p>
-        <p style={{ marginBottom: 0 }}><strong>Limits:</strong> 50 notes per department per month on paid plans, and 10 during a trial.</p>
+        <p style={{ marginBottom: 0 }}><strong>Limits:</strong> on Plus, Pro and Custom, 50 notes per department each month (10 during a free trial).</p>
       </Section>
 
       <Section title="Still stuck? Message us">

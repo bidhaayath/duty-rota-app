@@ -664,7 +664,7 @@ export default function AssistantPanel({
         noteArea = (
           <div style={{ ...note("#FBF1DC", "#E7D9B8", "#6B4A0C"), padding: "16px 16px" }}>
             <div style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
-              Ini is on the Plus and Pro plans
+              Ini is on the Plus, Pro and Custom plans
             </div>
             <p style={{ margin: "0 0 14px" }}>
               Write a note in your own words, like "Fathimath is on annual leave 10th to 15th", and Ini
