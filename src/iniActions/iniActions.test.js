@@ -57,14 +57,14 @@ describe("reading the server's answer", () => {
   test("actions this panel cannot do yet are mentioned once under Not added", () => {
     const r = readReply({
       actions: [
-        { type: "set_code", staffId: "a", start: "2026-11-02", end: "2026-11-03", codeId: "M", code: "M" },
-        { type: "set_code", staffId: "m", start: "2026-11-02", end: "2026-11-03", codeId: "M", code: "M" },
+        { type: "set_shifts", staffId: "a", shifts: ["night"] },
+        { type: "set_shifts", staffId: "m", shifts: [] },
       ],
       unclear: [],
     }, period);
     expect(r.lines).toHaveLength(0);
     expect(r.unclear).toHaveLength(1);
-    expect(r.unclear[0]).toMatch(/putting duty codes on the rota/);
+    expect(r.unclear[0]).toMatch(/shift setting for a person/);
   });
 
   test("the build is read out separately, and its dates set what counts as outside", () => {

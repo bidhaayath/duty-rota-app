@@ -18,6 +18,7 @@
      check       (line, ctx) -> { blocked?, warnings? }
      apply       (draft, line, { uid, today }) -> draft
      saved       (count) -> "2 leave periods", for the message after saving
+     savedAs     optional: entries sharing it are counted together there
      footnote    optional sentence shown under the group
      tabNote     optional { tabName: sentence } shown while on that tab
      opensRequests  offer "Open Duty Requests" after saving
@@ -39,30 +40,33 @@
    the rota, and an action type that is not listed here is ignored. */
 
 import { addLeave, addRequest } from "./leaveAndRequests";
+import { setCode, clearDays, swapDuties, setNonOfficial } from "./rotaEdits";
 import { build } from "./build";
 import { plural, listWords, staffOf } from "./shared";
 
 export { LEAVE_TYPES } from "./shared";
 
-// Shown in this order; applied settings first, then rota edits, then
-// leave and requests. The build always comes last, after saving.
+/* Shown in this order. Applied: standing settings first, then leave and
+   requests, then changes to the rota — so a duty written on a day sees
+   leave added in the same note and skips it, rather than being written
+   and then hidden under the leave. The build always comes last, after
+   saving. Within a group, lines are applied in the order the note gave
+   them unless an entry says otherwise. */
 export const GROUPS = [
-  { id: "rota", title: "Changes to the rota", applyOrder: 2 },
-  { id: "leave", title: "Leave & requests", applyOrder: 3 },
+  { id: "rota", title: "Changes to the rota", applyOrder: 3 },
+  { id: "leave", title: "Leave & requests", applyOrder: 2 },
   { id: "settings", title: "Standing settings", applyOrder: 1 },
 ];
 
-const CATALOGUE = Object.fromEntries([addLeave, addRequest, build].map((e) => [e.type, e]));
+const CATALOGUE = Object.fromEntries(
+  [addLeave, addRequest, setCode, clearDays, swapDuties, setNonOfficial, build].map((e) => [e.type, e]),
+);
 export const entryFor = (type) => CATALOGUE[type] || null;
 
 /* Actions the server can already suggest but this panel cannot carry out
    yet. Each is mentioned under "Not added", once, rather than vanishing.
    An entry leaves this list when it joins the catalogue. */
 const COMING = {
-  set_code: "putting duty codes on the rota",
-  clear_days: "clearing days on the rota",
-  swap_duties: "swapping duties",
-  set_non_official: "marking non-official days",
   set_shifts: "Smart Roster's shift setting for a person",
   set_offs_per_week: "Smart Roster's off days per week",
   weekly_off: "regular weekly days off",
@@ -177,6 +181,11 @@ export function applyLines(d, lines, { staffEditable = () => true, uid, today })
 // "2 leave periods and 1 duty request", for the lines being saved.
 export function savedWords(lines) {
   const counts = {};
-  lines.forEach((l) => { counts[l.type] = (counts[l.type] || 0) + 1; });
-  return listWords(Object.entries(counts).map(([t, n]) => CATALOGUE[t].saved ? CATALOGUE[t].saved(n) : plural(n, "change")));
+  lines.forEach((l) => {
+    const e = CATALOGUE[l.type];
+    const k = e.savedAs || l.type;
+    counts[k] = counts[k] || { e, n: 0 };
+    counts[k].n += 1;
+  });
+  return listWords(Object.values(counts).map(({ e, n }) => (e.saved ? e.saved(n) : plural(n, "change"))));
 }
