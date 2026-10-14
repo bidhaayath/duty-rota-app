@@ -39,8 +39,9 @@
    deleting staff or departments, other departments. None of them lives in
    the rota, and an action type that is not listed here is ignored. */
 
-import { addLeave, addRequest } from "./leaveAndRequests";
+import { addLeave, addRequest, weeklyOff } from "./leaveAndRequests";
 import { setCode, clearDays, swapDuties, setNonOfficial } from "./rotaEdits";
+import { setShifts, setOffsPerWeek } from "./settings";
 import { build } from "./build";
 import { plural, listWords, staffOf } from "./shared";
 
@@ -55,22 +56,20 @@ export { LEAVE_TYPES } from "./shared";
 export const GROUPS = [
   { id: "rota", title: "Changes to the rota", applyOrder: 3 },
   { id: "leave", title: "Leave & requests", applyOrder: 2 },
-  { id: "settings", title: "Standing settings", applyOrder: 1 },
+  { id: "settings", title: "Standing settings", note: "Standing setting: applies from now on", applyOrder: 1 },
 ];
 
 const CATALOGUE = Object.fromEntries(
-  [addLeave, addRequest, setCode, clearDays, swapDuties, setNonOfficial, build].map((e) => [e.type, e]),
+  [addLeave, addRequest, weeklyOff, setCode, clearDays, swapDuties, setNonOfficial,
+    setShifts, setOffsPerWeek, build].map((e) => [e.type, e]),
 );
 export const entryFor = (type) => CATALOGUE[type] || null;
 
 /* Actions the server can already suggest but this panel cannot carry out
    yet. Each is mentioned under "Not added", once, rather than vanishing.
-   An entry leaves this list when it joins the catalogue. */
-const COMING = {
-  set_shifts: "Smart Roster's shift setting for a person",
-  set_offs_per_week: "Smart Roster's off days per week",
-  weekly_off: "regular weekly days off",
-};
+   An entry leaves this list when it joins the catalogue; every action the
+   server sends today has one, so the list is empty. */
+const COMING = {};
 
 /* The server's actions. Until every server sends `actions`, the older
    reply (leave, requests, build) is turned into the same thing. */

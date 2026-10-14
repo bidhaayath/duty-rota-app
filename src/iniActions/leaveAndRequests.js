@@ -1,6 +1,10 @@
 /* ─────────────── Ini's actions: leave and duty requests ───────────────
    add_leave   { staffId, leaveType, start, end }
    add_request { staffId, date, duty }     saved approved
+   weekly_off  { staffId, weekdays, start, end }
+               one line; saved as an approved off request on every matching
+               date (0 = Sunday). Dates that already have a request, that the
+               person is on leave, or outside their employment, are skipped.
 
    The shapes they save match the Staff tab and RequestsTab.add exactly.
    The checks on a duty request repeat the ones in RequestsTab.js
@@ -8,9 +12,13 @@
    shared so that tab did not have to change. If one set of checks
    changes, change the other to match. */
 
+import { entriesOf } from "../rotaCounts";
+import { employedOn } from "../rosterConfig";
+import { MAX_DAYS, daysIn } from "../monthBuild";
+import { datesFrom } from "./rotaEdits";
 import {
-  isISO, rangeLabel, withWeekday, plural, staffOf, leaveOn, leaveName,
-  LEAVE_LABEL, DUTIES, REQUEST_LABEL, SHIFT_LABELS,
+  isISO, parseISO, rangeLabel, withWeekday, plural, listWords, staffOf, leaveOn, leaveName,
+  LEAVE_LABEL, DUTIES, REQUEST_LABEL, SHIFT_LABELS, WEEKDAYS,
 } from "./shared";
 
 export const addLeave = {
@@ -114,6 +122,106 @@ export const addRequest = {
       enteredBy: "assistant",
       enteredOn: today,
     }];
+    return d;
+  },
+};
+
+/* ── weekly_off ── */
+const OFF_CATS = ["off"];
+const planWeeklyOff = (l, data) => {
+  const person = staffOf(data, l.staffId);
+  const add = [], hasRequest = [], onLeave = [], notEmployed = [], filled = [];
+  datesFrom(l.start, l.end)
+    .filter((date) => l.weekdays.includes(parseISO(date).getDay()))
+    .forEach((date) => {
+      if (!employedOn(person, date)) { notEmployed.push(date); return; }
+      const lp = leaveOn(person, date);
+      if (lp) { onLeave.push({ date, lp }); return; }
+      if ((data.dutyRequests || []).some((r) => r.staffId === l.staffId && r.date === date)) { hasRequest.push(date); return; }
+      add.push(date);
+      // A duty already on the rota wins over a request when building with
+      // "Keep duties already on the rota", so that day will not change.
+      const first = entriesOf((data.cells?.[date] || {})[l.staffId])[0];
+      const code = first && (data.codes || []).find((c) => c.id === first.code);
+      if (first && !(code && OFF_CATS.includes(code.counts))) filled.push(date);
+    });
+  return { add, hasRequest, onLeave, notEmployed, filled };
+};
+const daysWords = (dates) => {
+  const words = dates.slice(0, 3).map(withWeekday);
+  if (dates.length > 3) words.push(`${dates.length - 3} more`);
+  return listWords(words);
+};
+
+export const weeklyOff = {
+  type: "weekly_off",
+  group: "leave",
+  order: 3,
+  people: ["staffId"],
+  footnote: addRequest.footnote,
+  opensRequests: true,
+  saved: (n) => plural(n, "set of weekly days off", "sets of weekly days off"),
+
+  fromServer: (a) => {
+    const weekdays = [...new Set((Array.isArray(a.weekdays) ? a.weekdays : [])
+      .filter((x) => Number.isInteger(x) && x >= 0 && x <= 6))].sort();
+    if (!weekdays.length || !isISO(a.start) || !isISO(a.end) || a.start > a.end || daysIn(a.start, a.end) > MAX_DAYS) return null;
+    return { staffId: a.staffId, weekdays, start: a.start, end: a.end };
+  },
+  span: (l) => [l.start, l.end],
+  describe: (l, { sim }) => {
+    const p = planWeeklyOff(l, sim);
+    const why = {};
+    p.hasRequest.forEach((d) => { why[d] = "skipped — already has a request"; });
+    p.onLeave.forEach(({ date, lp }) => { why[date] = `skipped — on ${leaveName(lp).toLowerCase()}`; });
+    p.notEmployed.forEach((d) => { why[d] = "skipped — not employed here then"; });
+    return {
+      what: `Off every ${listWords(l.weekdays.map((d) => WEEKDAYS[d]))}`,
+      when: `${plural(p.add.length, "day")}, ${rangeLabel(l.start, l.end)}`,
+      detailsLabel: "Show the days",
+      details: datesFrom(l.start, l.end)
+        .filter((date) => l.weekdays.includes(parseISO(date).getDay()))
+        .map((date) => (why[date] ? `${withWeekday(date)}: ${why[date]}` : withWeekday(date))),
+    };
+  },
+
+  check: (l, { data, sim }) => {
+    const who = staffOf(sim, l.staffId);
+    const p = planWeeklyOff(l, sim);
+    const warnings = [];
+    if (p.hasRequest.length) {
+      warnings.push(`skips ${plural(p.hasRequest.length, "day")} that already ${p.hasRequest.length === 1 ? "has" : "have"} a request (${daysWords(p.hasRequest)})`);
+    }
+    const byLeave = {};
+    p.onLeave.forEach(({ date, lp }) => { const k = leaveName(lp).toLowerCase(); (byLeave[k] = byLeave[k] || []).push(date); });
+    Object.entries(byLeave).forEach(([name, dates]) => {
+      warnings.push(`skips ${plural(dates.length, "day")} — ${who.name} is on ${name} (${daysWords(dates)})`);
+    });
+    if (p.notEmployed.length) {
+      warnings.push(`skips ${plural(p.notEmployed.length, "day")} — not employed here then (${daysWords(p.notEmployed)})`);
+    }
+    if (p.filled.length) {
+      warnings.push(`${p.filled.length} of these days already ${p.filled.length === 1 ? "has a duty" : "have duties"} on the rota, so the rota will not change on ${p.filled.length === 1 ? "it" : "them"} unless you build without "Keep duties already on the rota" (${daysWords(p.filled)})`);
+    }
+    if ((data.rosterRules?.skipStaff || []).includes(l.staffId)) {
+      warnings.push("skipped in Smart Roster, so the generator will not touch this week for them");
+    }
+    if (!p.add.length) return { blocked: "Nothing to add: every matching day is skipped.", warnings };
+    return { warnings };
+  },
+
+  apply: (d, l, { uid, today }) => {
+    const p = planWeeklyOff(l, d);
+    if (!p.add.length) return d;
+    d.dutyRequests = [...(d.dutyRequests || []), ...p.add.map((date) => ({
+      id: uid(),
+      staffId: l.staffId,
+      date,
+      category: "off",
+      approved: true,           // the manager confirming is the approval
+      enteredBy: "assistant",
+      enteredOn: today,
+    }))];
     return d;
   },
 };

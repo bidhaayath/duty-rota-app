@@ -3,8 +3,11 @@
    duties, and a few small readings of the rota that more than one action
    needs. Pure functions only. */
 
+import { mergeRules } from "../rosterConfig";
+import { SHIFTS } from "../rosterEngine";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export const isISO = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 export const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
@@ -44,4 +47,10 @@ export const SHIFT_LABELS = { morning: "morning", afternoon: "afternoon", evenin
 export const staffOf = (data, id) => (data.staff || []).find((s) => s.id === id) || null;
 export const leaveOn = (person, date) =>
   (person?.leavePeriods || []).find((lp) => date >= lp.start && date <= lp.end) || null;
-export const leaveName = (p) => (p.type === "other" && p.label ? p.label : (LEAVE_LABEL[p.type] || "leave"));
+/* The shifts the ward runs: those with a minimum or maximum in Smart
+   Roster's coverage, the settings the generator itself works from. */
+export const wardShifts = (data) => {
+  const cov = mergeRules((data && data.rosterRules) || {}).coverage;
+  return SHIFTS.filter((sh) => (cov[sh]?.min || 0) > 0 || (cov[sh]?.max || 0) > 0);
+};
+export const leaveName =(p) => (p.type === "other" && p.label ? p.label : (LEAVE_LABEL[p.type] || "leave"));

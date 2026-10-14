@@ -54,17 +54,19 @@ describe("reading the server's answer", () => {
     expect(r.unclear).toEqual(["Fathimath could be two people."]);
   });
 
-  test("actions this panel cannot do yet are mentioned once under Not added", () => {
+  test("every action the server sends has an entry; anything else is ignored without a note", () => {
     const r = readReply({
       actions: [
         { type: "set_shifts", staffId: "a", shifts: ["night"] },
-        { type: "set_shifts", staffId: "m", shifts: [] },
+        { type: "set_offs_per_week", min: 2, max: null },
+        { type: "weekly_off", staffId: "m", weekdays: [5, 6], start: "2026-11-01", end: "2026-11-30" },
+        { type: "invite_member", email: "x@example.com" },
+        { type: "change_plan", plan: "pro" },
       ],
       unclear: [],
     }, period);
-    expect(r.lines).toHaveLength(0);
-    expect(r.unclear).toHaveLength(1);
-    expect(r.unclear[0]).toMatch(/shift setting for a person/);
+    expect(r.lines.map((l) => l.type)).toEqual(["set_shifts", "set_offs_per_week", "weekly_off"]);
+    expect(r.unclear).toEqual([]);
   });
 
   test("the build is read out separately, and its dates set what counts as outside", () => {

@@ -616,6 +616,7 @@ export default function AssistantPanel({
           return (
             <section key={g.id}>
               <h3 style={sectionTitle}>{g.title}</h3>
+              {g.note && <p style={{ fontSize: 12, color: T.inkSoft, margin: "-4px 0 8px", lineHeight: 1.5 }}>{g.note}</p>}
               <div style={{ display: "grid", gap: 8 }}>{inGroup.map(renderLine)}</div>
               {footnotes.map((f) => (
                 <p key={f} style={{ fontSize: 12, color: T.inkSoft, margin: "8px 0 0", lineHeight: 1.5 }}>{f}</p>
