@@ -13,8 +13,15 @@ import {
 import supabase from "./supabaseClient";
 import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
+import AssistantPanel from "./AssistantPanel";
 import { exportRotaToExcel } from "./rotaExcel";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
+/* The rota's counting rules (cells, leave, employment, totals and coverage)
+   live in rotaCounts.js so Ini's month preview counts the same way. */
+import {
+  FRIDAY, DUTY_CATS, isNonOff, leaveOn, codeByIdOf, entriesOf, cellEntries, isEmployedOn,
+  weekTotalsFor, dayCountFor,
+} from "./rotaCounts";
 import Dashboard from "./Dashboard";
 import InviteDialog from "./InviteDialog";
 import StaffAccessCell, { useOrgAccess } from "./StaffAccessCell";
@@ -274,7 +281,6 @@ const T = {
   sand: "#F4B860", dusk: "#6C7BD9", night: "#2E3358",
 };
 
-const FRIDAY = 5;
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const LEAVE_STYLES = {
   annual:       { label: "Annual Leave",     abbrev: "AL",  bg: "#D8EEE9", fg: "#0B6A60", icon: Plane },
@@ -288,7 +294,6 @@ const styleFor = (period) => {
   const base = LEAVE_STYLES[period.type] || LEAVE_STYLES.other;
   return period.type === "other" && period.label ? { ...base, label: period.label } : base;
 };
-const DUTY_CATS = ["morning", "afternoon", "evening", "night", "other", "release"];
 // Which leave column a code feeds. "leave" is the catch-all that feeds the
 // Other leave column; sl/frl/ml feed their own, so a code like N/FRL can be
 // counted as FRL without being named "FRL". Newer codes say so explicitly via `counts`.
@@ -379,49 +384,7 @@ const uniqueLabel = (staff, pool) => {
 // display exactly as they always have.
 const displayName = (staff) => (staff.designation ? `${staff.name} — ${staff.designation}` : staff.name);
 
-/* ─────────────────── Data helpers ─────────────────── */
-const isNonOff = (data, date) =>
-  (data.fridayRule && parseD(date).getDay() === FRIDAY) || data.nonOfficial.includes(date);
-// All leave periods (annual, maternity, pre-maternity, emergency, other) count
-// calendar days: every day inside the period counts, including Fridays,
-// Saturdays, and non-official days.
-const leaveOn = (staff, date) => (staff.leavePeriods || []).find((p) => date >= p.start && date <= p.end) || null;
-const codeByIdOf = (data) => (id) => data.codes.find((c) => c.id === id);
 
-/* ── What a cell can hold ────────────────────────────────────────────
-   Historically a cell was one duty code id:
-       cells[date][staffId] = "abc123"
-   To support a post alongside a duty, and two duties on one day (resort,
-   guesthouse and security rotas), it may also be a list:
-       cells[date][staffId] = [{ code: "abc", post: "p1" },
-                                { code: "xyz", post: "p2" }]
-
-   `post` holds the POST ID from data.posts, never the post name. Storing the
-   id means renaming a post updates every rota that used it; storing the name
-   would leave last month reading "Front Gate" after it became "Main Gate",
-   which looks like a bug and cannot be corrected afterwards.
-
-   BOTH SHAPES STAY VALID FOREVER. Existing rotas are never migrated —
-   rewriting 800 accounts' saved data is exactly the kind of operation
-   that loses someone's roster. Instead every reader goes through
-   entriesOf() below, so a plain string and a list behave identically.
-
-   COUNTING RULES, decided with the shift rules in mind:
-     - Anything measuring COVERAGE counts duties. Two duties in a day
-       means the unit was covered twice, so both count.
-     - Anything measuring a PERSON counts days. Working a split duty is
-       still one day worked, so "days on duty" and non-official day
-       payment count the date once, however many duties are in it.        */
-const entriesOf = (raw) => {
-  if (!raw) return [];
-  if (typeof raw === "string") return [{ code: raw, post: "" }];
-  if (Array.isArray(raw)) {
-    return raw.filter((e) => e && e.code)
-              .map((e) => ({ code: e.code, post: e.post || "" }));
-  }
-  return [];
-};
-const cellEntries = (data, date, staffId) => entriesOf((data.cells?.[date] || {})[staffId]);
 /* The first duty in a cell. For anything that still shows or compares a
    single code, this is the one it means. */
 const firstCodeId = (data, date, staffId) => {
@@ -452,14 +415,6 @@ const EXCHANGE_BY = {
   manager: { label: "Changed by manager",  short: "Manager", icon: Briefcase, color: "#A5731B", bg: "#FBF1DC" },
 };
 
-/* ── Employment window (start/end dates are INCLUSIVE) ────────────────
-   startDate empty = always employed from the beginning.
-   endDate   empty = still employed (active staff).                     */
-const isEmployedOn = (staff, date) => {
-  if (staff.startDate && date < staff.startDate) return false;
-  if (staff.endDate && date > staff.endDate) return false;
-  return true;
-};
 // Is this person employed at any point inside [from, to]?
 const employedInRange = (staff, from, to) => {
   if (staff.startDate && staff.startDate > to) return false;
@@ -472,36 +427,6 @@ const isFormer = (staff) => !!staff.endDate && staff.endDate < dstr(new Date());
 const staffForDays = (data, days) =>
   data.staff.filter((s) => days.some((d) => isEmployedOn(s, d)));
 
-const weekTotalsFor = (data, staff, days) => {
-  const codeById = codeByIdOf(data);
-  const t = { morning: 0, afternoon: 0, evening: 0, night: 0, other: 0, release: 0, off: 0, nonOfficialDuty: 0 };
-  days.forEach((date) => {
-    if (!isEmployedOn(staff, date)) return;
-    if (leaveOn(staff, date)) return;
-    const codes = cellEntries(data, date, staff.id).map((e) => codeById(e.code)).filter(Boolean);
-    if (!codes.length) return;
-    // Shift columns count each duty: a split day adds to M and to E.
-    codes.forEach((code) => { if (code.counts in t) t[code.counts]++; });
-    // Non-official day payment counts the DAY, once, however many duties.
-    if (isNonOff(data, date) && codes.some((c) => DUTY_CATS.includes(c.counts))) t.nonOfficialDuty++;
-  });
-  return t;
-};
-// Unit coverage counts exclude release duty (staff is on duty elsewhere).
-// Historical accuracy: counts whoever was EMPLOYED on that date, so past
-// weeks keep the correct coverage even after someone leaves.
-const dayCountFor = (data, date, cat) => {
-  const codeById = codeByIdOf(data);
-  return data.staff.reduce((a, s) => {
-    if (!isEmployedOn(s, date)) return a;
-    if (leaveOn(s, date)) return a;
-    // Coverage counts duties, so someone doing M and E appears in both.
-    const n = cellEntries(data, date, s.id)
-      .map((e) => codeById(e.code))
-      .filter((code) => code?.counts === cat).length;
-    return a + n;
-  }, 0);
-};
 // Only staff employed at some point in [from, to] appear in records/stats
 const recordsFor = (data, from, to) => {
   const codeById = codeByIdOf(data);
@@ -2133,6 +2058,23 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
+
+      {/* Ini, the rota assistant. Shown only where this person can edit —
+          the same three checks that switch Undo off. */}
+      <AssistantPanel
+        visible={!!deptId && !viewOnlyRole && !editBlocked && !currentDeptLocked}
+        deptId={deptId} data={data} update={update} staffEditable={staffEditable}
+        currentTab={tab} onOpenBilling={onOpenBilling} onOpenRequests={() => setTab("requests")}
+        T={T} uid={uid} dstr={dstr}
+        // Building uses Smart Roster, so it follows the same plan check as
+        // the Smart Roster tab. After Apply, the dates built are shown on
+        // the rota — the first 45 of them, the most the monthly view holds.
+        canBuild={features?.smart_roster !== false}
+        onMonthApplied={(start, end) => {
+          const last = addDays(start, 44);
+          setMonthRange({ start, end: end > last ? last : end }); setRotaView("monthly"); setTab("rota");
+        }}
+      />
     </div>
   );
 }
@@ -5192,10 +5134,11 @@ function HelpTab({ data }) {
 
       <Section title="10. Reports & printing">
         <p style={{ marginTop: 0 }}>The <strong>Staff Records</strong> tab shows totals per person for a date range you choose. The <strong>Statistics</strong> tab shows charts — including how many staff are on each type of leave, and how many leave days were taken in each category (SL, FRL, ML, Other leave).</p>
-        <p>On any of these, the <strong>Export PDF</strong> button opens an export view with two choices:</p>
+        <p>On any of these, the <strong>Export PDF</strong> button opens an export view with these choices:</p>
         <ul style={{ margin: "6px 0", paddingLeft: 20 }}>
           <li style={{ marginBottom: 5 }}><strong>Print / Save as PDF</strong> — a clean printable version for your records or the noticeboard. Best done from a computer; wide monthly ranges print in landscape automatically.</li>
-          <li><strong>Save as image</strong> — downloads the same layout as a picture, ready to share on WhatsApp. This is usually the easier option on a phone. Available for ranges up to 30 days.</li>
+          <li style={{ marginBottom: 5 }}><strong>Save as image</strong> — downloads the same layout as a picture, ready to share on WhatsApp. This is usually the easier option on a phone. Available for ranges up to 30 days.</li>
+          <li><strong>Export Excel</strong> — when you export the rota itself, downloads it as a spreadsheet you can open in Excel or Google Sheets.</li>
         </ul>
         <p style={{ marginBottom: 0 }}>Your logo, if you have set one, appears on both.</p>
       </Section>
@@ -5280,6 +5223,25 @@ function HelpTab({ data }) {
           Non-official duties are shown separately because they carry extra pay — a small gap in one
           week becomes a large one by December.
         </p>
+      </Section>
+
+      <Section title="15. Ini, your rota assistant (Plus, Pro and Custom plans, owners and managers)">
+        <p style={{ marginTop: 0 }}>Write what you need in plain words, in English or mixed with Dhivehi, and Ini turns it into a checklist. Nothing changes until you press Add.</p>
+        <p style={{ marginBottom: 4, fontWeight: 700, color: T.ink }}>What Ini can do:</p>
+        <ul style={{ margin: "0 0 10px", paddingLeft: 20 }}>
+          <li style={{ marginBottom: 5 }}><strong>Leave:</strong> “Ali annual leave 10 to 12 November”</li>
+          <li style={{ marginBottom: 5 }}><strong>Put a duty or code in the rota:</strong> “Ali night duty on 9 November”, “Fathimath SL on the 16th”</li>
+          <li style={{ marginBottom: 5 }}><strong>Requests for Smart Roster:</strong> “Aishath wants off on the 15th”</li>
+          <li style={{ marginBottom: 5 }}><strong>Clear or swap:</strong> “Clear Mohamed 18 to 20 Nov”, “Swap Aminath and Nasha on the 21st”</li>
+          <li style={{ marginBottom: 5 }}><strong>Non-official days:</strong> “Make 24 November non-official”</li>
+          <li style={{ marginBottom: 5 }}><strong>Weekly offs:</strong> “Aminath off every Friday and Saturday in November”</li>
+          <li style={{ marginBottom: 5 }}><strong>Settings:</strong> “Nasha only does nights”, “At least 2 offs a week”</li>
+          <li><strong>Build:</strong> “Build the December roster”</li>
+        </ul>
+        <p><strong>Instruction or wish?</strong> “Ali night duty on the 9th” writes N into the rota now. “Ali wants nights on the 9th” saves a request that Smart Roster honours when it builds.</p>
+        <p><strong>Checking and undoing:</strong> read each line before pressing Add, untick anything you don’t want, and fix the person if needed. Everything you add from one note can be reverted with one Undo. Press Undo before refreshing the page, because a refresh clears the Undo list.</p>
+        <p><strong>What Ini won’t do:</strong> billing and plans, members and invites, deleting staff or departments, or changing other departments.</p>
+        <p style={{ marginBottom: 0 }}><strong>Limits:</strong> on Plus, Pro and Custom, 50 notes per department each month (10 during a free trial).</p>
       </Section>
 
       <Section title="Still stuck? Message us">

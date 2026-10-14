@@ -28,7 +28,7 @@ const WHATSAPP = '9607666261'; // +960 Maldives
    plan_limits, since the database is the price source of truth.        */
 const featureFlags = {
   smartRoster: true,
-  employeeAccess: false,
+  employeeAccess: true,
   premiumLaunchPricing: false,
 };
 
@@ -64,7 +64,7 @@ const PLAN_COPY = {
 
 const INCLUDED_IN_ALL = [
   'Weekly and monthly rota views',
-  'PDF and image export',
+  'PDF, image and Excel export',
   'Your own duty codes',
   'Staff records and leave tracking',
   'Duty exchange tracking',
@@ -289,13 +289,25 @@ export default function Billing({ onExit, email }) {
      of what was paid for.                                              */
   const faqs = [
     ['Who can edit my duty rota?',
-      'You can, as the account owner. Once invitations launch you will also be able to make any of your staff a manager for a department, and they can build and publish that department\'s rota. There is no limit on how many managers you appoint.'],
+      'You can, as the account owner, and so can anyone you make a manager for a department. Managers can build and publish that department\'s rota. You can appoint as many managers as you need.'],
     ['What is employee access?',
-      'Employee access allows staff to log in and view the latest published duty rota that is relevant to them. It is being rolled out now and will be included in every plan, including Basic.'],
+      'Employee access lets staff sign in and see the duty rota. It is included in every plan, including Basic.'],
     ['Is multi-user access available now?',
-      'It is being rolled out now. The groundwork is live and email invitations are the last piece; we will let you know as soon as you can invite your team.'],
+      'Yes. Put a staff member\'s email on their row, press Invite and send them the link, as an employee who can view the rota or a manager who can edit it. Your plan is limited by departments, not by people (Basic allows up to 20 staff).'],
     ['What is Smart Roster?',
       'Smart Roster automates the repetitive parts of building a duty rota while leaving the final schedule in your control. It is included with Plus, Pro and Custom. Basic and Standard use manual rota creation.'],
+    ['What is Ini?',
+      'Ini is an AI rota assistant on the Plus, Pro and Custom plans. Write what you need in plain words, such as leave, duty changes, swaps, weekly offs or building a month, and Ini turns it into a checklist for you to confirm.'],
+    ['Will Ini change my rota without asking?',
+      'No. Ini only suggests changes. Nothing is saved until you press Add, and everything from one note can be reverted with one Undo.'],
+    ['Who can use Ini?',
+      'Owners and managers of departments on Plus, Pro or Custom. Employees can’t use it.'],
+    ['How many notes can I use?',
+      '50 notes per department each month on paid plans, and 10 during a free trial. The count resets on the 1st of each month (Maldives time).'],
+    ['What happens to the information I send to Ini?',
+      'Your note, staff names on that rota, duty codes and dates go to our AI provider, Anthropic, to be read. Anthropic does not train its models on it, and deletes it within 30 days. We never send email addresses, phone numbers or payment details. See our Privacy Policy for details.'],
+    ['What if Ini gets something wrong?',
+      'Untick the line or change the person before pressing Add. If it’s already added, press Undo once. Do this before refreshing the page.'],
     ['How does annual billing work?',
       'Annual plans are charged once for the full year. The displayed monthly amount is the monthly equivalent of the annual charge.'],
     ['Which currency am I charged in?',
@@ -411,7 +423,7 @@ export default function Billing({ onExit, email }) {
               p.max_staff == null ? 'Unlimited staff members' : `Up to ${p.max_staff} staff members`,
               `${p.max_departments == null ? 'Unlimited' : p.max_departments} department${p.max_departments === 1 ? '' : 's'}`,
               'Manual rota creation',
-              'PDF and image export',
+              'PDF, image and Excel export',
               ...(featureFlags.employeeAccess && copy.employeeAccessFuture ? ['Unlimited employee viewing access'] : []),
               ...(featureFlags.smartRoster && copy.smartRosterFuture ? ['Smart Roster automation'] : []),
               ...(p.has_company_logo ? ['Your own company logo'] : []),
@@ -517,13 +529,11 @@ export default function Billing({ onExit, email }) {
 
         {/* 5 — Features in development banner */}
         <div style={{ ...card, background: T.devBg, borderStyle: 'dashed' }}>
-          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>Multi-user access is rolling out now</div>
+          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>Your whole team can sign in</div>
           <p style={{ fontSize: 13, color: T.soft, lineHeight: 1.7, margin: 0 }}>
-            Your team will be able to sign in and see the duty rota that applies to them, instead of
-            waiting for an exported file. Every plan includes it, Basic included, and there is no cap
-            on how many people you add — your plan is limited by departments, not by people. You will
-            also be able to make any staff member a manager for a department, so they can build and
-            publish its rota. The groundwork is live and email invitations are the last piece.
+            Invite staff to see the duty rota themselves, instead of waiting for an exported file.
+            Every plan includes it, Basic included. You can also make a staff member a manager for a
+            department, so they can build and publish its rota.
           </p>
         </div>
 
@@ -584,10 +594,11 @@ export default function Billing({ onExit, email }) {
               {[
                 ['Staff members', '20', 'Unlimited', 'Unlimited', 'Unlimited', 'Unlimited'],
                 ['Departments', '1', '1', '6', '12', 'Unlimited'],
-                ['Employee viewing access', 'Rolling out', 'Rolling out', 'Rolling out', 'Rolling out', 'Rolling out'],
+                ['Employee viewing access', 'Included', 'Included', 'Included', 'Included', 'Included'],
                 ['Manual rota creation', 'Included', 'Included', 'Included', 'Included', 'Included'],
-                ['PDF and image export', 'Included', 'Included', 'Included', 'Included', 'Included'],
+                ['PDF, image and Excel export', 'Included', 'Included', 'Included', 'Included', 'Included'],
                 ['Smart Roster', 'Not included', 'Not included', 'Included', 'Included', 'Included'],
+                ['Ini AI assistant', 'Not included', 'Not included', '✓ 50 notes / dept / month', '✓ 50 notes / dept / month', '✓ 50 notes / dept / month'],
                 ['Custom company logo', 'Not included', 'Not included', 'Included', 'Included', 'Included'],
                 ['Support', 'Standard', 'Standard', 'Standard', 'Priority', 'Priority'],
                 ['Dedicated setup help', 'Not included', 'Not included', 'Not included', 'Not included', 'Included'],
@@ -597,8 +608,8 @@ export default function Billing({ onExit, email }) {
                   {cells.map((c, i) => (
                     <td key={i} style={{
                       padding: '9px 12px', borderBottom: `1px solid ${T.line}`, textAlign: 'center',
-                      color: c === 'Included' ? T.teal : (c === 'In development' || c === 'Rolling out') ? T.warn : c === 'Not included' ? T.faint : T.ink,
-                      fontWeight: c === 'Included' ? 700 : 400, whiteSpace: 'nowrap',
+                      color: (c === 'Included' || c.startsWith('✓')) ? T.teal : (c === 'In development' || c === 'Rolling out') ? T.warn : c === 'Not included' ? T.faint : T.ink,
+                      fontWeight: (c === 'Included' || c.startsWith('✓')) ? 700 : 400, whiteSpace: 'nowrap',
                     }}>
                       {c === 'Included' ? '✓ Included' : c}
                     </td>
@@ -616,6 +627,16 @@ export default function Billing({ onExit, email }) {
             Smart Roster takes the repetitive work out of building a duty rota and leaves the final
             schedule in your hands — nothing is published until you say so. It is included with
             Plus, Pro and Custom plans.
+          </p>
+        </div>
+
+        {/* 9b — Ini section */}
+        <div style={{ ...card }}>
+          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>Ini, your AI rota assistant</div>
+          <p style={{ fontSize: 13, color: T.soft, lineHeight: 1.7, margin: 0 }}>
+            Write what you need in plain words, like leave, duty changes, swaps, weekly offs or
+            building a month, and Ini turns it into a checklist you confirm. One Undo reverts it all.
+            Included with Plus, Pro and Custom.
           </p>
         </div>
 
