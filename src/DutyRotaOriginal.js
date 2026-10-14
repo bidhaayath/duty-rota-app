@@ -13,6 +13,7 @@ import {
 import supabase from "./supabaseClient";
 import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
+import AssistantPanel from "./AssistantPanel";
 import { exportRotaToExcel } from "./rotaExcel";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 import Dashboard from "./Dashboard";
@@ -2133,6 +2134,15 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
+
+      {/* Ini, the rota assistant. Shown only where this person can edit —
+          the same three checks that switch Undo off. */}
+      <AssistantPanel
+        visible={!!deptId && !viewOnlyRole && !editBlocked && !currentDeptLocked}
+        deptId={deptId} data={data} update={update} staffEditable={staffEditable}
+        currentTab={tab} onOpenBilling={onOpenBilling} onOpenRequests={() => setTab("requests")}
+        T={T} uid={uid} dstr={dstr}
+      />
     </div>
   );
 }
