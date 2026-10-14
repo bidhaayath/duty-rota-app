@@ -529,7 +529,7 @@ export default function AssistantPanel({
   /* ── The build controls, shared by the note form and the checklist ── */
   const lookControl = (
     <label style={{ display: "grid", gap: 5, fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
-      <span>{lookbackSentence(lookOpt, month)}</span>
+      <span>{lookbackSentence(lookOpt, from)}</span>
       <select
         value={lookOpt ? lookOpt.id : "usual"}
         onChange={(e) => setLookChoice(e.target.value)}

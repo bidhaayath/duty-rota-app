@@ -112,7 +112,11 @@ const PHONE_CSS = `
     .mp-name { min-width: 0 !important; padding: 0 6px !important; }
     .mp-name-text { max-width: 88px; overflow: hidden; text-overflow: ellipsis; }
   }
-  @media (hover: none) { .mp-hover-hint { display: none !important; } }
+  /* Touch screens cannot hover. Some Android phones still report that they
+     can, so a finger-sized pointer or a phone-width screen hides it too. */
+  @media (hover: none), (pointer: coarse), (any-pointer: coarse), (max-width: 699px) {
+    .mp-hover-hint { display: none !important; }
+  }
 `;
 
 export default function MonthPreview({ proposal, data, update, T, onDiscard, onApplied }) {

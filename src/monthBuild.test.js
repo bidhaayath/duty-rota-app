@@ -224,3 +224,53 @@ describe("any dates, not only a month", () => {
     expect(fin.shortfalls.every((s) => s.date >= "2026-10-07" && s.date <= "2026-10-20")).toBe(true);
   }, 60000);
 });
+
+describe("the look-back, for a month and for chosen dates", () => {
+  // Every day of 2026 filled, so the history handed to the
+  // engine shows exactly where the look-back starts and ends.
+  const fullData = () => {
+    const staff = [{ id: "a", name: "Ali" }, { id: "b", name: "Mariyam" }];
+    const cells = {};
+    datesBetween("2026-01-01", "2026-12-31").forEach((d, i) => { cells[d] = { a: CYCLE[i % 7], b: CYCLE[(i + 3) % 7] }; });
+    return { staff, codes: CODES, cells, weekStartsOn: 0 };
+  };
+  const CASES = [
+    // [period, choice, look-back starts, sentence]
+    ["2026-11-01..2026-11-30", "usual", "2026-10-02", "Fairness based on rosters from 2 Oct to 31 Oct."],
+    ["2026-11-01..2026-11-30", "year", "2026-01-01", "Fairness based on rosters from 1 Jan to 31 Oct."],
+    ["2026-11-01..2026-11-30", "3m", "2026-08-01", "Fairness based on rosters from 1 Aug to 31 Oct."],
+    ["2026-11-01..2026-11-30", "6m", "2026-05-01", "Fairness based on rosters from 1 May to 31 Oct."],
+    ["2026-11-14..2026-12-15", "usual", "2026-10-15", "Fairness based on rosters from 15 Oct to 13 Nov."],
+    ["2026-11-14..2026-12-15", "year", "2026-01-01", "Fairness based on rosters from 1 Jan to 13 Nov."],
+    ["2026-11-14..2026-12-15", "3m", "2026-08-01", "Fairness based on rosters from 1 Aug to 13 Nov."],
+    ["2026-11-14..2026-12-15", "6m", "2026-05-01", "Fairness based on rosters from 1 May to 13 Nov."],
+  ];
+
+  test.each(CASES)("%s, %s: the sentence and what the engine is given", (period, choice, start, sentence) => {
+    const [from, to] = period.split("..");
+    const data = fullData();
+    const opt = lookbackOptions(from, { lookbackDays: 30 }, null).find((o) => o.id === choice);
+    expect(opt.from).toBe(start);
+    expect(lookbackSentence(opt, from)).toBe(sentence);
+
+    // The engine's history runs from the chosen start to the day before the
+    // first day it builds; the days from there to the period are locked,
+    // so together they reach the day before the period, as the sentence says.
+    const prep = prepareBuild({ data, from, to, lookFrom: opt.from });
+    const hist = Object.keys(prep.config.history.cells).map((k) => k.slice(-10)).sort();
+    expect(hist[0]).toBe(start);
+    const dayBefore = (iso) => { const [y, m, d] = iso.split("-").map(Number); const x = new Date(y, m - 1, d - 1);
+      return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+    expect(hist[hist.length - 1]).toBe(dayBefore(prep.buildFrom));
+    datesBetween(prep.buildFrom, dayBefore(from)).forEach((d) => {
+      expect(prep.config.requests.some((r) => r.staffId === "a" && r.date === d)).toBe(true);
+    });
+  });
+
+  test("never prints a broken date, whatever it is given", () => {
+    const opt = { id: "usual", from: "2026-10-15" };
+    expect(lookbackSentence(opt, "2026-11")).toBe("Fairness based on rosters from 15 Oct 2026.");
+    expect(lookbackSentence(opt, undefined)).not.toMatch(/NaN|undefined/);
+    expect(lookbackSentence({ id: "usual", from: null }, "2026-11-14")).toBe("Fairness does not look back at earlier rosters.");
+  });
+});

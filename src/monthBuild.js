@@ -133,8 +133,12 @@ export const lookbackOptions = (from, rosterRules, historyFrom) => {
 export const lookbackIdFor = (options, historyFrom) =>
   (historyFrom && options.find((o) => o.from === historyFrom)?.id) || "usual";
 
+// `from` is the first day of the period ("YYYY-MM-DD"); the look-back ends
+// the day before it.
 export const lookbackSentence = (option, from) => {
   if (!option || !option.from) return "Fairness does not look back at earlier rosters.";
+  // Never print a broken date: without a real first day, say only where it starts.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "")) return `Fairness based on rosters from ${prettyDay(option.from)} ${option.from.slice(0, 4)}.`;
   const lastDay = shiftISO(from, -1);
   const y1 = option.from.slice(0, 4), y2 = lastDay.slice(0, 4);
   return `Fairness based on rosters from ${prettyDay(option.from)}${y1 !== y2 ? ` ${y1}` : ""} to ${prettyDay(lastDay)}${y1 !== y2 ? ` ${y2}` : ""}.`;

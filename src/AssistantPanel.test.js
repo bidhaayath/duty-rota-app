@@ -92,3 +92,62 @@ test("a note that asks to build particular dates switches to those dates", async
   const ali = config.staff.find((s) => s.id === "a");
   expect(ali.leavePeriods.some((p) => p.start === "2026-12-10" && p.end === "2026-12-12")).toBe(true);
 });
+
+describe("the look-back line and what the build receives", () => {
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const D = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+  const add = (s, n) => { const d = D(s); d.setDate(d.getDate() + n); return iso(d); };
+  const fmt = (s) => `${D(s).getDate()} ${MON[D(s).getMonth()]}`;
+  // Worked out here independently of the app's own code.
+  const expectedStart = (first, choice) => {
+    const d = D(first);
+    if (choice === "usual") return add(first, -30);
+    if (choice === "year") return `${d.getFullYear()}-01-01`;
+    return iso(new Date(d.getFullYear(), d.getMonth() - (choice === "3m" ? 3 : 6), 1));
+  };
+  const expectedSentence = (start, first) => {
+    const end = add(first, -1);
+    const y1 = start.slice(0, 4), y2 = end.slice(0, 4);
+    return `Fairness based on rosters from ${fmt(start)}${y1 !== y2 ? ` ${y1}` : ""} to ${fmt(end)}${y1 !== y2 ? ` ${y2}` : ""}.`;
+  };
+  // A rota filled every day for a year either side of today.
+  const filledData = () => {
+    const data = makeData();
+    const n = new Date();
+    for (let d = new Date(n.getFullYear() - 1, n.getMonth(), 1); d < new Date(n.getFullYear() + 1, n.getMonth(), 1); d.setDate(d.getDate() + 1)) {
+      data.cells[iso(d)] = { a: "M", m: "M" };
+    }
+    return data;
+  };
+  const n = new Date();
+  const nextMonthFirst = iso(new Date(n.getFullYear(), n.getMonth() + 1, 1));
+  const MODES = [["A month", nextMonthFirst, null], ["Choose dates", "2026-11-14", "2026-12-15"]];
+  const CHOICES = ["usual", "year", "3m", "6m"];
+
+  test.each(MODES.flatMap(([mode, first, last]) => CHOICES.map((c) => [mode, c, first, last])))(
+    "%s, %s", async (mode, choice, first, last) => {
+      if (choice === "year" && first.endsWith("-01-01")) return;   // not offered for a period starting 1 January
+      const { unmount } = renderPanel(filledData());
+      await open();
+      if (mode === "Choose dates") {
+        fireEvent.click(screen.getByText("Choose dates"));
+        fireEvent.change(screen.getByLabelText("From"), { target: { value: first } });
+        fireEvent.change(screen.getByLabelText("To"), { target: { value: last } });
+      }
+      fireEvent.change(screen.getByLabelText("How far back fairness looks"), { target: { value: choice } });
+      const start = expectedStart(first, choice);
+      expect(screen.getByText(/^Fairness based on rosters/)).toHaveTextContent(expectedSentence(start, first));
+      expect(screen.getByText(/^Fairness based on rosters/).textContent).not.toMatch(/NaN|undefined/);
+
+      // Build, and look at exactly what the engine was handed.
+      fireEvent.click(screen.getAllByRole("button").find((b) => /^\s*Build .*roster/.test(b.textContent)));
+      await waitFor(() => expect(startMonthBuild).toHaveBeenCalled());
+      const config = startMonthBuild.mock.calls[0][0];
+      const hist = Object.keys(config.history.cells).map((k) => k.slice(-10)).sort();
+      expect(hist[0]).toBe(start);                          // starts where the line says
+      expect(hist[hist.length - 1]).toBe(add(config.from, -1)); // ends the day before the first day built
+      expect(config.from <= first).toBe(true);
+      unmount();
+    },
+  );
+});
