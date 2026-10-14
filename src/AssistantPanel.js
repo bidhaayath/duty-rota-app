@@ -30,7 +30,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles, X, AlertTriangle, Check, Wand2 } from "lucide-react";
 import supabase from "./supabaseClient";
 import {
-  prepareMonth, finishMonth, plainProblems, lookbackOptions, lookbackIdFor, lookbackSentence, monthName,
+  prepareBuild, finishMonth, plainProblems, lookbackOptions, lookbackIdFor, lookbackSentence,
+  periodProblem, periodWords, periodLabel,
 } from "./monthBuild";
 import { startMonthBuild } from "./monthBuildRunner";
 import MonthPreview from "./MonthPreview";
@@ -107,8 +108,13 @@ const employedInRange = (s, from, to) => {
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // The server's answer, turned into checklist lines. Anything outside the
-// chosen month is kept but starts unticked, so it is never added by accident.
-const buildResult = (body, sent, from, to) => {
+// chosen period is kept but starts unticked, so it is never added by accident.
+// When the note asks to build particular dates, those become the period.
+const isISO = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const buildResult = (body, sent, periodFrom, periodTo) => {
+  const ownDates = body.build === true && isISO(body.buildFrom) && isISO(body.buildTo);
+  const from = ownDates ? body.buildFrom : periodFrom;
+  const to = ownDates ? body.buildTo : periodTo;
   const known = new Set(sent.map((s) => s.id));
   const lines = [];
   (Array.isArray(body.leave) ? body.leave : []).forEach((l, i) => {
@@ -126,9 +132,11 @@ const buildResult = (body, sent, from, to) => {
   const unclear = (Array.isArray(body.unclear) ? body.unclear : []).map((u) => String(u || "").trim()).filter(Boolean);
   // Whether the note asked for the month to be built, and from when its
   // fairness should look back. The server has already checked the date.
-  const historyFrom = typeof body.historyFrom === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.historyFrom)
-    ? body.historyFrom : null;
-  return { staff: sent, lines, unclear, build: body.build === true, historyFrom };
+  const historyFrom = isISO(body.historyFrom) ? body.historyFrom : null;
+  return {
+    staff: sent, lines, unclear, build: body.build === true, historyFrom,
+    buildFrom: ownDates ? body.buildFrom : null, buildTo: ownDates ? body.buildTo : null,
+  };
 };
 
 export default function AssistantPanel({
@@ -149,7 +157,12 @@ export default function AssistantPanel({
   // department), so a reply that arrives late is ignored.
   const seq = useRef(0);
 
-  /* ── Building the month ── */
+  /* ── The period: a calendar month, or dates the manager chooses ── */
+  const [periodMode, setPeriodMode] = useState("month");   // "month" | "dates"
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+
+  /* ── Building ── */
   const [lookChoice, setLookChoice] = useState("usual");
   const [noteFrom, setNoteFrom] = useState(null);       // look-back date from the last note
   const [keepExisting, setKeepExisting] = useState(true);
@@ -171,6 +184,7 @@ export default function AssistantPanel({
     stopBuild();
     setOpen(false); setStatus(null); setText(""); setBusy(false);
     setError(""); setResult(null); setSaved(null); setMonth(nextMonthKey());
+    setPeriodMode("month"); setRangeFrom(""); setRangeTo("");
     setLookChoice("usual"); setNoteFrom(null); setKeepExisting(true); setBuildOn(true);
     setBuilding(false); setBuildProblems(null); setPendingBuild(null); setPreview(null);
     // stopBuild only touches refs, so it does not need to be listed.
@@ -205,35 +219,42 @@ export default function AssistantPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const { from, to } = monthBounds(month);
+  /* The period everything works on: the note is read against it, and it is
+     what gets built. Chosen dates must be in order and at most 92 days. */
+  const periodErr = periodMode === "dates" ? periodProblem(rangeFrom, rangeTo) : "";
+  const { from, to } = periodMode === "dates" && !periodErr ? { from: rangeFrom, to: rangeTo } : monthBounds(month);
+  // While the chosen dates cannot be built, the buttons do not pretend they can.
+  const words = periodErr
+    ? { the: "the roster for these dates", name: "these dates", build: "roster for these dates" }
+    : periodWords(from, to);
   const staffForMonth = useMemo(
     () => ((data && data.staff) || []).filter((s) => (s.name || "").trim() && employedInRange(s, from, to)),
     [data, from, to],
   );
 
-  /* ── Building the month ──
-     The look-back choices follow the month picked. A date from the note is
-     only offered while it is still before that month. */
+  /* ── Building ──
+     The look-back choices follow the period. A date from the note is only
+     offered while it is still before the period starts. */
   const lookOpts = useMemo(
-    () => lookbackOptions(month, data && data.rosterRules, noteFrom),
-    [month, data, noteFrom],
+    () => lookbackOptions(from, data && data.rosterRules, noteFrom),
+    [from, data, noteFrom],
   );
   const lookOpt = lookOpts.find((o) => o.id === lookChoice) || lookOpts[0];
-  const mName = monthName(month);
 
   // Builds from `d`: the rota as it is now, or as it is once a note's items
   // have been saved. Nothing is written here; the preview does that.
   const startBuild = (d) => {
     if (!d) return;
     setBuildProblems(null);
+    if (periodErr) { setBuildProblems([periodErr]); return; }
     if (!staffForMonth.length) {
-      setBuildProblems([`Nobody on this rota is employed in ${mName}.`]);
+      setBuildProblems([`Nobody on this rota is employed in ${periodLabel(from, to)}.`]);
       return;
     }
     let prep;
     try {
-      prep = prepareMonth({
-        data: d, month, lookFrom: lookOpt ? lookOpt.from : null, keepExisting,
+      prep = prepareBuild({
+        data: d, from, to, lookFrom: lookOpt ? lookOpt.from : null, keepExisting,
         // View-only staff cannot have their cells changed, so they are
         // planned around exactly as they stand.
         lockedStaffIds: (d.staff || []).filter((s) => !staffEditable(s.id)).map((s) => s.id),
@@ -351,7 +372,7 @@ export default function AssistantPanel({
           }
         }
       }
-      if (l.outside) warnings.unshift("outside the month you chose");
+      if (l.outside) warnings.unshift("outside the dates you chose");
       return { ...l, who, blocked, warnings, on: l.checked && !blocked };
     });
   }, [result, data, staffEditable]);
@@ -361,8 +382,9 @@ export default function AssistantPanel({
   const read = async () => {
     const note = text.trim();
     if (!note || busy) return;
+    if (periodErr) { setError(periodErr); return; }
     if (!staffForMonth.length) {
-      setError(`Nobody on this rota is employed in ${monthOptions().find(([k]) => k === month)?.[1] || "that month"}.`);
+      setError(`Nobody on this rota is employed in ${periodLabel(from, to)}.`);
       return;
     }
     const mine = ++seq.current;
@@ -404,10 +426,15 @@ export default function AssistantPanel({
       const r = buildResult(body, sent, from, to);
       setResult(r);
       setBuildOn(true);
+      // Dates the note asked to build become the period.
+      const newFrom = r.buildFrom || from;
+      if (r.buildFrom && r.buildTo) {
+        setPeriodMode("dates"); setRangeFrom(r.buildFrom); setRangeTo(r.buildTo);
+      }
       // A look-back the note asked for is preselected; it can still be changed.
       if (r.historyFrom) {
         setNoteFrom(r.historyFrom);
-        setLookChoice(lookbackIdFor(lookbackOptions(month, data && data.rosterRules, r.historyFrom), r.historyFrom));
+        setLookChoice(lookbackIdFor(lookbackOptions(newFrom, data && data.rosterRules, r.historyFrom), r.historyFrom));
       }
       return;
     }
@@ -428,7 +455,7 @@ export default function AssistantPanel({
 
   const picked = lines.filter((l) => l.on);
   // The note asked for the month to be built, and the line is still ticked.
-  const willBuild = !!(result && result.build && canBuild && buildOn);
+  const willBuild = !!(result && result.build && canBuild && buildOn && !periodErr);
 
   // One update(), so it is one step for Undo and passes the same locks as
   // every other edit. Shapes match the Staff tab and RequestsTab.add exactly.
@@ -528,7 +555,7 @@ export default function AssistantPanel({
         Keep duties already on the rota (only fill empty days)
         {!keepExisting && (
           <span style={{ display: "block", fontSize: 12, color: "#8A5A0F", marginTop: 2 }}>
-            Duties already in {mName} will be replaced. You will see how many before anything is written.
+            Duties already on these dates will be replaced. You will see how many before anything is written.
           </span>
         )}
       </span>
@@ -536,7 +563,7 @@ export default function AssistantPanel({
   );
   const problemsBox = buildProblems && buildProblems.length > 0 && (
     <div role="alert" style={note("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
-      <strong>The {mName} roster could not be built. Nothing has been changed.</strong>
+      <strong>{words.the.charAt(0).toUpperCase() + words.the.slice(1)} could not be built. Nothing has been changed.</strong>
       <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
         {buildProblems.map((p, i) => <li key={i} style={{ marginBottom: 3 }}>{p}</li>)}
       </ul>
@@ -544,16 +571,17 @@ export default function AssistantPanel({
   );
   const buildSection = canBuild && (
     <section style={{ borderTop: `1px solid ${T.line}`, paddingTop: 14, display: "grid", gap: 10 }}>
-      <h3 style={{ ...sectionTitle, margin: 0 }}>Build the whole month</h3>
+      <h3 style={{ ...sectionTitle, margin: 0 }}>{periodMode === "dates" ? "Build these dates" : "Build the whole month"}</h3>
       <p style={{ fontSize: 12.5, color: T.inkSoft, margin: 0, lineHeight: 1.55 }}>
-        Ini builds {mName} with your Smart Roster settings. This does not use a note. Nothing changes on
-        the rota until you have checked the month and pressed Apply.
+        Ini builds {words.the} with your Smart Roster settings. This does not use a note. Nothing changes on
+        the rota until you have checked it and pressed Apply.
       </p>
       {lookControl}
       {keepControl}
       <div>
-        <button type="button" style={button("primary", building)} disabled={building} onClick={() => startBuild(data)}>
-          <Wand2 size={15} /> Build {mName} roster
+        <button type="button" style={button("primary", building || !!periodErr)} disabled={building || !!periodErr}
+          onClick={() => startBuild(data)}>
+          <Wand2 size={15} /> Build {words.build}
         </button>
       </div>
       {problemsBox}
@@ -568,7 +596,7 @@ export default function AssistantPanel({
         <div role="status" style={{ ...note("#E3F3EF", "#BFE3DA", "#0B6A60"), display: "flex", gap: 9, alignItems: "flex-start" }}>
           <Wand2 size={17} style={{ flexShrink: 0, marginTop: 2 }} />
           <span>
-            <strong>{pendingBuild ? "Saving your items…" : `Building ${mName}… this can take a few seconds.`}</strong>
+            <strong>{pendingBuild ? "Saving your items…" : `Building ${words.the}… this can take a few seconds.`}</strong>
             {" "}The month opens here when it is ready.
           </span>
         </div>
@@ -669,7 +697,7 @@ export default function AssistantPanel({
               onChange={(e) => setBuildOn(e.target.checked)}
               style={{ width: 17, height: 17, marginTop: 2, accentColor: T.lagoon, flexShrink: 0 }}
             />
-            <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.45 }}>Build the {mName} roster</span>
+            <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.45 }}>Build {words.the}</span>
           </label>
           {buildOn && <div style={{ display: "grid", gap: 10, paddingLeft: 27 }}>{lookControl}{keepControl}</div>}
         </div>
@@ -681,8 +709,8 @@ export default function AssistantPanel({
       </div>
     ));
     const confirmLabel = picked.length
-      ? (willBuild ? `Add ${plural(picked.length, "item")} and build ${mName}` : `Add ${plural(picked.length, "item")}`)
-      : (willBuild ? `Build ${mName}` : "Add 0 items");
+      ? (willBuild ? `Add ${plural(picked.length, "item")} and build ${words.name}` : `Add ${plural(picked.length, "item")}`)
+      : (willBuild ? `Build ${words.name}` : "Add 0 items");
     const canConfirm = picked.length > 0 || willBuild;
 
     body = (
@@ -804,22 +832,67 @@ export default function AssistantPanel({
       );
     }
     const showMonth = canBuild || (status !== null && status.ok !== false && status.remaining !== 0);
+    /* "Planning for": a calendar month as before, or any dates up to about
+       three months. The note is read against this period, and it is what
+       gets built. */
+    const field = { fontFamily: "inherit", fontSize: 14, padding: "9px 10px", borderRadius: 9,
+      border: `1px solid ${T.line}`, background: "#fff", color: T.ink, cursor: "pointer", minWidth: 0 };
+    const modeButton = (mode, text) => (
+      <button type="button" aria-pressed={periodMode === mode} disabled={busy || building}
+        onClick={() => {
+          setBuildProblems(null); setError("");
+          if (mode === "dates" && !rangeFrom && !rangeTo) {
+            const b = monthBounds(month); setRangeFrom(b.from); setRangeTo(b.to);
+          }
+          setPeriodMode(mode);
+        }}
+        style={{ flex: 1, fontFamily: "inherit", fontSize: 13, fontWeight: 700, padding: "7px 10px", border: "none",
+          cursor: busy || building ? "not-allowed" : "pointer",
+          background: periodMode === mode ? T.lagoon : "#fff", color: periodMode === mode ? "#fff" : T.inkSoft }}>
+        {text}
+      </button>
+    );
+    const periodPicker = (
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>Planning for</div>
+        <div role="group" aria-label="Planning for" style={{ display: "flex", borderRadius: 9, overflow: "hidden", border: `1px solid ${T.line}` }}>
+          {modeButton("month", "A month")}
+          {modeButton("dates", "Choose dates")}
+        </div>
+        {periodMode === "month" ? (
+          <select
+            aria-label="Month"
+            value={month}
+            onChange={(e) => { setMonth(e.target.value); setBuildProblems(null); }}
+            disabled={busy || building}
+            style={field}
+          >
+            {monthOptions().map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 600, color: T.inkSoft, flex: "1 1 140px" }}>
+                From
+                <input type="date" value={rangeFrom} disabled={busy || building} style={field}
+                  onChange={(e) => { setRangeFrom(e.target.value); setBuildProblems(null); setError(""); }} />
+              </label>
+              <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 600, color: T.inkSoft, flex: "1 1 140px" }}>
+                To
+                <input type="date" value={rangeTo} disabled={busy || building} style={field}
+                  onChange={(e) => { setRangeTo(e.target.value); setBuildProblems(null); setError(""); }} />
+              </label>
+            </div>
+            {periodErr
+              ? <div role="alert" style={{ fontSize: 12.5, color: "#8A2E1E" }}>{periodErr}</div>
+              : <div style={{ fontSize: 12, color: T.inkSoft }}>{periodLabel(from, to)} · up to 3 months at a time</div>}
+          </>
+        )}
+      </div>
+    );
     body = (
       <div style={{ display: "grid", gap: 12 }}>
-        {showMonth && (
-          <label style={{ display: "grid", gap: 5, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
-            Planning for
-            <select
-              value={month}
-              onChange={(e) => { setMonth(e.target.value); setBuildProblems(null); }}
-              disabled={busy || building}
-              style={{ fontFamily: "inherit", fontSize: 14, padding: "9px 10px", borderRadius: 9,
-                border: `1px solid ${T.line}`, background: "#fff", color: T.ink, cursor: "pointer" }}
-            >
-              {monthOptions().map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-            </select>
-          </label>
-        )}
+        {showMonth && periodPicker}
         {noteArea}
         {buildSection}
       </div>
@@ -838,7 +911,7 @@ export default function AssistantPanel({
         @media print { .ini-root { display: none !important; } }
       `}</style>
 
-      {!open && (
+      {!open && !preview && (
         <button
           type="button"
           aria-label="Ask Ini"

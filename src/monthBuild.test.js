@@ -4,8 +4,8 @@
 
 import { datesBetween } from "./rosterEngine";
 import {
-  prepareMonth, finishMonth, runEngine, lookbackOptions, lookbackIdFor, lookbackSentence,
-  monthFingerprint,
+  prepareMonth, prepareBuild, finishMonth, runEngine, lookbackOptions, lookbackIdFor, lookbackSentence,
+  monthFingerprint, periodProblem, periodLabel, periodWords,
 } from "./monthBuild";
 
 const CODES = [
@@ -113,20 +113,20 @@ describe("keeping what is already on the rota", () => {
 
 describe("look-back choices", () => {
   test("usual follows Smart Roster's setting; January has no 'since 1 January'", () => {
-    const nov = lookbackOptions("2026-11", { lookbackDays: 30 }, null);
+    const nov = lookbackOptions("2026-11-01", { lookbackDays: 30 }, null);
     expect(nov.map((o) => o.id)).toEqual(["usual", "year", "3m", "6m"]);
     expect(nov[0].from).toBe("2026-10-02");
     expect(nov.find((o) => o.id === "3m").from).toBe("2026-08-01");
-    expect(lookbackSentence(nov[0], "2026-11")).toBe("Fairness based on rosters from 2 Oct to 31 Oct.");
-    expect(lookbackOptions("2027-01", {}, null).map((o) => o.id)).toEqual(["usual", "3m", "6m"]);
+    expect(lookbackSentence(nov[0], "2026-11-01")).toBe("Fairness based on rosters from 2 Oct to 31 Oct.");
+    expect(lookbackOptions("2027-01-01", {}, null).map((o) => o.id)).toEqual(["usual", "3m", "6m"]);
   });
 
   test("a date from the note is preselected, reusing a matching choice", () => {
-    const opts = lookbackOptions("2026-11", {}, "2026-01-01");
+    const opts = lookbackOptions("2026-11-01", {}, "2026-01-01");
     expect(lookbackIdFor(opts, "2026-01-01")).toBe("year");
-    const own = lookbackOptions("2026-11", {}, "2026-03-15");
+    const own = lookbackOptions("2026-11-01", {}, "2026-03-15");
     expect(lookbackIdFor(own, "2026-03-15")).toBe("note");
-    expect(lookbackSentence({ from: "2025-12-01" }, "2026-11")).toBe("Fairness based on rosters from 1 Dec 2025 to 31 Oct 2026.");
+    expect(lookbackSentence({ from: "2025-12-01" }, "2026-11-01")).toBe("Fairness based on rosters from 1 Dec 2025 to 31 Oct 2026.");
   });
 });
 
@@ -179,4 +179,48 @@ describe("end to end with the engine", () => {
     other.cells["2026-10-05"].s9 = "N";
     expect(monthFingerprint(other, "2026-09-27", "2026-10-31")).not.toBe(before);
   });
+});
+
+describe("any dates, not only a month", () => {
+  test("a chosen period is checked: both dates, in order, at most 92 days", () => {
+    expect(periodProblem("2026-11-15", "2026-12-14")).toBe("");
+    expect(periodProblem("2026-11-01", "2027-01-31")).toBe("");                   // exactly 92 days
+    expect(periodProblem("2026-11-01", "2027-02-01")).toMatch(/at most 3 months/);
+    expect(periodProblem("2026-12-14", "2026-11-15")).toMatch(/on or before/);
+    expect(periodProblem("", "2026-11-15")).toMatch(/both dates/);
+    expect(() => prepareBuild({ data: makeData(), from: "2026-11-01", to: "2027-03-01" })).toThrow(/at most 3 months/);
+  });
+
+  test("labels say a month when it is one, and the dates when it is not", () => {
+    expect(periodLabel("2026-11-01", "2026-11-30")).toBe("November 2026");
+    expect(periodLabel("2026-11-15", "2026-12-14")).toBe("15 Nov – 14 Dec 2026");
+    expect(periodLabel("2026-12-15", "2027-01-14")).toBe("15 Dec 2026 – 14 Jan 2027");
+    expect(periodWords("2026-11-01", "2026-11-30").the).toBe("the November roster");
+    expect(periodWords("2026-11-15", "2026-12-14").the).toBe("the roster for 15 Nov – 14 Dec");
+    expect(periodWords("2026-11-15", "2026-12-14").build).toBe("roster for 15 Nov – 14 Dec");
+  });
+
+  test("the whole-week edges and the look-back follow the chosen dates", () => {
+    const p = prepareBuild({ data: makeData(), from: "2026-10-14", to: "2026-11-10" });
+    expect(p.periodFrom).toBe("2026-10-14");
+    expect(p.buildFrom).toBe("2026-10-11");          // the Sunday before a Wednesday
+    expect(p.buildTo).toBe("2026-11-14");            // the Saturday after a Tuesday
+    expect(p.label).toBe("14 Oct – 10 Nov 2026");
+    const opts = lookbackOptions("2026-11-15", { lookbackDays: 14 }, null);
+    expect(opts[0].from).toBe("2026-11-01");
+    expect(opts.find((o) => o.id === "3m").from).toBe("2026-08-01");
+    expect(lookbackSentence(opts[0], "2026-11-15")).toBe("Fairness based on rosters from 1 Nov to 14 Nov.");
+  });
+
+  test("end to end: only cells inside the chosen dates are written", () => {
+    const data = makeData();
+    const prep = prepareBuild({ data, from: "2026-10-07", to: "2026-10-20", keepExisting: false });
+    const out = runEngine({ ...prep.config, polishSteps: 2000, attempts: 1 }, prep.chosenCodes);
+    expect(out.ok).toBe(true);
+    const fin = finishMonth(prep, out, data);
+    expect(fin.writes.length).toBeGreaterThan(0);
+    fin.writes.forEach((w) => expect(w.date >= "2026-10-07" && w.date <= "2026-10-20").toBe(true));
+    expect(fin.label).toBe("7 Oct – 20 Oct 2026");
+    expect(fin.shortfalls.every((s) => s.date >= "2026-10-07" && s.date <= "2026-10-20")).toBe(true);
+  }, 60000);
 });

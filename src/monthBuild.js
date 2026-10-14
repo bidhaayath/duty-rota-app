@@ -1,32 +1,33 @@
-/* ─────────────── Ini action: build a whole month ───────────────
-   One of Ini's actions. It prepares the engine configuration for a month,
-   and turns the engine's answer into a list of cell writes plus a plain
-   summary. Pure functions only: no React, nothing saved. Running the engine
-   (in a background worker) lives in monthBuildRunner.js, and showing and
-   applying the result in MonthPreview.js.
+/* ─────────────── Ini action: build a period ───────────────
+   One of Ini's actions. It prepares the engine configuration for a period
+   — a calendar month, or any dates the manager chooses up to about three
+   months — and turns the engine's answer into a list of cell writes plus a
+   plain summary. Pure functions only: no React, nothing saved. Running the
+   engine (in a background worker) lives in monthBuildRunner.js, and showing
+   and applying the result in MonthPreview.js.
 
    The configuration is the one Smart Roster builds for a week
-   (buildRosterConfig in rosterConfig.js), stretched over the month, with
+   (buildRosterConfig in rosterConfig.js), stretched over the period, with
    three additions — all expressed with things the engine already
    understands, so the engine itself is unchanged:
 
    1. Whole weeks. The engine only judges a weekly limit over a whole week,
       and does not count days before its first date toward that week. So a
-      month starting on a Thursday is built from the start of that week to
+      period starting on a Thursday is built from the start of that week to
       the end of the week holding the last day. The duties already on the
       rota on those extra days are LOCKED, so they count toward the week;
-      empty extra days are planned and thrown away. Only the month itself is
-      ever written. If last month's locked days make the engine refuse (a
-      past day that was short of staff, say), the month is built on its own
-      instead, and the summary says so.
+      empty extra days are planned and thrown away. Only the period itself
+      is ever written. If the locked days before it make the engine refuse
+      (a past day that was short of staff, say), the period is built on its
+      own instead, and the summary says so.
 
    2. Keeping what is already there. With "keep duties already on the rota"
-      ticked, every filled cell inside the month is locked too, and only
+      ticked, every filled cell inside the period is locked too, and only
       empty days are filled.
 
    3. View-only staff (beyond the plan's staff limit) are locked for the
-      whole month: their cells cannot be changed, so they are planned around
-      exactly as they stand.
+      whole period: their cells cannot be changed, so they are planned
+      around exactly as they stand.
 
    How a cell is locked:
    - A duty or off day becomes an approved request for that category. The
@@ -59,32 +60,70 @@ export const monthBounds = (month) => {
   const [y, m] = month.split("-").map(Number);
   return { from: `${month}-01`, to: `${month}-${pad2(new Date(y, m, 0).getDate())}` };
 };
-const monthStartBefore = (month, n) => {
-  const [y, m] = month.split("-").map(Number);
+// The 1st of the month `n` months before the month holding `iso`.
+const monthStartBefore = (iso, n) => {
+  const [y, m] = iso.split("-").map(Number);
   const d = new Date(y, m - 1 - n, 1);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
 };
 // How far `iso` is past the start of the ward's week (0–6).
 const intoWeek = (iso, firstDay) => (((parseISO(iso).getDay() - firstDay) % 7) + 7) % 7;
 
+/* ── The period ──
+   At most 92 days at once — about three months, and the same limit the
+   note reader (api/ai/parse.js) uses for dates it is asked to build. */
+export const MAX_DAYS = 92;
+export const daysIn = (from, to) => Math.round((parseISO(to) - parseISO(from)) / 86400000) + 1;
+// Why a chosen period cannot be built, in a few words, or "" if it can.
+export const periodProblem = (from, to) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(to || "")) return "Choose both dates.";
+  if (from > to) return "The first date must be on or before the last.";
+  if (daysIn(from, to) > MAX_DAYS) return "Choose at most 3 months (92 days) at a time.";
+  return "";
+};
+// Whether from..to is exactly one calendar month.
+export const isWholeMonth = (from, to) => {
+  if (!from || !to || !from.endsWith("-01")) return false;
+  return monthBounds(from.slice(0, 7)).to === to;
+};
+/* "November 2026" for a calendar month; otherwise "15 Nov – 14 Dec 2026",
+   with both years when it crosses into a new one. */
+export const periodLabel = (from, to) => {
+  if (isWholeMonth(from, to)) return `${monthName(from.slice(0, 7))} ${from.slice(0, 4)}`;
+  if (from === to) return `${prettyDay(from)} ${from.slice(0, 4)}`;
+  const y1 = from.slice(0, 4), y2 = to.slice(0, 4);
+  return y1 === y2 ? `${prettyDay(from)} – ${prettyDay(to)} ${y2}` : `${prettyDay(from)} ${y1} – ${prettyDay(to)} ${y2}`;
+};
+/* The words for buttons and checklist lines: "the November roster" or
+   "the roster for 15 Nov – 14 Dec". A month leaves its year out. */
+export const periodWords = (from, to) => {
+  if (isWholeMonth(from, to)) {
+    const name = monthName(from.slice(0, 7));
+    return { the: `the ${name} roster`, name, build: `${name} roster` };
+  }
+  const y1 = from.slice(0, 4), y2 = to.slice(0, 4);
+  const span = from === to ? prettyDay(from)
+    : y1 === y2 ? `${prettyDay(from)} – ${prettyDay(to)}` : `${prettyDay(from)} ${y1} – ${prettyDay(to)} ${y2}`;
+  return { the: `the roster for ${span}`, name: span, build: `roster for ${span}` };
+};
+
 /* ── How far back fairness looks ──
-   "Usual" is Smart Roster's own setting, counted back from the 1st. The
-   rest are fixed starting points. The look-back always ends on the last
-   day before the month. */
-export const lookbackOptions = (month, rosterRules, historyFrom) => {
-  const { from } = monthBounds(month);
+   "Usual" is Smart Roster's own setting, counted back from the first day
+   of the period. The rest are fixed starting points. The look-back always
+   ends on the day before the period. */
+export const lookbackOptions = (from, rosterRules, historyFrom) => {
   const rules = mergeRules(rosterRules || {});
   const days = rules.lookbackDays || 0;
-  const year = month.slice(0, 4);
+  const year = from.slice(0, 4);
   const out = [{
     id: "usual",
     label: days ? `Usual (last ${days} days)` : "Usual (no look-back)",
     from: days ? shiftISO(from, -days) : null,
   }];
-  // Since 1 January means nothing when planning January itself.
-  if (!month.endsWith("-01")) out.push({ id: "year", label: "Since 1 January", from: `${year}-01-01` });
-  out.push({ id: "3m", label: "Last 3 months", from: monthStartBefore(month, 3) });
-  out.push({ id: "6m", label: "Last 6 months", from: monthStartBefore(month, 6) });
+  // Since 1 January means nothing when the period starts on 1 January.
+  if (from !== `${year}-01-01`) out.push({ id: "year", label: "Since 1 January", from: `${year}-01-01` });
+  out.push({ id: "3m", label: "Last 3 months", from: monthStartBefore(from, 3) });
+  out.push({ id: "6m", label: "Last 6 months", from: monthStartBefore(from, 6) });
   if (historyFrom && historyFrom < from && !out.some((o) => o.from === historyFrom)) {
     out.push({ id: "note", label: `From ${prettyDay(historyFrom)} ${historyFrom.slice(0, 4)} (your note)`, from: historyFrom });
   }
@@ -94,9 +133,9 @@ export const lookbackOptions = (month, rosterRules, historyFrom) => {
 export const lookbackIdFor = (options, historyFrom) =>
   (historyFrom && options.find((o) => o.from === historyFrom)?.id) || "usual";
 
-export const lookbackSentence = (option, month) => {
+export const lookbackSentence = (option, from) => {
   if (!option || !option.from) return "Fairness does not look back at earlier rosters.";
-  const lastDay = shiftISO(monthBounds(month).from, -1);
+  const lastDay = shiftISO(from, -1);
   const y1 = option.from.slice(0, 4), y2 = lastDay.slice(0, 4);
   return `Fairness based on rosters from ${prettyDay(option.from)}${y1 !== y2 ? ` ${y1}` : ""} to ${prettyDay(lastDay)}${y1 !== y2 ? ` ${y2}` : ""}.`;
 };
@@ -112,7 +151,7 @@ const categoryOf = (data, raw) => {
 const onLeave = (person, date) =>
   (person.leavePeriods || []).some((lp) => date >= lp.start && date <= lp.end);
 
-function configFor({ data, rules, from, to, monthFrom, monthTo, lookFrom, keepExisting, lockedStaff }) {
+function configFor({ data, rules, from, to, periodFrom, periodTo, lookFrom, keepExisting, lockedStaff }) {
   const staff = activeStaffFor(data.staff, datesBetween(from, to));
   // History ends the day before the first day built; with no look-back it
   // is simply empty.
@@ -131,14 +170,14 @@ function configFor({ data, rules, from, to, monthFrom, monthTo, lookFrom, keepEx
     if (skipped.has(s.id)) return;                     // the engine leaves them out anyway
     const lockAll = lockedStaff.has(s.id);
     for (const date of datesBetween(from, to)) {
-      const inMonth = date >= monthFrom && date <= monthTo;
-      if (inMonth && !keepExisting && !lockAll) continue;
+      const inPeriod = date >= periodFrom && date <= periodTo;
+      if (inPeriod && !keepExisting && !lockAll) continue;
       if (!employedOn(s, date) || onLeave(s, date)) continue;
       const key = `${s.id}|${date}`;
       const { empty, cat } = categoryOf(data, (rotaCells[date] || {})[s.id]);
       if (empty) {
         // An empty day is only locked for someone whose cells cannot change.
-        if (lockAll && inMonth) { blocked.add(key); (blockDays[s.id] = blockDays[s.id] || []).push(date); }
+        if (lockAll && inPeriod) { blocked.add(key); (blockDays[s.id] = blockDays[s.id] || []).push(date); }
         continue;
       }
       if (PRESERVE.includes(cat)) continue;           // already left alone by the engine
@@ -165,36 +204,38 @@ function configFor({ data, rules, from, to, monthFrom, monthTo, lookFrom, keepEx
   return { cfg, pinned, blocked };
 }
 
-/* Everything the engine needs for one month, and what the result has to be
-   checked against. `lockedStaffIds` are the view-only staff. */
-export function prepareMonth({ data, month, lookFrom, keepExisting = true, lockedStaffIds = [] }) {
-  const { from: monthFrom, to: monthTo } = monthBounds(month);
+/* Everything the engine needs for one period (from..to, both included),
+   and what the result has to be checked against. `lockedStaffIds` are the
+   view-only staff. */
+export function prepareBuild({ data, from: periodFrom, to: periodTo, lookFrom, keepExisting = true, lockedStaffIds = [] }) {
+  const bad = periodProblem(periodFrom, periodTo);
+  if (bad) throw new Error(bad);
   const savedRules = mergeRules(data.rosterRules || {});
   const lockedStaff = new Set(lockedStaffIds);
   const firstDay = data.weekStartsOn ?? 0;
-  const padFrom = shiftISO(monthFrom, -intoWeek(monthFrom, firstDay));
-  const padTo = shiftISO(monthTo, 6 - intoWeek(monthTo, firstDay));
+  const padFrom = shiftISO(periodFrom, -intoWeek(periodFrom, firstDay));
+  const padTo = shiftISO(periodTo, 6 - intoWeek(periodTo, firstDay));
 
   const make = (from, to) => ({
     from, to,
-    ...configFor({ data, rules: savedRules, from, to, monthFrom, monthTo, lookFrom, keepExisting, lockedStaff }),
+    ...configFor({ data, rules: savedRules, from, to, periodFrom, periodTo, lookFrom, keepExisting, lockedStaff }),
   });
 
   let built = make(padFrom, padTo);
   let fellBack = false;
-  const padded = padFrom !== monthFrom || padTo !== monthTo;
+  const padded = padFrom !== periodFrom || padTo !== periodTo;
   if (padded) {
-    // Only a refusal caused by the extra days outside the month falls back.
+    // Only a refusal caused by the extra days outside the period falls back.
     const check = checkFeasible(built.cfg);
     const dated = (p) => /^\d{4}-\d{2}-\d{2}:/.test(p) ? p.slice(0, 10) : null;
-    if (!check.ok && check.problems.every((p) => dated(p) && (dated(p) < monthFrom || dated(p) > monthTo))) {
-      built = make(monthFrom, monthTo);
+    if (!check.ok && check.problems.every((p) => dated(p) && (dated(p) < periodFrom || dated(p) > periodTo))) {
+      built = make(periodFrom, periodTo);
       fellBack = true;
     }
   }
 
   return {
-    month, monthFrom, monthTo,
+    periodFrom, periodTo, label: periodLabel(periodFrom, periodTo),
     buildFrom: built.from, buildTo: built.to,
     padded: padded && !fellBack, fellBack, keepExisting,
     config: built.cfg, pinned: built.pinned, blocked: built.blocked,
@@ -204,8 +245,11 @@ export function prepareMonth({ data, month, lookFrom, keepExisting = true, locke
   };
 }
 
+// A calendar month ("2026-11"): the same thing for that month's dates.
+export const prepareMonth = ({ month, ...rest }) => prepareBuild({ ...rest, ...monthBounds(month) });
+
 /* What the build depended on. Compared again before Apply, so a rota that
-   changed in the meantime is never overwritten with a month planned for a
+   changed in the meantime is never overwritten with a period planned for a
    different one. */
 export function monthFingerprint(data, from, to) {
   const cells = {};
@@ -251,20 +295,20 @@ const RULE_SORT = ["weekly duty maximum", "duty rule", "days in a row", "working
   "maximum off days", "minimum off days", "weekly duty minimum", "two off days together"];
 
 export function finishMonth(prep, result, data) {
-  const { monthFrom, monthTo, pinned, blocked, config } = prep;
-  const inMonth = (d) => d >= monthFrom && d <= monthTo;
+  const { periodFrom, periodTo, pinned, blocked, config } = prep;
+  const inPeriod = (d) => d >= periodFrom && d <= periodTo;
   const idByCode = codeIdByText(data.codes);
   const nameOf = {};
   (data.staff || []).forEach((s) => { nameOf[s.id] = s.name; });
 
-  // Cells the engine owns inside the month, written only where they change.
+  // Cells the engine owns inside the period, written only where they change.
   const writes = [];
   const missing = new Set();
   let replaced = 0, replacedSplit = 0;
   for (const [key, code] of Object.entries(result.rotaCells || {})) {
     const cut = key.lastIndexOf("|");
     const sid = key.slice(0, cut), date = key.slice(cut + 1);
-    if (!inMonth(date) || pinned[key] || blocked.has(key)) continue;
+    if (!inPeriod(date) || pinned[key] || blocked.has(key)) continue;
     const id = idByCode[code];
     if (!id) { missing.add(code); continue; }
     const before = (data.cells?.[date] || {})[sid];
@@ -277,15 +321,15 @@ export function finishMonth(prep, result, data) {
   }
 
   const report = result.report;
-  const weekTouches = (wk) => wk <= monthTo && shiftISO(wk, 6) >= monthFrom;
-  const shortfalls = report.shortfalls.filter((s) => inMonth(s.date));
-  const seniorGaps = (report.seniorGaps || []).filter((s) => inMonth(s.date));
+  const weekTouches = (wk) => wk <= periodTo && shiftISO(wk, 6) >= periodFrom;
+  const shortfalls = report.shortfalls.filter((s) => inPeriod(s.date));
+  const seniorGaps = (report.seniorGaps || []).filter((s) => inPeriod(s.date));
 
   // Rules bent, grouped, with where. Weekly ones name the person and week.
   const groups = {};
   report.relaxations.forEach((r) => {
     const weekly = r.staffId != null;
-    if (weekly ? !weekTouches(r.date) : !inMonth(r.date)) return;
+    if (weekly ? !weekTouches(r.date) : !inPeriod(r.date)) return;
     const where = weekly
       ? `${nameOf[r.staffId] || "someone"} (week of ${prettyDay(r.date)})`
       : `${prettyWeekday(r.date)}${r.shift && r.shift !== "off" ? ` ${r.shift}` : ""}`;
@@ -298,18 +342,18 @@ export function finishMonth(prep, result, data) {
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || b.places.length - a.places.length;
     });
 
-  // Weeks inside the month that are short of duties on paper.
+  // Weeks inside the period that are short of duties on paper.
   const shortWeeks = (report.budget || []).filter((w) => w.spare < 0 && weekTouches(w.week))
     .map((w) => ({ week: w.week, needed: w.dutiesNeeded, available: w.dutiesAvailable }));
 
-  /* Fairness over the month alone — not the extra days, and not history —
+  /* Fairness over the period alone — not the extra days, and not history —
      for everyone the engine rostered on at least one day of it. */
   const nonOff = new Set(config.nonOfficialDates || []);
   const tally = {};
   for (const [key, cat] of Object.entries(result.cells || {})) {
     const cut = key.lastIndexOf("|");
     const sid = key.slice(0, cut), date = key.slice(cut + 1);
-    if (!inMonth(date)) continue;
+    if (!inPeriod(date)) continue;
     const t = tally[sid] || (tally[sid] = { night: 0, fridayOff: 0, nonOfficial: 0, duties: 0 });
     if (cat === "night") t.night += 1;
     if (cat === "off" && parseISO(date).getDay() === 5) t.fridayOff += 1;
@@ -328,12 +372,12 @@ export function finishMonth(prep, result, data) {
   };
 
   return {
-    month: prep.month, monthFrom, monthTo,
+    label: prep.label, periodFrom, periodTo,
     padded: prep.padded, fellBack: prep.fellBack, keepExisting: prep.keepExisting,
     lockedStaffIds: prep.lockedStaffIds, skipStaff: config.skipStaff || [],
     writes, missing: [...missing], replaced, replacedSplit,
-    keptCount: Object.keys(pinned).filter((k) => inMonth(k.slice(-10))).length
-      + [...blocked].filter((k) => inMonth(k.slice(-10))).length,
+    keptCount: Object.keys(pinned).filter((k) => inPeriod(k.slice(-10))).length
+      + [...blocked].filter((k) => inPeriod(k.slice(-10))).length,
     shortfalls, seniorGaps, bent, shortWeeks,
     fairness: {
       nights: spread("night"), fridayOff: spread("fridayOff"),

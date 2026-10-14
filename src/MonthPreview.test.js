@@ -4,8 +4,9 @@
 
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { datesBetween } from "./rosterEngine";
-import { prepareMonth, finishMonth, runEngine } from "./monthBuild";
+import { prepareMonth, prepareBuild, finishMonth, runEngine } from "./monthBuild";
 import MonthPreview from "./MonthPreview";
+import { weekTotalsFor, dayCountFor } from "./rotaCounts";
 
 const T = { lagoon: "#0E7C7B", ink: "#142B33", inkSoft: "#4A6570", line: "#D5E2E0", mist: "#EEF4F3", coral: "#E4604E" };
 const CODES = [
@@ -45,7 +46,7 @@ test("renders the month and marks every cell that will change", () => {
   const proposal = build(data, true);
   render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
     onDiscard={jest.fn()} onApplied={jest.fn()} />);
-  expect(screen.getByText(/October 2026 roster/)).toBeInTheDocument();
+  expect(screen.getByText(/Roster for October 2026/)).toBeInTheDocument();
   expect(screen.getByText(/Built in 1\.2 seconds/)).toBeInTheDocument();
   expect(document.querySelectorAll('[title*="will be"]').length).toBe(proposal.writes.length);
   expect(screen.getAllByText("AL").length).toBe(3);                // leave shown as on the rota
@@ -59,7 +60,7 @@ test("Apply writes exactly the planned cells in one update, then confirms and op
   const onApplied = jest.fn();
   const { rerender } = render(<MonthPreview proposal={proposal} data={data} update={update} T={T}
     onDiscard={jest.fn()} onApplied={onApplied} />);
-  fireEvent.click(screen.getByText("Apply to rota"));
+  fireEvent.click(screen.getAllByText("Apply to rota")[0]);
   expect(window.confirm.mock.calls[0][0]).toMatch(/Duties already on the rota are kept exactly as they are/);
   expect(update).toHaveBeenCalledTimes(1);
 
@@ -87,7 +88,7 @@ test("not keeping: the confirmation says how many existing duties are replaced",
   const proposal = build(data, false);
   render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
     onDiscard={jest.fn()} onApplied={jest.fn()} />);
-  fireEvent.click(screen.getByText("Apply to rota"));
+  fireEvent.click(screen.getAllByText("Apply to rota")[0]);
   // The split duty and the Other duty on 5 October are always replaced.
   expect(proposal.replaced).toBeGreaterThanOrEqual(2);
   expect(proposal.replacedSplit).toBeGreaterThanOrEqual(1);
@@ -103,9 +104,9 @@ test("a rota that changed after building is not overwritten", () => {
   const update = jest.fn();
   render(<MonthPreview proposal={proposal} data={changed} update={update} T={T}
     onDiscard={jest.fn()} onApplied={jest.fn()} />);
-  fireEvent.click(screen.getByText("Apply to rota"));
+  fireEvent.click(screen.getAllByText("Apply to rota")[0]);
   expect(update).not.toHaveBeenCalled();
-  expect(window.alert.mock.calls[0][0]).toMatch(/changed since this month was built/);
+  expect(window.alert.mock.calls[0][0]).toMatch(/changed since this roster was built/);
 });
 
 test("Discard writes nothing", () => {
@@ -114,7 +115,52 @@ test("Discard writes nothing", () => {
   const onDiscard = jest.fn();
   render(<MonthPreview proposal={build(data, true)} data={data} update={update} T={T}
     onDiscard={onDiscard} onApplied={jest.fn()} />);
-  fireEvent.click(screen.getByText("Discard"));
+  fireEvent.click(screen.getAllByText("Discard")[0]);
   expect(onDiscard).toHaveBeenCalled();
   expect(update).not.toHaveBeenCalled();
+});
+
+test("totals match the rota's own counting, on the rota as it will be after Apply", () => {
+  const data = { ...makeData(), nonOfficial: ["2026-10-13"], fridayRule: true };
+  const proposal = build(data, true);
+  render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
+    onDiscard={jest.fn()} onApplied={jest.fn()} />);
+  const after = clone(data);
+  proposal.writes.forEach((w) => { after.cells[w.date] = { ...(after.cells[w.date] || {}), [w.sid]: w.id }; });
+  const days = datesBetween("2026-10-01", "2026-10-31");
+
+  // Each staff row ends with M, A, N, OD, RD, OFF, NON-OFF DUTY.
+  const headers = [...document.querySelectorAll("thead th")].map((th) => th.textContent);
+  expect(headers.slice(-7)).toEqual(["M", "A", "N", "OD", "RD", "OFF", "NON-OFF DUTY"]);
+  const rows = [...document.querySelectorAll("tbody tr")];
+  data.staff.forEach((s, i) => {
+    const t = weekTotalsFor(after, s, days);
+    const cells = [...rows[i].querySelectorAll("td")].slice(-7).map((td) => Number(td.textContent));
+    expect(cells).toEqual([t.morning, t.afternoon, t.night, t.other, t.release, t.off, t.nonOfficialDuty]);
+  });
+  // The shift rows along the bottom: the split duty on 5 October counts for both shifts.
+  const foot = [...document.querySelectorAll("tfoot tr")];
+  expect(foot.map((r) => r.querySelector("td").textContent)).toEqual(["MORNING", "AFTERNOON", "NIGHT", "OTHER DUTY"]);
+  ["morning", "afternoon", "night", "other"].forEach((cat, r) => {
+    const counts = [...foot[r].querySelectorAll("td")].slice(1, 1 + days.length).map((td) => Number(td.textContent));
+    expect(counts).toEqual(days.map((d) => dayCountFor(after, d, cat)));
+  });
+});
+
+test("a chosen range is labelled with its dates and applies only inside them", () => {
+  const data = makeData();
+  const prep = prepareBuild({ data, from: "2026-10-07", to: "2026-10-20", keepExisting: true });
+  const out = runEngine({ ...prep.config, polishSteps: 2000, attempts: 1 }, prep.chosenCodes);
+  const proposal = { ...finishMonth(prep, out, data), ms: 900 };
+  const update = jest.fn();
+  render(<MonthPreview proposal={proposal} data={data} update={update} T={T}
+    onDiscard={jest.fn()} onApplied={jest.fn()} />);
+  expect(screen.getByText(/Roster for 7 Oct – 20 Oct 2026/)).toBeInTheDocument();
+  expect(document.querySelectorAll("thead th").length).toBe(1 + 14 + 7);
+  fireEvent.click(screen.getAllByText("Apply to rota")[0]);
+  expect(window.confirm.mock.calls[0][0]).toMatch(/between 7 Oct and 20 Oct/);
+  const after = update.mock.calls[0][0](clone(data));
+  Object.keys(after.cells).forEach((date) => {
+    if (date < "2026-10-07" || date > "2026-10-20") expect(after.cells[date]).toEqual(data.cells[date]);
+  });
 });
