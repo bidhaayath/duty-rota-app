@@ -16,54 +16,19 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Plus, Trash2, Wand2, AlertTriangle, Check, X, ChevronDown, ChevronRight } from "lucide-react";
 import { generateRoster, checkFeasible, toRotaCells, SHIFTS } from "./rosterEngine";
+/* The settings, the engine configuration and the Apply helpers live in
+   rosterConfig.js, shared with Ini's month builder so the two never drift
+   apart. Moved there unchanged; rosterConfig.test.js proves it. */
+import {
+  DEFAULT_RULES, mergeRules, seniorTermsOf, addDays, shiftISO, employedOn,
+  weekDatesFrom, activeStaffFor, codeTextById, codeIdByText, flattenCells,
+  chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches,
+} from "./rosterConfig";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 const SEQ_CATS = [...SHIFTS, "off"];
 const SEQ_LABELS = { ...SHIFT_LABELS, off: "Off day" };
 
-/* The defaults are the rules you described, already set up. Someone opening
-   this page for the first time should be able to press Generate and get a
-   sensible week without configuring anything. */
-const DEFAULT_RULES = {
-  coverage: {
-    morning: { min: 2, max: 3 }, afternoon: { min: 2, max: 3 },
-    evening: { min: 0, max: 0 }, night: { min: 1, max: 2 },
-  },
-  // At least one of every shift the ward runs, so nobody goes a week
-  // without seeing a night, or without a morning.
-  weeklyMin: { morning: 1, afternoon: 1, evening: 1, night: 1, off: 1 },
-  weeklyMax: { morning: null, afternoon: null, evening: null, night: null, off: 2 },
-  blockDays: { morning: 3, afternoon: 3, evening: 3, night: 2 },
-  sequenceRules: [
-    { id: "d1", type: "never", after: "night", then: "morning" },
-    { id: "d2", type: "never", after: "night", then: "afternoon" },
-    { id: "d3", type: "never", after: "night", then: "evening" },
-    { id: "d4", type: "never", after: "afternoon", then: "morning" },
-    { id: "d5", type: "never", after: "evening", then: "morning" },
-  ],
-  maxDaysOn: 5,
-  skipStaff: [],
-  staffShifts: {},
-  weeklyDuties: { min: 5, max: 5 },
-  lookbackDays: 30,
-  /* Who can take charge of a shift, and how many each shift needs. Off by
-     default — every number zero — so nothing changes for a ward that has
-     never thought about it. The word is theirs to choose: "senior" is only
-     one of the ones in use. */
-  seniorStaff: [],
-  seniorCover: { morning: 0, afternoon: 0, evening: 0, night: 0 },
-  seniorTerm: "Senior",
-  seniorTermPlural: "",
-  /* Which code gets written for each kind of duty. Empty = work it out, which
-     is what every existing rota does today, so nothing changes until a ward
-     says otherwise. Stored as code ids, not code text, so renaming a code in
-     Settings does not quietly break the choice. */
-  codeFor: { morning: "", afternoon: "", evening: "", night: "", off: "", nightOff: "" },
-  ruleStates: { coverage: { state: 'hard', priority: 1 }, sequence: { state: 'hard', priority: 1 },
-                offMax: { state: 'hard', priority: 1 }, workPattern: { state: 'soft', priority: 4 } },
-};
-
-const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 /* Back to the start of whatever the ward calls a week — Sunday in the
    Maldives, Monday across much of Europe. 0 is Sunday, matching JavaScript's
    own day numbering, so nothing has to be translated on the way through. */
@@ -107,29 +72,12 @@ export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
   onApplied,
 }) {
-  const saved = data.rosterRules || {};
-  const rules = {
-    ...DEFAULT_RULES, ...saved,
-    coverage: { ...DEFAULT_RULES.coverage, ...(saved.coverage || {}) },
-    weeklyMin: { ...DEFAULT_RULES.weeklyMin, ...(saved.weeklyMin || {}) },
-    weeklyMax: { ...DEFAULT_RULES.weeklyMax, ...(saved.weeklyMax || {}) },
-    blockDays: { ...DEFAULT_RULES.blockDays, ...(saved.blockDays || {}) },
-    sequenceRules: saved.sequenceRules || DEFAULT_RULES.sequenceRules,
-    staffShifts: saved.staffShifts || {},
-    skipStaff: saved.skipStaff || [],
-    seniorStaff: saved.seniorStaff || [],
-    seniorCover: { ...DEFAULT_RULES.seniorCover, ...(saved.seniorCover || {}) },
-    codeFor: { ...DEFAULT_RULES.codeFor, ...(saved.codeFor || {}) },
-    ruleStates: { ...DEFAULT_RULES.ruleStates, ...(saved.ruleStates || {}) },
-    weeklyDuties: { ...DEFAULT_RULES.weeklyDuties, ...(saved.weeklyDuties || {}) },
-  };
+  const rules = mergeRules(data.rosterRules || {});
 
   /* The word this ward uses. Everything on the page and every message the
      engine produces follows it, so a ward that says "in-charge" never sees
      the word "senior" anywhere. */
-  const termOne = (rules.seniorTerm || "Senior").trim() || "Senior";
-  const termMany = (rules.seniorTermPlural || "").trim() || `${termOne}s`;
-  const lower = termOne.toLowerCase();
+  const { termOne, termMany, lower } = seniorTermsOf(rules);
 
   /* Which day a week begins on, as set in Settings. Sunday unless the ward
      says otherwise, which is what every existing rota has always assumed. */
@@ -157,29 +105,8 @@ export default function SmartRosterTab({
   /* ── Who is actually on the rota this week ──
      Employment dates are inclusive, and the rota grid only shows somebody on
      the days between their joining date and their last working day. The
-     generator has to use the same rule, or it rosters people the rota will
-     not display: their duties are written, nobody can see them, and the ward
-     is quietly a person short for the week.
-
-     Read from the same two fields the Staff tab sets, in plain string
-     comparison — the dates are stored as YYYY-MM-DD, which sorts correctly
-     as text and avoids every timezone trap. */
-  const employedOn = (s, date) => {
-    if (s.startDate && date < s.startDate) return false;
-    if (s.endDate && date > s.endDate) return false;
-    return true;
-  };
-  const shiftISO = (iso, n) => {
-    const [y, m, d] = String(iso).split("-").map(Number);
-    const x = new Date(y, m - 1, d);
-    x.setDate(x.getDate() + n);
-    return dstr(x);
-  };
-  const weekDates = useMemo(
-    () => [...Array(7)].map((_, i) => dstr(addDays(new Date(weekStart), i))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [weekStart]
-  );
+     generator uses the same rule (employedOn, in rosterConfig.js). */
+  const weekDates = useMemo(() => weekDatesFrom(weekStart), [weekStart]);
 
   /* Everyone still with the ward — the list the settings below apply to. It
      deliberately does NOT change with the week being planned: a "skip" or a
@@ -190,8 +117,7 @@ export default function SmartRosterTab({
   );
   // Everyone employed on at least one day of THIS week — the ones to roster.
   const activeStaff = useMemo(
-    () => (data.staff || []).filter((s) => weekDates.some((d) => employedOn(s, d))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => activeStaffFor(data.staff, weekDates),
     [data.staff, weekDates]
   );
   /* Left out of this week, and why. Drawn from EVERY staff member, not just
@@ -221,128 +147,13 @@ export default function SmartRosterTab({
   const weekLabel = `${new Date(weekStart).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ` +
                     `${new Date(weekEnd).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
 
-  const nonOfficialFor = (from, to) => {
-    const out = new Set(data.nonOfficial || []);
-    if (data.fridayRule) {
-      for (let d = new Date(from); dstr(d) <= to; d = addDays(d, 1)) if (d.getDay() === 5) out.add(dstr(d));
-    }
-    return [...out];
-  };
+  /* The rota stores cells as cells[date][staffId] = codeId; the engine works
+     in flat "staffId|date" keys holding the code itself. The translation,
+     and the configuration built from it, live in rosterConfig.js. */
+  const codeById = useMemo(() => codeTextById(data.codes), [data.codes]);
+  const idByCode = useMemo(() => codeIdByText(data.codes), [data.codes]);
 
-  /* The rota stores cells as cells[date][staffId] = codeId — nested by
-     date, holding the code's id. The engine works in flat "staffId|date"
-     keys holding the code itself. These two translate between them; getting
-     this wrong means the engine reads no history and writes nothing the
-     rota can see. */
-  const codeById = useMemo(() => {
-    const m = {}; (data.codes || []).forEach((c) => { m[c.id] = c.code; }); return m;
-  }, [data.codes]);
-  /* Code text back to the code's id. FIRST match wins, because that is what
-     the engine picks too — it takes the first code counting as a category.
-     Last-wins would quietly hand every morning to a second code that
-     happens to share the letters, and the preview would look right while
-     the rota got something else. */
-  const idByCode = useMemo(() => {
-    const m = {};
-    (data.codes || []).forEach((c) => { if (!(c.code in m)) m[c.code] = c.id; });
-    return m;
-  }, [data.codes]);
-
-  /* A cell is either a plain duty code id, or a list of duties when a
-     department uses tasks or split shifts:
-         "abc123"   or   [{ code: "abc", task: "Waiter" }, ...]
-     The engine holds one duty per staff member per day, so a split duty
-     contributes its first duty here. Reading the raw value instead would
-     find no matching code and skip the day entirely — the engine would
-     then treat a person who worked twice as having been free, and roster
-     them again. Silent, and exactly the kind of unfairness the lookback
-     exists to prevent. */
-  const firstCodeIdOf = (raw) => {
-    if (!raw) return "";
-    if (typeof raw === "string") return raw;
-    if (Array.isArray(raw)) {
-      const first = raw.find((e) => e && e.code);
-      return first ? first.code : "";
-    }
-    return "";
-  };
-
-  const flatten = (from, to) => {
-    const out = {};
-    for (const [date, row] of Object.entries(data.cells || {})) {
-      if (date < from || date > to) continue;
-      if (!row || typeof row !== "object") continue;
-      for (const [sid, raw] of Object.entries(row)) {
-        const code = codeById[firstCodeIdOf(raw)];
-        if (code) out[`${sid}|${date}`] = code;
-      }
-    }
-    return out;
-  };
-
-  const buildConfig = () => {
-    const lookFrom = dstr(addDays(new Date(weekStart), -(rules.lookbackDays || 0)));
-    const lookTo = dstr(addDays(new Date(weekStart), -1));
-    const history = flatten(lookFrom, lookTo);
-    /* Somebody who joins on the Wednesday should be rostered from Wednesday,
-       not from Sunday. The engine has no notion of employment dates, but it
-       does understand leave — so the days outside somebody's employment are
-       handed to it as leave periods. It then leaves those cells untouched,
-       exactly as the rota grid shows them. */
-    const rosterStaff = activeStaff.map((s) => {
-      const gaps = [];
-      if (s.startDate && s.startDate > weekStart) {
-        gaps.push({ id: `pre-${s.id}`, type: "other", start: weekStart, end: shiftISO(s.startDate, -1) });
-      }
-      if (s.endDate && s.endDate < weekEnd) {
-        gaps.push({ id: `post-${s.id}`, type: "other", start: shiftISO(s.endDate, 1), end: weekEnd });
-      }
-      return gaps.length ? { ...s, leavePeriods: [...(s.leavePeriods || []), ...gaps] } : s;
-    });
-    return {
-      from: weekStart, to: weekEnd,
-      // The weekly limits below reset on the ward's own week boundary.
-      weekStartsOn: firstDay,
-      staff: rosterStaff,
-      codes: data.codes || [],
-      existingCells: flatten(weekStart, weekEnd),
-      coverage: rules.coverage,
-      /* Per-shift caps are left off deliberately: the generator already
-         spreads shift types within the week, so a cap would only get in its
-         way. Off days carry both ends — `off` is the FEWEST somebody should
-         get, `offMax` the most. These were once both fed from the "most"
-         column, which quietly held everyone to exactly that many. */
-      weeklyPerStaff: {
-        ...rules.weeklyMax,
-        off: rules.weeklyMin?.off ?? null,
-        offMax: rules.weeklyMax?.off ?? null,
-      },
-      weeklyMin: rules.weeklyMin,
-      weeklyDuties: rules.weeklyDuties,
-      sequenceRules: rules.sequenceRules,
-      skipStaff: rules.skipStaff,
-      staffShifts: rules.staffShifts,
-      // Who can take charge, how many each shift needs, and what they are
-      // called — the last so the engine's own messages use the ward's word.
-      seniorStaff: rules.seniorStaff,
-      seniorCover: rules.seniorCover,
-      seniorTerm: lower,
-      seniorTermPlural: termMany.toLowerCase(),
-      // Blocks are kept short so a week reads as a mix rather than five
-      // afternoons running. Nights are the exception: they pair.
-      maxBlock: rules.blockDays,
-      maxConsecutiveDays: rules.maxDaysOn ?? 5,
-      // The working pattern is held firm: it is what stops one person
-      // collecting a whole week of the same duty. Only the off-day floor
-      // gives way, and only to keep a shift covered.
-      ruleStates: rules.ruleStates,
-      nonOfficialDates: nonOfficialFor(weekStart, weekEnd),
-      requests: (data.dutyRequests || [])
-        .filter((r) => r.approved && r.date >= weekStart && r.date <= weekEnd)
-        .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category })),
-      history: { cells: history, nonOfficialDates: nonOfficialFor(lookFrom, lookTo) },
-    };
-  };
+  const buildConfig = () => weekConfig(data, weekStart);
 
   const feasibility = useMemo(() => {
     if (!activeStaff.length) return null;
@@ -350,18 +161,11 @@ export default function SmartRosterTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, rules, weekStart, activeStaff]);
 
-  /* The ward's code choices, turned from ids into the code text the engine
-     writes. A choice pointing at a code that has since been deleted simply
-     drops out here, and the engine falls back to working it out. */
-  const chosenCodes = useMemo(() => {
-    const out = {};
-    Object.entries(rules.codeFor || {}).forEach(([slot, id]) => {
-      const c = (data.codes || []).find((x) => x.id === id);
-      if (c) out[slot] = c.code;
-    });
-    return out;
+  const chosenCodes = useMemo(
+    () => chosenCodesFor(rules, data.codes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rules.codeFor, data.codes]);
+    [rules.codeFor, data.codes]
+  );
 
   const generate = () => {
     setBusy(true);
@@ -376,7 +180,7 @@ export default function SmartRosterTab({
         const yearStart = `${weekStart.slice(0, 4)}-01-01`;
         setProposal({
           cells: res.cells, report: res.report,
-          yearToDate: flatten(yearStart, weekEnd),
+          yearToDate: flattenCells(data.cells, codeById, yearStart, weekEnd),
           yearStart,
           rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes),
           from: weekStart, to: weekEnd,
@@ -417,18 +221,8 @@ export default function SmartRosterTab({
       }, 1500);
       return () => clearTimeout(timer);
     }
-    const wrong = [];
-    for (const w of verify.writes) {
-      /* A cell is either a plain duty code id or a list of duties carrying a
-         post. Comparing the raw value only works for the first shape: a cell
-         holding a post would never match and would be reported as empty even
-         though the duty landed correctly. Compare the duty itself. */
-      const landedId = firstCodeIdOf((data.cells?.[w.date] || {})[w.sid]);
-      if (landedId !== w.id) {
-        const who = (data.staff || []).find((s) => String(s.id) === String(w.sid))?.name || w.sid;
-        wrong.push(`${w.date} · ${who}: expected ${w.code}, rota has ${codeById[landedId] || "nothing"}`);
-      }
-    }
+    // Compared duty by duty, whichever shape the cell is in.
+    const wrong = findMismatches(data, verify.writes, codeById);
     const total = verify.writes.length;
     setVerify(null);
     if (wrong.length) {
@@ -456,16 +250,7 @@ export default function SmartRosterTab({
   const apply = () => {
     // Plan the write before touching anything, so a code that cannot be
     // resolved stops the whole thing rather than leaving half a week behind.
-    const writes = [];
-    const missing = new Set();
-    for (const [key, code] of Object.entries(proposal.rotaCells)) {
-      const cut = key.lastIndexOf("|");            // a date never contains "|"
-      const sid = key.slice(0, cut);
-      const date = key.slice(cut + 1);
-      const id = idByCode[code];
-      if (!id) { missing.add(code); continue; }
-      writes.push({ sid, date, id, code });
-    }
+    const { writes, missing } = planWrites(proposal.rotaCells, idByCode);
     if (missing.size) {
       window.alert(
         `Cannot apply: no duty code is set up for ${[...missing].join(", ")}.\n\n` +
@@ -479,7 +264,7 @@ export default function SmartRosterTab({
        nobody worked, so applying clears it — which is the only thing here
        that removes anything the manager entered by hand. It is counted and
        said out loud beforehand rather than discovered later in Insights. */
-    const marksCleared = writes.filter((w) => data.cellMeta?.[w.date]?.[w.sid]?.exchange).length;
+    const marksCleared = exchangeMarksIn(data, writes);
     if (!window.confirm(
       `Apply this week?\n\n${writes.length} duties will be written for ${weekLabel}.\n\n` +
       `Existing duties that week will be replaced. Recorded leave is kept as it is, ` +
@@ -492,23 +277,9 @@ export default function SmartRosterTab({
       `\n\nUndo will put everything back if you change your mind.`
     )) return;
 
-    update((d) => {
-      const next = { ...(d.cells || {}) };
-      for (const w of writes) {
-        next[w.date] = { ...(next[w.date] || {}), [w.sid]: w.id };
-        /* A "changed duty" mark remembers what a cell held before it was
-           exchanged. Once the cell has been rewritten by a fresh rota that
-           memory is of a duty nobody ever worked, so it goes. Notes on the
-           cell are about the person and the day, so those stay. */
-        const meta = d.cellMeta?.[w.date]?.[w.sid];
-        if (meta?.exchange) {
-          delete meta.exchange;
-          if (!Object.keys(meta).length) delete d.cellMeta[w.date][w.sid];
-        }
-      }
-      d.cells = next;
-      return d;
-    });
+    // Writes every cell and clears the "changed duty" marks it replaces;
+    // notes on the cells stay.
+    update((d) => writeCells(d, writes));
     setProposal(null);
     setVerify({ writes, before: data, week: weekStart });
   };
