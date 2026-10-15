@@ -174,13 +174,17 @@ async function claimUse(cfg, token, departmentId) {
 /* ── What Claude may answer ──
    One object per action type. The `type` field tells them apart. Every field
    is required (unknown values are null), because the structured output
-   format needs a fixed shape. Ranges and numbers are checked after Claude
-   answers, since the format cannot express minimums or maximums. */
+   format needs a fixed shape.
+
+   Kept deliberately light: the API turns this shape into a grammar, and a
+   long list of allowed values repeated in many places (staff refs, dates,
+   codes) makes that grammar too large for big departments. So staff refs,
+   dates and codes are plain text here, and every one of them is checked in
+   checkAnswer below, together with ranges and numbers. */
 function buildSchema(input) {
-  const refs = input.staff.map((s) => s.ref);
-  const date = { type: 'string', format: 'date' };
+  const date = { type: 'string' };
   const dateOrNull = { anyOf: [date, { type: 'null' }] };
-  const staffRef = { type: 'string', enum: refs };
+  const staffRef = { type: 'string' };
   const obj = (type, props) => ({
     type: 'object',
     additionalProperties: false,
@@ -227,7 +231,7 @@ function buildSchema(input) {
   if (input.codes.length) {
     variants.splice(2, 0, obj('set_code', {
       staff: staffRef, start: date, end: date,
-      code: { type: 'string', enum: input.codes.map((c) => c.code) },
+      code: { type: 'string' },
     }));
   }
 
@@ -313,7 +317,8 @@ function buildPrompt(input, today) {
     '  those days were left out because of the leave; nothing more is needed for them.',
     '',
     'Rules:',
-    '- Only use the staff listed, by their ref (s1, s2...). Never invent a person.',
+    '- Only use the staff listed, by their ref exactly as written (s1, s2...). Never invent a',
+    '  person.',
     '- Maldivian names have many spellings (Aishath / Aisha, Mohamed / Mohammed). Match a',
     '  different spelling only when it clearly means exactly one listed person. If a name',
     '  could mean two or more people, or nobody on the list, do not guess: put it in unclear',
@@ -413,6 +418,14 @@ async function askClaude(cfg, input, today) {
    picked up. The app makes its own checks against the rota on top of these. */
 function checkAnswer(answer, input, today) {
   const byRef = new Map(input.staff.map((s) => [s.ref, s]));
+  const byName = new Map(input.staff.map((s) => [s.name.toLowerCase(), s]));
+  // A ref as asked for, or failing that the person's exact name.
+  const find = (r) => {
+    if (typeof r !== 'string') return undefined;
+    const t = r.trim();
+    return byRef.get(t) || byRef.get(t.toLowerCase()) || byName.get(t.toLowerCase());
+  };
+  let unknownPeople = 0;
   const codeByText = new Map(input.codes.map((c) => [c.code, c]));
   const leaveTypes = new Set(input.leaveTypes);
   const earliest = addDaysISO(today, -62);
@@ -428,7 +441,8 @@ function checkAnswer(answer, input, today) {
 
   for (const raw of (Array.isArray(a.actions) ? a.actions : []).slice(0, MAX_ACTIONS)) {
     if (!raw || typeof raw !== 'object') continue;
-    const who = byRef.get(raw.staff);
+    const who = find(raw.staff);
+    if (raw.staff !== undefined && raw.staff !== null && !who) unknownPeople += 1;
 
     switch (raw.type) {
       case 'add_leave': {
@@ -464,8 +478,8 @@ function checkAnswer(answer, input, today) {
         break;
       }
       case 'swap_duties': {
-        const A = byRef.get(raw.staffA), B = byRef.get(raw.staffB);
-        if (!A || !B) break;
+        const A = find(raw.staffA), B = find(raw.staffB);
+        if (!A || !B) { unknownPeople += 1; break; }
         if (A.id === B.id) { note(`A swap named ${A.name} twice, so it was left out.`); break; }
         if (!okRange(raw.start, raw.end)) { note(`The swap between ${A.name} and ${B.name} had dates that did not make sense, so it was left out.`); break; }
         actions.push({ type: 'swap_duties', staffA: A.id, staffAName: A.name, staffB: B.id, staffBName: B.name, start: raw.start, end: raw.end });
@@ -510,7 +524,7 @@ function checkAnswer(answer, input, today) {
         break;
       }
       case 'set_seniors': {
-        const pick = (list) => [...new Set((Array.isArray(list) ? list : []).map((r) => byRef.get(r)).filter(Boolean))];
+        const pick = (list) => [...new Set((Array.isArray(list) ? list : []).map((r) => find(r)).filter(Boolean))];
         let add = pick(raw.add);
         let remove = pick(raw.remove);
         const both = add.filter((p) => remove.includes(p));
@@ -558,6 +572,8 @@ function checkAnswer(answer, input, today) {
         break;
     }
   }
+
+  if (unknownPeople) note(`${unknownPeople === 1 ? 'One change' : `${unknownPeople} changes`} named someone not on this rota's staff list, so ${unknownPeople === 1 ? 'it was' : 'they were'} left out.`);
 
   // The refs (s1, s2...) mean nothing to the manager, so any that slip into
   // a note are swapped back for the person's name.
