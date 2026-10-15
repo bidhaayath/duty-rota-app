@@ -181,7 +181,6 @@ function buildSchema(input) {
   const date = { type: 'string', format: 'date' };
   const dateOrNull = { anyOf: [date, { type: 'null' }] };
   const staffRef = { type: 'string', enum: refs };
-  const intOrNull = { anyOf: [{ type: 'integer' }, { type: 'null' }] };
   const obj = (type, props) => ({
     type: 'object',
     additionalProperties: false,
@@ -200,8 +199,18 @@ function buildSchema(input) {
       min: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
       max: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     }),
+    // A list of { shift, count } rather than four nullable numbers: nullable
+    // fields make the answer format much heavier for the API to prepare.
     obj('set_senior_cover', {
-      morning: intOrNull, afternoon: intOrNull, evening: intOrNull, night: intOrNull,
+      cover: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['shift', 'count'],
+          properties: { shift: { type: 'string', enum: SHIFTS }, count: { type: 'integer' } },
+        },
+      },
     }),
     obj('set_seniors', {
       add: { type: 'array', items: staffRef },
@@ -277,10 +286,10 @@ function buildPrompt(input, today) {
     '- set_senior_cover: a standing Smart Roster setting for the whole ward: the fewest',
     '  seniors each shift needs. A senior is someone able to take charge of a shift. Wards',
     '  call them different things: senior, in-charge, shift in-charge, charge nurse, sister,',
-    '  supervisor, team leader, or the ward\'s own word given below. Give a number for each',
-    '  shift the note mentions and null for any it does not ("at least 1 in-charge on every',
-    '  shift" gives 1 for every shift this ward runs; "2 seniors on nights" gives night 2 and',
-    '  null for the rest; "no senior needed on afternoons" gives afternoon 0).',
+    '  supervisor, team leader, or the ward\'s own word given below. cover lists only the',
+    '  shifts the note mentions, each with its number ("at least 1 in-charge on every shift"',
+    '  lists every shift this ward runs with 1; "2 seniors on nights" lists only night with 2;',
+    '  "no senior needed on afternoons" lists afternoon with 0).',
     '- set_seniors: a standing Smart Roster setting: who can take charge of a shift. add lists',
     '  people who can ("Ali and Hawwa can be in charge"), remove lists people who no longer',
     '  can ("Mariyam is not a senior any more"). Use empty lists for a side not mentioned.',
@@ -376,6 +385,11 @@ async function askClaude(cfg, input, today) {
       // Only the status and Anthropic's error type are logged — never the
       // manager's note, staff names or the key.
       console.error('Claude request failed', res.status, data && data.error && data.error.type);
+      // For a 400 the API's own message says what was wrong with the request
+      // format (never the note or names), so it is logged to help fix it.
+      if (res.status === 400 && data && data.error && data.error.message) {
+        console.error('Claude says:', String(data.error.message).slice(0, 300));
+      }
       return null;
     }
     if (data.stop_reason === 'refusal' || data.stop_reason === 'max_tokens') {
@@ -480,8 +494,12 @@ function checkAnswer(answer, input, today) {
         const cover = {};
         let any = false;
         let offShift = false;
+        const given = {};
+        for (const c of (Array.isArray(raw.cover) ? raw.cover : [])) {
+          if (c && SHIFTS.includes(c.shift)) given[c.shift] = c.count;
+        }
         for (const sh of SHIFTS) {
-          const v = fix(raw[sh]);
+          const v = fix(given[sh]);
           if (v !== null && !input.shifts.includes(sh)) { offShift = true; cover[sh] = null; continue; }
           cover[sh] = v;
           if (v !== null) any = true;
