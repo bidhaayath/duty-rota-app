@@ -1,10 +1,11 @@
 /* POST /api/ai/parse
-   body: { departmentId, text, from, to, staff, leaveTypes, codes, shifts, fridayRule }
+   body: { departmentId, text, from, to, staff, leaveTypes, codes, shifts, fridayRule, seniorTerm }
 
    Ini, the rota assistant. Turns a manager's plain-language note into a list
    of ACTIONS (add leave, add a request, put an exact code in cells, clear
    days, swap two people, mark non-official days, change a Smart Roster
-   setting, give fixed weekday offs, build a period).
+   setting, say how many seniors each shift needs and who they are, give
+   fixed weekday offs, build a period).
 
    It only SUGGESTS. Nothing is saved here: the manager reviews every action
    in the app and confirms, and the app saves through its normal, permission-
@@ -44,6 +45,7 @@ const MAX_STAFF = 300;
 const MAX_CODES = 80;
 const MAX_ACTIONS = 120;    // after Claude answers
 const MAX_RANGE_DAYS = 92;  // the longest date range any one action may cover
+const MAX_SENIOR_COVER = 10; // the most seniors any one shift may ask for
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -142,6 +144,9 @@ function readInput(body) {
       departmentId: b.departmentId, text, from: b.from, to: b.to,
       staff, leaveTypes, codes, shifts: shifts.length ? shifts : ['morning', 'afternoon', 'night'],
       fridayRule: b.fridayRule === true,
+      // The ward's own word for the person in charge of a shift ("Senior",
+      // "In-charge", "Sister"). Only used so Ini understands the note.
+      seniorTerm: cleanText(b.seniorTerm, 30) || 'Senior',
     },
   };
 }
@@ -176,6 +181,7 @@ function buildSchema(input) {
   const date = { type: 'string', format: 'date' };
   const dateOrNull = { anyOf: [date, { type: 'null' }] };
   const staffRef = { type: 'string', enum: refs };
+  const intOrNull = { anyOf: [{ type: 'integer' }, { type: 'null' }] };
   const obj = (type, props) => ({
     type: 'object',
     additionalProperties: false,
@@ -193,6 +199,13 @@ function buildSchema(input) {
     obj('set_offs_per_week', {
       min: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
       max: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+    }),
+    obj('set_senior_cover', {
+      morning: intOrNull, afternoon: intOrNull, evening: intOrNull, night: intOrNull,
+    }),
+    obj('set_seniors', {
+      add: { type: 'array', items: staffRef },
+      remove: { type: 'array', items: staffRef },
     }),
     obj('weekly_off', {
       staff: staffRef,
@@ -261,6 +274,16 @@ function buildPrompt(input, today) {
     '  (min) and most (max) off days each person gets per week. Use null for a side the',
     '  note does not mention ("at least 2 offs" gives min 2, max null; "2 offs a week"',
     '  gives min 2, max 2).',
+    '- set_senior_cover: a standing Smart Roster setting for the whole ward: the fewest',
+    '  seniors each shift needs. A senior is someone able to take charge of a shift. Wards',
+    '  call them different things: senior, in-charge, shift in-charge, charge nurse, sister,',
+    '  supervisor, team leader, or the ward\'s own word given below. Give a number for each',
+    '  shift the note mentions and null for any it does not ("at least 1 in-charge on every',
+    '  shift" gives 1 for every shift this ward runs; "2 seniors on nights" gives night 2 and',
+    '  null for the rest; "no senior needed on afternoons" gives afternoon 0).',
+    '- set_seniors: a standing Smart Roster setting: who can take charge of a shift. add lists',
+    '  people who can ("Ali and Hawwa can be in charge"), remove lists people who no longer',
+    '  can ("Mariyam is not a senior any more"). Use empty lists for a side not mentioned.',
     '- weekly_off: off on the same weekdays every week ("off every Friday and Saturday"),',
     '  from start to end. Weekdays are numbers: 0 Sunday, 1 Monday, 2 Tuesday, 3 Wednesday,',
     '  4 Thursday, 5 Friday, 6 Saturday. Use null for start and end to mean the whole',
@@ -309,6 +332,7 @@ function buildPrompt(input, today) {
     `Planning period: ${input.from} to ${input.to}`,
     `Shifts this ward runs: ${input.shifts.join(', ')}`,
     `Every Friday is already non-official: ${input.fridayRule ? 'yes' : 'no'}`,
+    `This ward's word for a senior (the person in charge of a shift): ${input.seniorTerm}`,
     `Leave types: ${input.leaveTypes.join(', ')}`,
     '',
     'Duty codes in this department:',
@@ -449,6 +473,40 @@ function checkAnswer(answer, input, today) {
         const min = fix(raw.min), max = fix(raw.max);
         if (min === null && max === null) { note('The number of off days per week did not make sense, so it was left out.'); break; }
         actions.push({ type: 'set_offs_per_week', min, max });
+        break;
+      }
+      case 'set_senior_cover': {
+        const fix = (v) => (Number.isInteger(v) && v >= 0 && v <= MAX_SENIOR_COVER ? v : null);
+        const cover = {};
+        let any = false;
+        let offShift = false;
+        for (const sh of SHIFTS) {
+          const v = fix(raw[sh]);
+          if (v !== null && !input.shifts.includes(sh)) { offShift = true; cover[sh] = null; continue; }
+          cover[sh] = v;
+          if (v !== null) any = true;
+        }
+        if (offShift) note(`A number of ${input.seniorTerm.toLowerCase()}s was given for a shift this ward does not run, so that part was left out.`);
+        if (!any) { if (!offShift) note(`The number of ${input.seniorTerm.toLowerCase()}s per shift did not make sense, so it was left out.`); break; }
+        actions.push({ type: 'set_senior_cover', cover });
+        break;
+      }
+      case 'set_seniors': {
+        const pick = (list) => [...new Set((Array.isArray(list) ? list : []).map((r) => byRef.get(r)).filter(Boolean))];
+        let add = pick(raw.add);
+        let remove = pick(raw.remove);
+        const both = add.filter((p) => remove.includes(p));
+        if (both.length) {
+          note(`${both.map((p) => p.name).join(' and ')} ${both.length > 1 ? 'were' : 'was'} both added and removed as ${input.seniorTerm.toLowerCase()}, so that was left out.`);
+          add = add.filter((p) => !both.includes(p));
+          remove = remove.filter((p) => !both.includes(p));
+        }
+        if (!add.length && !remove.length) break;
+        actions.push({
+          type: 'set_seniors',
+          add: add.map((p) => ({ staffId: p.id, staffName: p.name })),
+          remove: remove.map((p) => ({ staffId: p.id, staffName: p.name })),
+        });
         break;
       }
       case 'weekly_off': {

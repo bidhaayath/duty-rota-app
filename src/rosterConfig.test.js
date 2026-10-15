@@ -10,7 +10,7 @@
 import { generateRoster, toRotaCells } from "./rosterEngine";
 import {
   weekConfig, mergeRules, chosenCodesFor, codeTextById, codeIdByText, flattenCells,
-  activeStaffFor, weekDatesFrom, planWrites, writeCells, findMismatches, exchangeMarksIn,
+  activeStaffFor, weekDatesFrom, planWrites, writeCells, findMismatches, exchangeMarksIn, seniorNeedOf,
 } from "./rosterConfig";
 
 /* ─────────────── OLD (frozen copy) ─────────────── */
@@ -392,4 +392,45 @@ describe.each(CASES)("Smart Roster unchanged: %s", (_label, make, weekStart) => 
       expect(findMismatches(tampered, writes, old.codeById)).toEqual(wrongOld);
     }
   }, 60000);
+});
+
+/* ─────────────── Smart Roster's "enough seniors?" hint ───────────────
+   OLD_HINT is the sum exactly as it stood inline in SmartRosterTab.js
+   before it moved to seniorNeedOf (commit 66f3aab). Do not tidy it. */
+const OLD_HINT = (rules, activeStaff) => {
+  const SHIFTS = ["morning", "afternoon", "evening", "night"];
+  const seniorCount = activeStaff.filter((s) => rules.seniorStaff.includes(s.id) && !rules.skipStaff.includes(s.id)).length;
+  const seniorPerDay = SHIFTS.reduce((n, sh) => n + ((rules.coverage[sh]?.min || 0) > 0 ? (rules.seniorCover[sh] || 0) : 0), 0);
+  return {
+    show: seniorPerDay > 0,
+    seniorCount, seniorPerDay,
+    perPerson: rules.weeklyDuties?.max || 5,
+    needed: Math.ceil((seniorPerDay * 7) / (rules.weeklyDuties?.max || 5)),
+  };
+};
+
+describe("Smart Roster's senior hint is unchanged", () => {
+  const staff = staffList(12);
+  const SAVED = [
+    {},
+    { seniorStaff: ["s1", "s2"], seniorCover: { morning: 1 } },
+    { seniorStaff: ["s1", "s2", "s3"], seniorCover: { morning: 1, night: 2 }, skipStaff: ["s2"] },
+    // A senior on a shift the ward does not staff is not counted.
+    { seniorStaff: ["s0"], seniorCover: { evening: 3, night: 1 }, coverage: { evening: { min: 0, max: 2 } } },
+    { seniorStaff: ["s4", "ghost"], seniorCover: { morning: 2, afternoon: 2, night: 2 }, weeklyDuties: { max: 4 } },
+    { seniorStaff: ["s5"], seniorCover: { morning: 1 }, weeklyDuties: { max: 0 } },
+    { seniorStaff: ["s5"], seniorCover: { morning: 1 }, weeklyDuties: { max: null } },
+    { seniorStaff: ["s6"], seniorCover: { morning: "" }, coverage: { morning: { min: null, max: 3 } } },
+    { seniorStaff: ["s7", "s8"], seniorCover: { morning: 10, afternoon: 0, evening: 4, night: 7 },
+      coverage: { evening: { min: 1, max: 4 } }, weeklyDuties: { max: 6 } },
+  ];
+  test.each(SAVED.map((s, i) => [i, s]))("settings %i", (_i, saved) => {
+    const rules = mergeRules(saved);
+    [staff, staff.slice(0, 3), []].forEach((list) => {
+      const old = OLD_HINT(rules, list);
+      const now = seniorNeedOf(rules, list);
+      expect(now.seniorPerDay > 0).toBe(old.show);
+      expect(now).toEqual({ seniorCount: old.seniorCount, seniorPerDay: old.seniorPerDay, perPerson: old.perPerson, needed: old.needed });
+    });
+  });
 });

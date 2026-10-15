@@ -26,7 +26,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X, Check, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
-import { codeTextById, writeCells, findMismatches, exchangeMarksIn, employedOn } from "./rosterConfig";
+import { codeTextById, writeCells, findMismatches, exchangeMarksIn, employedOn, mergeRules, seniorTermsOf } from "./rosterConfig";
 import { weekTotalsFor, dayCountFor, isNonOff } from "./rotaCounts";
 import { monthFingerprint, prettyDay, prettyWeekday } from "./monthBuild";
 
@@ -246,10 +246,12 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
   const lockedNames = [...locked].map(nameOf).filter(Boolean);
   const skippedNames = rows.filter((s) => skipped.has(s.id)).map((s) => s.name);
   const clean = !proposal.shortfalls.length && !proposal.seniorGaps.length && !proposal.bent.length;
+  // The ward's own word for the person in charge, as Smart Roster uses it.
+  const seniorWord = seniorTermsOf(mergeRules(data.rosterRules || {})).lower;
   // The one-line version for phones.
   const summaryLine = [
     proposal.shortfalls.length ? `${plural(proposal.shortfalls.length, "shift")} not filled` : "Every shift covered",
-    proposal.seniorGaps.length ? `${proposal.seniorGaps.length} without anyone in charge` : null,
+    proposal.seniorGaps.length ? `${proposal.seniorGaps.length} with no ${seniorWord}` : null,
     proposal.bent.length ? `${plural(proposal.bent.length, "setting")} bent` : null,
   ].filter(Boolean).join(" · ");
 
@@ -372,7 +374,7 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
             )}
             {proposal.seniorGaps.length > 0 && (
               <div style={box("#FBF1DC", "#E7D9B8", "#8A5A0F")}>
-                <strong>{plural(proposal.seniorGaps.length, "shift")} without anyone in charge:</strong>{" "}
+                <strong>{plural(proposal.seniorGaps.length, "shift")} with no {seniorWord}:</strong>{" "}
                 {listOf(proposal.seniorGaps.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.
               </div>
             )}

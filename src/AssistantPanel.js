@@ -39,7 +39,7 @@ import {
 import { startMonthBuild } from "./monthBuildRunner";
 import MonthPreview from "./MonthPreview";
 import IniMascot from "./IniMascot";
-import { mergeRules } from "./rosterConfig";
+import { mergeRules, seniorTermsOf } from "./rosterConfig";
 import { SHIFTS } from "./rosterEngine";
 import { GROUPS, LEAVE_TYPES, entryFor, readReply, checkLines, applyLines, savedWords } from "./iniActions";
 
@@ -379,6 +379,8 @@ export default function AssistantPanel({
           departmentId: deptId, text: note, from, to, staff: sent,
           leaveTypes: LEAVE_TYPES.map(([id]) => id),
           codes: codesFor(data), shifts: shiftsFor(data), fridayRule: !!(data && data.fridayRule),
+          // The ward's own word for a senior, so Ini understands "in-charge".
+          seniorTerm: seniorTermsOf(mergeRules((data && data.rosterRules) || {})).termOne,
         }),
       });
       body = await res.json().catch(() => ({}));

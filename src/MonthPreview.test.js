@@ -164,3 +164,13 @@ test("a chosen range is labelled with its dates and applies only inside them", (
     if (date < "2026-10-07" || date > "2026-10-20") expect(after.cells[date]).toEqual(data.cells[date]);
   });
 });
+
+test("shifts with nobody in charge are named with the ward's own word", () => {
+  const data = { ...makeData(), rosterRules: { seniorTerm: "In-charge" } };
+  const proposal = { ...build(data, true), seniorGaps: [{ date: "2026-10-06", shift: "night" }, { date: "2026-10-07", shift: "morning" }] };
+  render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
+    onDiscard={jest.fn()} onApplied={jest.fn()} />);
+  expect(screen.getByText("2 shifts with no in-charge:")).toBeInTheDocument();
+  expect(screen.getByText(/2 with no in-charge/)).toBeInTheDocument();
+  expect(screen.queryByText(/anyone in charge/)).toBeNull();
+});

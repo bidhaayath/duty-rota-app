@@ -77,6 +77,22 @@ export const seniorTermsOf = (rules) => {
   return { termOne, termMany, lower: termOne.toLowerCase() };
 };
 
+/* Enough seniors for the week? Smart Roster's sum under "How many staff on
+   each shift", moved here unchanged so Ini can say the same thing:
+   seniors asked for each day (counting only shifts the ward staffs) times
+   seven, shared out at the weekly duty maximum, against the people ticked
+   who are not skipped. `staff` is whoever the screen is counting — the
+   week's staff on Smart Roster, everyone still with the ward for Ini.
+   rosterConfig.test.js holds the old inline code to prove it.          */
+// The engine's SHIFTS; not imported, so this file stays free of the engine.
+const SENIOR_SHIFTS = ["morning", "afternoon", "evening", "night"];
+export const seniorNeedOf = (rules, staff) => {
+  const seniorCount = staff.filter((s) => rules.seniorStaff.includes(s.id) && !rules.skipStaff.includes(s.id)).length;
+  const seniorPerDay = SENIOR_SHIFTS.reduce((n, sh) => n + ((rules.coverage[sh]?.min || 0) > 0 ? (rules.seniorCover[sh] || 0) : 0), 0);
+  const perPerson = rules.weeklyDuties?.max || 5;
+  return { seniorCount, seniorPerDay, perPerson, needed: Math.ceil((seniorPerDay * 7) / perPerson) };
+};
+
 /* ── Dates ──
    The same three helpers Smart Roster has always used, kept exactly as they
    were — including reading "YYYY-MM-DD" with new Date(), which a week's
