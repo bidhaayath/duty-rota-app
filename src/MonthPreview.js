@@ -78,9 +78,13 @@ const PHONE_CSS = `
     .mp-sheet {
       display: block !important; width: 100% !important; max-width: 100% !important;
       min-width: 0 !important; margin: 0 !important; border-radius: 0 !important;
-      min-height: 100%; overflow-x: hidden;
+      /* clip, not hidden: hidden would make this its own scroll box, and
+         the pinned title would then scroll away with the page. */
+      min-height: 100%; overflow-x: hidden; overflow-x: clip;
     }
-    .mp-head { padding: 12px !important; }
+    /* The page scrolls as one here, so the title stays pinned at the top
+       (Discard and Apply are pinned at the bottom). */
+    .mp-head { padding: 12px !important; position: sticky; top: 0; z-index: 9; background: #fff; }
     .mp-head > div { flex: 1 1 100%; min-width: 0; }
     .mp-title { white-space: normal !important; overflow-wrap: anywhere; font-size: 16px !important; line-height: 1.3; }
     .mp-body {
@@ -101,7 +105,12 @@ const PHONE_CSS = `
     .mp-summary-toggle { display: flex; width: 100%; white-space: normal; }
     .mp-summary-toggle span { overflow-wrap: anywhere; }
     .mp-details:not(.open) { display: none !important; }
-    .mp-gridbox { width: 100%; max-width: 100%; max-height: none !important; overflow-x: auto !important; overflow-y: visible !important; }
+    /* Scrolls both ways inside its own box, which is what keeps the day
+       header and the names in view: the screen between the title and the
+       buttons, or 60% of it on a very short screen. */
+    .mp-gridbox { width: 100%; max-width: 100%; overflow: auto !important;
+      max-height: max(60vh, calc(100vh - 170px)) !important;
+      max-height: max(60dvh, calc(100dvh - 170px)) !important; }
     /* The grid cells keep their own size: the app shrinks every table on a
        phone, which is right for its other tabs but not for this grid. */
     .mp-overlay .mp-gridbox table.mp-grid td { padding: 0 !important; }
@@ -123,6 +132,9 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
   const { writes, periodFrom, periodTo, label } = proposal;
   const [verify, setVerify] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
+  // The two long summaries start closed, so the grid is what you see first.
+  const [openBent, setOpenBent] = useState(false);
+  const [openFair, setOpenFair] = useState(false);
   // Held in a ref so a parent re-render cannot restart the check below.
   const appliedRef = useRef(onApplied);
   appliedRef.current = onApplied;
@@ -266,6 +278,22 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
     background: kind === "ghost" ? "#fff" : T.lagoon, color: kind === "ghost" ? T.ink : "#fff",
     cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1,
   });
+  /* A summary that opens on a click: one line while closed, so a big ward's
+     long lists never push the grid off the screen. */
+  const fold = (open, setOpen, title, extra, colours, body) => (
+    <div style={box(...colours)}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+        style={{ fontFamily: "inherit", fontSize: "inherit", color: "inherit", lineHeight: "inherit",
+          background: "none", border: "none", padding: 0, margin: 0, width: "100%", textAlign: "left",
+          cursor: "pointer", display: "flex", gap: 8, alignItems: "baseline" }}>
+        <span style={{ flex: 1, minWidth: 0 }}><strong>{title}</strong>{extra ? ` · ${extra}` : ""}</span>
+        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && body}
+    </div>
+  );
+  const bentPlaces = proposal.bent.reduce((n, b) => n + b.places.length, 0);
+
   const cellBox = { minWidth: 38, height: 30, borderRadius: 6, fontSize: 11.5, fontWeight: 700,
     display: "flex", alignItems: "center", justifyContent: "center", position: "relative", padding: "0 3px" };
   const actionButtons = (
@@ -340,7 +368,11 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
           <div className="mp-actions-top" style={{ display: "flex", gap: 8 }}>{actionButtons}</div>
         </header>
 
-        <div className="mp-body" style={{ flex: 1, overflowY: "auto", padding: "14px 18px 22px", display: "grid", gap: 12, alignContent: "start" }}>
+        {/* Every row is as tall as its content. With plain "auto" rows a
+            grid this tall squeezes the scrolling grid box to fit — with a
+            big ward it shrank to two rows. Now the body scrolls instead. */}
+        <div className="mp-body" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 18px 22px", display: "grid",
+          gridAutoRows: "max-content", gap: 12, alignContent: "start" }}>
           {/* On a phone the summary is one line until tapped. */}
           <button type="button" className="mp-summary-toggle" aria-expanded={showDetails}
             onClick={() => setShowDetails((v) => !v)}
@@ -352,59 +384,61 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
             {showDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
 
+          {/* Shifts left short or with nobody in charge are always on show,
+              on a phone too: they are what a manager must see before Apply. */}
+          {proposal.shortfalls.length > 0 && (
+            <div style={box("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
+              <strong>{plural(proposal.shortfalls.length, "shift")} could not be filled:</strong>{" "}
+              {listOf(proposal.shortfalls.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.
+              {proposal.shortWeeks.map((w) => (
+                <div key={w.week}>
+                  The week of {prettyDay(w.week)} needs {w.needed} duties and your staff can work {w.available} between
+                  them. Raise the weekly duty maximum, lower a shift minimum, or add someone.
+                </div>
+              ))}
+              {!proposal.shortWeeks.length && " There were enough duties on paper, but the rest rules left nobody free at those times."}
+              {" "}You can apply this and fill them by hand.
+            </div>
+          )}
+          {proposal.seniorGaps.length > 0 && (
+            <div style={box("#FBF1DC", "#E7D9B8", "#8A5A0F")}>
+              <strong>{plural(proposal.seniorGaps.length, "shift")} with no {seniorWord}:</strong>{" "}
+              {listOf(proposal.seniorGaps.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.
+            </div>
+          )}
+
           <div className={`mp-details${showDetails ? " open" : ""}`} style={{ display: "grid", gap: 12 }}>
             {clean && (
               <div style={box("#E3F3EF", "#BFE3DA", "#0B6A60")}>
                 Every shift is covered, and none of your Smart Roster settings had to bend.
               </div>
             )}
-            {proposal.shortfalls.length > 0 && (
-              <div style={box("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
-                <strong>{plural(proposal.shortfalls.length, "shift")} could not be filled:</strong>{" "}
-                {listOf(proposal.shortfalls.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.
-                {proposal.shortWeeks.map((w) => (
-                  <div key={w.week}>
-                    The week of {prettyDay(w.week)} needs {w.needed} duties and your staff can work {w.available} between
-                    them. Raise the weekly duty maximum, lower a shift minimum, or add someone.
-                  </div>
-                ))}
-                {!proposal.shortWeeks.length && " There were enough duties on paper, but the rest rules left nobody free at those times."}
-                {" "}You can apply this and fill them by hand.
-              </div>
-            )}
-            {proposal.seniorGaps.length > 0 && (
-              <div style={box("#FBF1DC", "#E7D9B8", "#8A5A0F")}>
-                <strong>{plural(proposal.seniorGaps.length, "shift")} with no {seniorWord}:</strong>{" "}
-                {listOf(proposal.seniorGaps.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.
-              </div>
-            )}
-            {proposal.bent.length > 0 && (
-              <div style={box("#FBF1DC", "#E7D9B8", "#8A5A0F")}>
-                <strong>Settings it had to bend:</strong>
+            {proposal.bent.length > 0 && fold(openBent, setOpenBent, "Settings it had to bend",
+              plural(bentPlaces, "place"), ["#FBF1DC", "#E7D9B8", "#8A5A0F"], (
                 <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
                   {proposal.bent.map((b) => (
                     <li key={b.rule}><strong>{b.rule}</strong> ({b.places.length}): {listOf(b.places)}</li>
                   ))}
                 </ul>
-              </div>
-            )}
-            {fairness.length > 0 && (
-              <div style={box("#F4F8F7", T.line, T.ink)}>
-                <strong>How evenly it is shared</strong> (these dates, per person):
-                <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-                  {fairness.map((x) => (
-                    <li key={x.name}>
-                      {x.name}: <strong>{x.range}</strong>
-                      {x.s.min !== x.s.max && (
-                        <span style={{ color: T.inkSoft }}>
-                          {" "}— fewest {listOf(x.s.fewest, 3)}; most {listOf(x.s.most, 3)}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              ))}
+            {fairness.length > 0 && fold(openFair, setOpenFair, "How evenly it is shared", "",
+              ["#F4F8F7", T.line, T.ink], (
+                <>
+                  <div style={{ marginTop: 4 }}>These dates, per person:</div>
+                  <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                    {fairness.map((x) => (
+                      <li key={x.name}>
+                        {x.name}: <strong>{x.range}</strong>
+                        {x.s.min !== x.s.max && (
+                          <span style={{ color: T.inkSoft }}>
+                            {" "}— fewest {listOf(x.s.fewest, 3)}; most {listOf(x.s.most, 3)}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ))}
 
             {/* How it was built */}
             <div style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.65 }}>
@@ -437,7 +471,11 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
             </span>
             <span className="mp-hover-hint">On a computer, hover over a changed cell to see what it holds now.</span>
           </div>
-          <div className="mp-gridbox" style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 10, maxHeight: "70vh" }}>
+          {/* As tall as the staff need, up to nearly the whole screen (and
+              never under 60% of it), so once scrolled to it the grid fills
+              the view. Day header and names stay put inside it. */}
+          <div className="mp-gridbox" style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 10,
+            maxHeight: "max(60vh, calc(100vh - 190px))" }}>
             <table className="mp-grid" style={{ borderCollapse: "separate", borderSpacing: 2, fontSize: 12 }}>
               <thead>
                 <tr>
