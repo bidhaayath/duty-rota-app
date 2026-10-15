@@ -22,11 +22,17 @@
      footnote    optional sentence shown under the group
      tabNote     optional { tabName: sentence } shown while on that tab
      opensRequests  offer "Open Duty Requests" after saving
+     together    optional (final, ctx) -> warnings, for a check that only
+                 makes sense on the result of several lines at once. Entries
+                 sharing the same function are one family: it runs once, on
+                 the rota as it will be after every ticked line, and its
+                 warnings go on the family's last line that will be saved.
 
-   check gets ctx = { data, sim }: `data` is the rota as it is now, `sim` the
-   rota as it will be once every ticked line above this one is saved. So a
-   request sees leave added a line earlier, and two lines that touch the
-   same day know about each other.
+   check gets ctx = { data, sim, staffEditable }: `data` is the rota as it
+   is now, `sim` the rota as it will be once every ticked line above this
+   one is saved. So a request sees leave added a line earlier, and two
+   lines that touch the same day know about each other. apply gets
+   staffEditable too, for a line naming several people.
 
    apply is used both to work out `sim` and to save, so the warnings
    describe exactly what is saved. For that it must never change an object
@@ -41,7 +47,7 @@
 
 import { addLeave, addRequest, weeklyOff } from "./leaveAndRequests";
 import { setCode, clearDays, swapDuties, setNonOfficial } from "./rotaEdits";
-import { setShifts, setOffsPerWeek } from "./settings";
+import { setShifts, setOffsPerWeek, setSeniorCover, setSeniors } from "./settings";
 import { build } from "./build";
 import { plural, listWords, staffOf } from "./shared";
 
@@ -61,7 +67,7 @@ export const GROUPS = [
 
 const CATALOGUE = Object.fromEntries(
   [addLeave, addRequest, weeklyOff, setCode, clearDays, swapDuties, setNonOfficial,
-    setShifts, setOffsPerWeek, build].map((e) => [e.type, e]),
+    setShifts, setOffsPerWeek, setSeniorCover, setSeniors, build].map((e) => [e.type, e]),
 );
 export const entryFor = (type) => CATALOGUE[type] || null;
 
@@ -141,7 +147,7 @@ function checkOne(entry, l, ctx, staffEditable) {
     if (!who) blocked = "This person is no longer on the rota, so this cannot be added.";
     else if (!staffEditable(who.id)) blocked = `${who.name} is view-only on your current plan, so this cannot be added.`;
   }
-  const own = blocked ? {} : (entry.check ? entry.check(l, ctx) || {} : {});
+  const own = blocked ? {} : (entry.check ? entry.check(l, { ...ctx, staffEditable }) || {} : {});
   const warnings = [...(own.warnings || [])];
   if (l.outside) warnings.unshift("outside the dates you chose");
   return { people, blocked: blocked || own.blocked || "", warnings };
@@ -152,17 +158,27 @@ const PREVIEW = { uid: () => "ini-preview", today: "" };
 /* Every line with its checks: { ...line, people, blocked, warnings, on,
    words }, in the order given. Worked out afresh whenever a line is ticked
    or corrected, so the warnings follow straight away. */
-export function checkLines(lines, { data, staffEditable = () => true }) {
+export function checkLines(lines, { data, staffEditable = () => true, today = todayISO() }) {
   const out = {};
+  const lastOf = new Map();      // together-check -> key of its last saved line
   let sim = data;
   byApplyOrder(lines).forEach(({ l, e }) => {
     const res = checkOne(e, l, { data, sim }, staffEditable);
     const on = !!l.checked && !res.blocked;
-    out[l.key] = { ...res, on, words: e.describe(l, { data, sim }) };
-    if (on) sim = e.apply({ ...sim }, l, PREVIEW);
+    out[l.key] = { ...res, on, words: e.describe(l, { data, sim, staffEditable }) };
+    if (on) sim = e.apply({ ...sim }, l, { ...PREVIEW, staffEditable });
+    if (on && e.together) lastOf.set(e.together, l.key);
+  });
+  lastOf.forEach((key, together) => {
+    out[key].warnings = [...out[key].warnings, ...together(sim, { data, today })];
   });
   return lines.filter((l) => out[l.key]).map((l) => ({ ...l, ...out[l.key] }));
 }
+
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 /* The body of the update(): every ticked line, checked again against the
    rota as it is at that moment (it may have changed since the checklist
@@ -172,7 +188,7 @@ export function applyLines(d, lines, { staffEditable = () => true, uid, today })
   let draft = d;
   byApplyOrder(lines.filter((l) => l.checked)).forEach(({ l, e }) => {
     if (checkOne(e, l, { data, sim: draft }, staffEditable).blocked) return;
-    draft = e.apply(draft, l, { uid, today });
+    draft = e.apply(draft, l, { uid, today, staffEditable });
   });
   return draft;
 }

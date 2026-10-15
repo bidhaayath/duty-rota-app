@@ -164,3 +164,53 @@ test("a chosen range is labelled with its dates and applies only inside them", (
     if (date < "2026-10-07" || date > "2026-10-20") expect(after.cells[date]).toEqual(data.cells[date]);
   });
 });
+
+test("shifts with nobody in charge are named with the ward's own word", () => {
+  const data = { ...makeData(), rosterRules: { seniorTerm: "In-charge" } };
+  const proposal = { ...build(data, true), seniorGaps: [{ date: "2026-10-06", shift: "night" }, { date: "2026-10-07", shift: "morning" }] };
+  render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
+    onDiscard={jest.fn()} onApplied={jest.fn()} />);
+  expect(screen.getByText("2 shifts with no in-charge:")).toBeInTheDocument();
+  expect(screen.getByText(/2 with no in-charge/)).toBeInTheDocument();
+  expect(screen.queryByText(/anyone in charge/)).toBeNull();
+});
+
+test("the long summaries start closed as one line each; shifts short or with nobody in charge are always shown", () => {
+  const data = { ...makeData(), rosterRules: { seniorTerm: "In-charge" } };
+  const proposal = {
+    ...build(data, true),
+    shortfalls: [{ date: "2026-10-08", shift: "night" }],
+    seniorGaps: [{ date: "2026-10-06", shift: "night" }],
+    bent: [
+      { rule: "Off days a week", places: ["Staff 1, week 1", "Staff 2, week 2", "Staff 3, week 3"] },
+      { rule: "Same shift in a row", places: ["Staff 4, 3 Oct"] },
+    ],
+  };
+  render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
+    onDiscard={jest.fn()} onApplied={jest.fn()} />);
+
+  const bent = screen.getByRole("button", { name: /Settings it had to bend · 4 places/ });
+  const fair = screen.getByRole("button", { name: /How evenly it is shared/ });
+  expect(bent).toHaveAttribute("aria-expanded", "false");
+  expect(bent).toHaveTextContent("▸");
+  expect(fair).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByText("Off days a week")).toBeNull();
+  expect(screen.queryByText(/These dates, per person/)).toBeNull();
+
+  // Open each one, then close it again.
+  fireEvent.click(bent);
+  expect(bent).toHaveAttribute("aria-expanded", "true");
+  expect(bent).toHaveTextContent("▾");
+  expect(screen.getByText("Off days a week")).toBeInTheDocument();
+  fireEvent.click(fair);
+  expect(screen.getByText(/These dates, per person/)).toBeInTheDocument();
+  fireEvent.click(bent);
+  expect(screen.queryByText("Off days a week")).toBeNull();
+
+  // Outside the part a phone folds away, so nothing has to be opened to see them.
+  const gap = screen.getByText("1 shift with no in-charge:");
+  const short = screen.getByText("1 shift could not be filled:");
+  [gap, short].forEach((el) => expect(el.closest(".mp-details")).toBeNull());
+  // The grid is not squeezed by the boxes above it.
+  expect(document.querySelector(".mp-body").style.gridAutoRows).toBe("max-content");
+});

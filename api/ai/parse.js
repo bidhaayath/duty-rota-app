@@ -1,10 +1,11 @@
 /* POST /api/ai/parse
-   body: { departmentId, text, from, to, staff, leaveTypes, codes, shifts, fridayRule }
+   body: { departmentId, text, from, to, staff, leaveTypes, codes, shifts, fridayRule, seniorTerm }
 
    Ini, the rota assistant. Turns a manager's plain-language note into a list
    of ACTIONS (add leave, add a request, put an exact code in cells, clear
    days, swap two people, mark non-official days, change a Smart Roster
-   setting, give fixed weekday offs, build a period).
+   setting, say how many seniors each shift needs and who they are, give
+   fixed weekday offs, build a period).
 
    It only SUGGESTS. Nothing is saved here: the manager reviews every action
    in the app and confirms, and the app saves through its normal, permission-
@@ -44,6 +45,7 @@ const MAX_STAFF = 300;
 const MAX_CODES = 80;
 const MAX_ACTIONS = 120;    // after Claude answers
 const MAX_RANGE_DAYS = 92;  // the longest date range any one action may cover
+const MAX_SENIOR_COVER = 10; // the most seniors any one shift may ask for
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -142,6 +144,9 @@ function readInput(body) {
       departmentId: b.departmentId, text, from: b.from, to: b.to,
       staff, leaveTypes, codes, shifts: shifts.length ? shifts : ['morning', 'afternoon', 'night'],
       fridayRule: b.fridayRule === true,
+      // The ward's own word for the person in charge of a shift ("Senior",
+      // "In-charge", "Sister"). Only used so Ini understands the note.
+      seniorTerm: cleanText(b.seniorTerm, 30) || 'Senior',
     },
   };
 }
@@ -167,15 +172,25 @@ async function claimUse(cfg, token, departmentId) {
 }
 
 /* ── What Claude may answer ──
+   (Reference only. This shape is no longer sent to the API as a strict
+   answer format: the API compiles it into a grammar, and even the slimmed
+   version was refused as too large once the seniors actions were added. The
+   same shape is now described in the prompt instead, and checkAnswer below
+   checks every field of every action, so nothing unchecked reaches the app.)
+
    One object per action type. The `type` field tells them apart. Every field
    is required (unknown values are null), because the structured output
-   format needs a fixed shape. Ranges and numbers are checked after Claude
-   answers, since the format cannot express minimums or maximums. */
+   format needs a fixed shape.
+
+   Kept deliberately light: the API turns this shape into a grammar, and a
+   long list of allowed values repeated in many places (staff refs, dates,
+   codes) makes that grammar too large for big departments. So staff refs,
+   dates and codes are plain text here, and every one of them is checked in
+   checkAnswer below, together with ranges and numbers. */
 function buildSchema(input) {
-  const refs = input.staff.map((s) => s.ref);
-  const date = { type: 'string', format: 'date' };
+  const date = { type: 'string' };
   const dateOrNull = { anyOf: [date, { type: 'null' }] };
-  const staffRef = { type: 'string', enum: refs };
+  const staffRef = { type: 'string' };
   const obj = (type, props) => ({
     type: 'object',
     additionalProperties: false,
@@ -194,6 +209,23 @@ function buildSchema(input) {
       min: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
       max: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     }),
+    // A list of { shift, count } rather than four nullable numbers: nullable
+    // fields make the answer format much heavier for the API to prepare.
+    obj('set_senior_cover', {
+      cover: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['shift', 'count'],
+          properties: { shift: { type: 'string', enum: SHIFTS }, count: { type: 'integer' } },
+        },
+      },
+    }),
+    obj('set_seniors', {
+      add: { type: 'array', items: staffRef },
+      remove: { type: 'array', items: staffRef },
+    }),
     obj('weekly_off', {
       staff: staffRef,
       weekdays: { type: 'array', items: { type: 'integer', enum: [0, 1, 2, 3, 4, 5, 6] } },
@@ -205,7 +237,7 @@ function buildSchema(input) {
   if (input.codes.length) {
     variants.splice(2, 0, obj('set_code', {
       staff: staffRef, start: date, end: date,
-      code: { type: 'string', enum: input.codes.map((c) => c.code) },
+      code: { type: 'string' },
     }));
   }
 
@@ -261,6 +293,16 @@ function buildPrompt(input, today) {
     '  (min) and most (max) off days each person gets per week. Use null for a side the',
     '  note does not mention ("at least 2 offs" gives min 2, max null; "2 offs a week"',
     '  gives min 2, max 2).',
+    '- set_senior_cover: a standing Smart Roster setting for the whole ward: the fewest',
+    '  seniors each shift needs. A senior is someone able to take charge of a shift. Wards',
+    '  call them different things: senior, in-charge, shift in-charge, charge nurse, sister,',
+    '  supervisor, team leader, or the ward\'s own word given below. cover lists only the',
+    '  shifts the note mentions, each with its number ("at least 1 in-charge on every shift"',
+    '  lists every shift this ward runs with 1; "2 seniors on nights" lists only night with 2;',
+    '  "no senior needed on afternoons" lists afternoon with 0).',
+    '- set_seniors: a standing Smart Roster setting: who can take charge of a shift. add lists',
+    '  people who can ("Ali and Hawwa can be in charge"), remove lists people who no longer',
+    '  can ("Mariyam is not a senior any more"). Use empty lists for a side not mentioned.',
     '- weekly_off: off on the same weekdays every week ("off every Friday and Saturday"),',
     '  from start to end. Weekdays are numbers: 0 Sunday, 1 Monday, 2 Tuesday, 3 Wednesday,',
     '  4 Thursday, 5 Friday, 6 Saturday. Use null for start and end to mean the whole',
@@ -280,8 +322,27 @@ function buildPrompt(input, today) {
     '  When you leave days out on purpose because the person is on leave then, just say',
     '  those days were left out because of the leave; nothing more is needed for them.',
     '',
+    'How to reply: ONLY a JSON object, with no other text and no code fences:',
+    '{"actions": [ ... ], "unclear": [ "..." ]}',
+    'Each action is one of these objects (every field shown is required; use null where',
+    'the description says so; staff are refs like "s1"; dates are "YYYY-MM-DD"):',
+    '{"type":"add_leave","staff":"s1","leaveType":"<one of Leave types>","start":"<date>","end":"<date>"}',
+    '{"type":"add_request","staff":"s1","date":"<date>","duty":"morning|afternoon|evening|night|off"}',
+    '{"type":"set_code","staff":"s1","start":"<date>","end":"<date>","code":"<a duty code exactly as listed>"}',
+    '{"type":"clear_days","staff":"s1","start":"<date>","end":"<date>"}',
+    '{"type":"swap_duties","staffA":"s1","staffB":"s2","start":"<date>","end":"<date>"}',
+    '{"type":"set_non_official","start":"<date>","end":"<date>","nonOfficial":true}',
+    '{"type":"set_shifts","staff":"s1","shifts":["night"]}',
+    '{"type":"set_offs_per_week","min":2,"max":null}',
+    '{"type":"set_senior_cover","cover":[{"shift":"night","count":2}]}',
+    '{"type":"set_seniors","add":["s1"],"remove":[]}',
+    '{"type":"weekly_off","staff":"s1","weekdays":[5,6],"start":null,"end":null}',
+    '{"type":"build","from":null,"to":null,"historyFrom":null}',
+    'If nothing in the note can be turned into an action, reply {"actions": [], "unclear": [...]}.',
+    '',
     'Rules:',
-    '- Only use the staff listed, by their ref (s1, s2...). Never invent a person.',
+    '- Only use the staff listed, by their ref exactly as written (s1, s2...). Never invent a',
+    '  person.',
     '- Maldivian names have many spellings (Aishath / Aisha, Mohamed / Mohammed). Match a',
     '  different spelling only when it clearly means exactly one listed person. If a name',
     '  could mean two or more people, or nobody on the list, do not guess: put it in unclear',
@@ -309,6 +370,7 @@ function buildPrompt(input, today) {
     `Planning period: ${input.from} to ${input.to}`,
     `Shifts this ward runs: ${input.shifts.join(', ')}`,
     `Every Friday is already non-official: ${input.fridayRule ? 'yes' : 'no'}`,
+    `This ward's word for a senior (the person in charge of a shift): ${input.seniorTerm}`,
     `Leave types: ${input.leaveTypes.join(', ')}`,
     '',
     'Duty codes in this department:',
@@ -324,6 +386,22 @@ function buildPrompt(input, today) {
   ].join('\n');
 
   return { system, user };
+}
+
+/* Claude is asked for JSON only. To be safe, take the outermost {...} in its
+   reply, so a stray sentence or a code fence around it does no harm. Anything
+   that still is not valid JSON counts as no answer. */
+function readJson(text) {
+  const t = String(text || '');
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    const v = JSON.parse(t.slice(start, end + 1));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 async function askClaude(cfg, input, today) {
@@ -344,7 +422,6 @@ async function askClaude(cfg, input, today) {
         max_tokens: 6000,
         system,
         messages: [{ role: 'user', content: user }],
-        output_config: { format: { type: 'json_schema', schema: buildSchema(input) } },
       }),
     });
     const data = await res.json().catch(() => null);
@@ -352,6 +429,11 @@ async function askClaude(cfg, input, today) {
       // Only the status and Anthropic's error type are logged — never the
       // manager's note, staff names or the key.
       console.error('Claude request failed', res.status, data && data.error && data.error.type);
+      // For a 400 the API's own message says what was wrong with the request
+      // format (never the note or names), so it is logged to help fix it.
+      if (res.status === 400 && data && data.error && data.error.message) {
+        console.error('Claude says:', String(data.error.message).slice(0, 300));
+      }
       return null;
     }
     if (data.stop_reason === 'refusal' || data.stop_reason === 'max_tokens') {
@@ -360,7 +442,7 @@ async function askClaude(cfg, input, today) {
     }
     const block = (data.content || []).find((c) => c && c.type === 'text');
     if (!block) return null;
-    try { return JSON.parse(block.text); } catch { return null; }
+    return readJson(block.text);
   } catch (e) {
     console.error('Claude request error:', e && e.name);
     return null;
@@ -375,6 +457,14 @@ async function askClaude(cfg, input, today) {
    picked up. The app makes its own checks against the rota on top of these. */
 function checkAnswer(answer, input, today) {
   const byRef = new Map(input.staff.map((s) => [s.ref, s]));
+  const byName = new Map(input.staff.map((s) => [s.name.toLowerCase(), s]));
+  // A ref as asked for, or failing that the person's exact name.
+  const find = (r) => {
+    if (typeof r !== 'string') return undefined;
+    const t = r.trim();
+    return byRef.get(t) || byRef.get(t.toLowerCase()) || byName.get(t.toLowerCase());
+  };
+  let unknownPeople = 0;
   const codeByText = new Map(input.codes.map((c) => [c.code, c]));
   const leaveTypes = new Set(input.leaveTypes);
   const earliest = addDaysISO(today, -62);
@@ -390,7 +480,8 @@ function checkAnswer(answer, input, today) {
 
   for (const raw of (Array.isArray(a.actions) ? a.actions : []).slice(0, MAX_ACTIONS)) {
     if (!raw || typeof raw !== 'object') continue;
-    const who = byRef.get(raw.staff);
+    const who = find(raw.staff);
+    if (raw.staff !== undefined && raw.staff !== null && !who) unknownPeople += 1;
 
     switch (raw.type) {
       case 'add_leave': {
@@ -426,8 +517,8 @@ function checkAnswer(answer, input, today) {
         break;
       }
       case 'swap_duties': {
-        const A = byRef.get(raw.staffA), B = byRef.get(raw.staffB);
-        if (!A || !B) break;
+        const A = find(raw.staffA), B = find(raw.staffB);
+        if (!A || !B) { unknownPeople += 1; break; }
         if (A.id === B.id) { note(`A swap named ${A.name} twice, so it was left out.`); break; }
         if (!okRange(raw.start, raw.end)) { note(`The swap between ${A.name} and ${B.name} had dates that did not make sense, so it was left out.`); break; }
         actions.push({ type: 'swap_duties', staffA: A.id, staffAName: A.name, staffB: B.id, staffBName: B.name, start: raw.start, end: raw.end });
@@ -449,6 +540,44 @@ function checkAnswer(answer, input, today) {
         const min = fix(raw.min), max = fix(raw.max);
         if (min === null && max === null) { note('The number of off days per week did not make sense, so it was left out.'); break; }
         actions.push({ type: 'set_offs_per_week', min, max });
+        break;
+      }
+      case 'set_senior_cover': {
+        const fix = (v) => (Number.isInteger(v) && v >= 0 && v <= MAX_SENIOR_COVER ? v : null);
+        const cover = {};
+        let any = false;
+        let offShift = false;
+        const given = {};
+        for (const c of (Array.isArray(raw.cover) ? raw.cover : [])) {
+          if (c && SHIFTS.includes(c.shift)) given[c.shift] = c.count;
+        }
+        for (const sh of SHIFTS) {
+          const v = fix(given[sh]);
+          if (v !== null && !input.shifts.includes(sh)) { offShift = true; cover[sh] = null; continue; }
+          cover[sh] = v;
+          if (v !== null) any = true;
+        }
+        if (offShift) note(`A number of ${input.seniorTerm.toLowerCase()}s was given for a shift this ward does not run, so that part was left out.`);
+        if (!any) { if (!offShift) note(`The number of ${input.seniorTerm.toLowerCase()}s per shift did not make sense, so it was left out.`); break; }
+        actions.push({ type: 'set_senior_cover', cover });
+        break;
+      }
+      case 'set_seniors': {
+        const pick = (list) => [...new Set((Array.isArray(list) ? list : []).map((r) => find(r)).filter(Boolean))];
+        let add = pick(raw.add);
+        let remove = pick(raw.remove);
+        const both = add.filter((p) => remove.includes(p));
+        if (both.length) {
+          note(`${both.map((p) => p.name).join(' and ')} ${both.length > 1 ? 'were' : 'was'} both added and removed as ${input.seniorTerm.toLowerCase()}, so that was left out.`);
+          add = add.filter((p) => !both.includes(p));
+          remove = remove.filter((p) => !both.includes(p));
+        }
+        if (!add.length && !remove.length) break;
+        actions.push({
+          type: 'set_seniors',
+          add: add.map((p) => ({ staffId: p.id, staffName: p.name })),
+          remove: remove.map((p) => ({ staffId: p.id, staffName: p.name })),
+        });
         break;
       }
       case 'weekly_off': {
@@ -482,6 +611,8 @@ function checkAnswer(answer, input, today) {
         break;
     }
   }
+
+  if (unknownPeople) note(`${unknownPeople === 1 ? 'One change' : `${unknownPeople} changes`} named someone not on this rota's staff list, so ${unknownPeople === 1 ? 'it was' : 'they were'} left out.`);
 
   // The refs (s1, s2...) mean nothing to the manager, so any that slip into
   // a note are swapped back for the person's name.

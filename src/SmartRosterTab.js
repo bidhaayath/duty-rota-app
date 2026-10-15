@@ -20,7 +20,7 @@ import { generateRoster, checkFeasible, toRotaCells, SHIFTS } from "./rosterEngi
    rosterConfig.js, shared with Ini's month builder so the two never drift
    apart. Moved there unchanged; rosterConfig.test.js proves it. */
 import {
-  DEFAULT_RULES, mergeRules, seniorTermsOf, addDays, shiftISO, employedOn,
+  DEFAULT_RULES, mergeRules, seniorTermsOf, seniorNeedOf,addDays, shiftISO, employedOn,
   weekDatesFrom, activeStaffFor, codeTextById, codeIdByText, flattenCells,
   chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches,
 } from "./rosterConfig";
@@ -310,8 +310,8 @@ export default function SmartRosterTab({
     color: on ? colour : T.inkSoft,
   });
 
-  const seniorCount = activeStaff.filter((s) => rules.seniorStaff.includes(s.id) && !rules.skipStaff.includes(s.id)).length;
-  const seniorPerDay = SHIFTS.reduce((n, sh) => n + ((rules.coverage[sh]?.min || 0) > 0 ? (rules.seniorCover[sh] || 0) : 0), 0);
+  // The sum lives in rosterConfig.js so Ini warns with the same numbers.
+  const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = seniorNeedOf(rules, activeStaff);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -383,8 +383,8 @@ export default function SmartRosterTab({
         {seniorPerDay > 0 && (
           <p style={{ ...hint, margin: "12px 0 0" }}>
             That is <strong>{seniorPerDay} {seniorPerDay === 1 ? lower : termMany.toLowerCase()} on duty every day</strong>,
-            or {seniorPerDay * 7} {lower} duties across the week. At {rules.weeklyDuties?.max || 5} duties
-            each that needs at least <strong>{Math.ceil((seniorPerDay * 7) / (rules.weeklyDuties?.max || 5))}</strong>{" "}
+            or {seniorPerDay * 7} {lower} duties across the week. At {seniorPerPerson} duties
+            each that needs at least <strong>{seniorsNeeded}</strong>{" "}
             {termMany.toLowerCase()}; you have ticked {seniorCount}.
           </p>
         )}

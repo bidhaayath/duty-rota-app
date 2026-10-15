@@ -163,3 +163,57 @@ test("standing settings and weekly days off save with everything else, one Undo 
   expect(mariyamChips()).not.toMatch(/✓/);
   expect([offDays("Fewest"), offDays("Most")]).toEqual(["1", "2"]);
 });
+
+test("senior lines send the ward's word, save in one step with everything else, and Smart Roster shows them", async () => {
+  global.fetch = jest.fn(() => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({
+      ok: true, unclear: [],
+      actions: [
+        { type: "set_senior_cover", cover: { morning: 1, afternoon: null, evening: null, night: 2 } },
+        { type: "set_seniors", add: [{ staffId: "ali", staffName: "Ali" }], remove: [{ staffId: "m", staffName: "Mariyam" }] },
+        { type: "set_code", staffId: "ali", start: "2026-11-09", end: "2026-11-09", codeId: "N", code: "N" },
+      ],
+    }),
+  }));
+  render(<App withSmartRoster />);
+  act(() => { api.open({ ...loaded(), rosterRules: { seniorTerm: "In-charge", seniorStaff: ["m"] } }); });
+  await screen.findByLabelText("Ask Ini");
+  const before = JSON.stringify(api.data);
+
+  const chipsOf = (name) => screen.getAllByText(name, { selector: "span" })[0].parentElement.textContent;
+  const seniorsOn = (shift) => {
+    const inputs = screen.getAllByText(shift, { selector: "td" })[0].closest("tr").querySelectorAll("input");
+    return inputs[inputs.length - 1].value;
+  };
+  expect(chipsOf("Ali")).not.toMatch(/✓ In-charge/);
+  expect(chipsOf("Mariyam")).toMatch(/✓ In-charge/);
+  expect([seniorsOn("Morning"), seniorsOn("Night")]).toEqual(["0", "0"]);
+
+  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(await screen.findByText("Choose dates"));
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-11-01" } });
+  fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-30" } });
+  fireEvent.change(screen.getByPlaceholderText(/Fathimath Easa/), { target: { value: "1 in-charge mornings, 2 nights; Ali can take charge, Mariyam not; Ali N 9th" } });
+  fireEvent.click(screen.getByText("Read my note"));
+
+  expect(await screen.findByText("In-charges per shift · morning 0 → 1, night 0 → 2")).toBeInTheDocument();
+  expect(screen.getByText("Can take charge · + Ali · − Mariyam")).toBeInTheDocument();
+  expect(JSON.parse(global.fetch.mock.calls[0][1].body).seniorTerm).toBe("In-charge");
+  fireEvent.click(screen.getByText("Add 3 items"));
+  await screen.findByText(/^Added /);
+
+  expect(api.history.depth).toBe(1);
+  expect(api.data.rosterRules.seniorCover).toEqual({ morning: 1, afternoon: 0, evening: 0, night: 2 });
+  expect(api.data.rosterRules.seniorStaff).toEqual(["ali"]);
+  expect(api.data.cells["2026-11-09"].ali).toBe("N");
+  expect(chipsOf("Ali")).toMatch(/✓ In-charge/);
+  expect(chipsOf("Mariyam")).not.toMatch(/✓ In-charge/);
+  expect([seniorsOn("Morning"), seniorsOn("Night")]).toEqual(["1", "2"]);
+
+  act(() => { api.history.undo(); });
+  expect(JSON.stringify(api.data)).toBe(before);
+  expect(chipsOf("Ali")).not.toMatch(/✓ In-charge/);
+  expect(chipsOf("Mariyam")).toMatch(/✓ In-charge/);
+  expect([seniorsOn("Morning"), seniorsOn("Night")]).toEqual(["0", "0"]);
+});
