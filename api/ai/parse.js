@@ -172,6 +172,12 @@ async function claimUse(cfg, token, departmentId) {
 }
 
 /* ── What Claude may answer ──
+   (Reference only. This shape is no longer sent to the API as a strict
+   answer format: the API compiles it into a grammar, and even the slimmed
+   version was refused as too large once the seniors actions were added. The
+   same shape is now described in the prompt instead, and checkAnswer below
+   checks every field of every action, so nothing unchecked reaches the app.)
+
    One object per action type. The `type` field tells them apart. Every field
    is required (unknown values are null), because the structured output
    format needs a fixed shape.
@@ -316,6 +322,24 @@ function buildPrompt(input, today) {
     '  When you leave days out on purpose because the person is on leave then, just say',
     '  those days were left out because of the leave; nothing more is needed for them.',
     '',
+    'How to reply: ONLY a JSON object, with no other text and no code fences:',
+    '{"actions": [ ... ], "unclear": [ "..." ]}',
+    'Each action is one of these objects (every field shown is required; use null where',
+    'the description says so; staff are refs like "s1"; dates are "YYYY-MM-DD"):',
+    '{"type":"add_leave","staff":"s1","leaveType":"<one of Leave types>","start":"<date>","end":"<date>"}',
+    '{"type":"add_request","staff":"s1","date":"<date>","duty":"morning|afternoon|evening|night|off"}',
+    '{"type":"set_code","staff":"s1","start":"<date>","end":"<date>","code":"<a duty code exactly as listed>"}',
+    '{"type":"clear_days","staff":"s1","start":"<date>","end":"<date>"}',
+    '{"type":"swap_duties","staffA":"s1","staffB":"s2","start":"<date>","end":"<date>"}',
+    '{"type":"set_non_official","start":"<date>","end":"<date>","nonOfficial":true}',
+    '{"type":"set_shifts","staff":"s1","shifts":["night"]}',
+    '{"type":"set_offs_per_week","min":2,"max":null}',
+    '{"type":"set_senior_cover","cover":[{"shift":"night","count":2}]}',
+    '{"type":"set_seniors","add":["s1"],"remove":[]}',
+    '{"type":"weekly_off","staff":"s1","weekdays":[5,6],"start":null,"end":null}',
+    '{"type":"build","from":null,"to":null,"historyFrom":null}',
+    'If nothing in the note can be turned into an action, reply {"actions": [], "unclear": [...]}.',
+    '',
     'Rules:',
     '- Only use the staff listed, by their ref exactly as written (s1, s2...). Never invent a',
     '  person.',
@@ -364,6 +388,22 @@ function buildPrompt(input, today) {
   return { system, user };
 }
 
+/* Claude is asked for JSON only. To be safe, take the outermost {...} in its
+   reply, so a stray sentence or a code fence around it does no harm. Anything
+   that still is not valid JSON counts as no answer. */
+function readJson(text) {
+  const t = String(text || '');
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    const v = JSON.parse(t.slice(start, end + 1));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 async function askClaude(cfg, input, today) {
   const { system, user } = buildPrompt(input, today);
   const controller = new AbortController();
@@ -382,7 +422,6 @@ async function askClaude(cfg, input, today) {
         max_tokens: 6000,
         system,
         messages: [{ role: 'user', content: user }],
-        output_config: { format: { type: 'json_schema', schema: buildSchema(input) } },
       }),
     });
     const data = await res.json().catch(() => null);
@@ -403,7 +442,7 @@ async function askClaude(cfg, input, today) {
     }
     const block = (data.content || []).find((c) => c && c.type === 'text');
     if (!block) return null;
-    try { return JSON.parse(block.text); } catch { return null; }
+    return readJson(block.text);
   } catch (e) {
     console.error('Claude request error:', e && e.name);
     return null;
