@@ -4,8 +4,9 @@
    Ini, the rota assistant. Turns a manager's plain-language note into a list
    of ACTIONS (add leave, add a request, put an exact code in cells, clear
    days, swap two people, mark non-official days, change a Smart Roster
-   setting, say how many seniors each shift needs and who they are, give
-   fixed weekday offs, build a period).
+   setting, say how many seniors each shift needs and who they are, limit
+   how many days or nights in a row anyone works, give fixed weekday offs,
+   build a period).
 
    It only SUGGESTS. Nothing is saved here: the manager reviews every action
    in the app and confirms, and the app saves through its normal, permission-
@@ -46,6 +47,7 @@ const MAX_CODES = 80;
 const MAX_ACTIONS = 120;    // after Claude answers
 const MAX_RANGE_DAYS = 92;  // the longest date range any one action may cover
 const MAX_SENIOR_COVER = 10; // the most seniors any one shift may ask for
+const MAX_IN_A_ROW = 14;      // the longest run of days or nights a limit may allow
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -226,6 +228,10 @@ function buildSchema(input) {
       add: { type: 'array', items: staffRef },
       remove: { type: 'array', items: staffRef },
     }),
+    obj('set_max_in_a_row', {
+      kind: { type: 'string', enum: ['duty', 'night'] },
+      max: { type: 'integer' },
+    }),
     obj('weekly_off', {
       staff: staffRef,
       weekdays: { type: 'array', items: { type: 'integer', enum: [0, 1, 2, 3, 4, 5, 6] } },
@@ -303,6 +309,11 @@ function buildPrompt(input, today) {
     '- set_seniors: a standing Smart Roster setting: who can take charge of a shift. add lists',
     '  people who can ("Ali and Hawwa can be in charge"), remove lists people who no longer',
     '  can ("Mariyam is not a senior any more"). Use empty lists for a side not mentioned.',
+    '- set_max_in_a_row: a standing Smart Roster setting for the whole ward: the most days in',
+    '  a row anyone may work (kind "duty") or the most nights in a row (kind "night"). Wards',
+    '  say it many ways: "everyone gets off after 3 days" or "no more than 3 duties in a row"',
+    '  gives kind duty, max 3; "max 2 nights in a row" gives kind night, max 2. Use this, not',
+    '  set_offs_per_week, for any rule about runs of days in a row.',
     '- weekly_off: off on the same weekdays every week ("off every Friday and Saturday"),',
     '  from start to end. Weekdays are numbers: 0 Sunday, 1 Monday, 2 Tuesday, 3 Wednesday,',
     '  4 Thursday, 5 Friday, 6 Saturday. Use null for start and end to mean the whole',
@@ -336,6 +347,7 @@ function buildPrompt(input, today) {
     '{"type":"set_offs_per_week","min":2,"max":null}',
     '{"type":"set_senior_cover","cover":[{"shift":"night","count":2}]}',
     '{"type":"set_seniors","add":["s1"],"remove":[]}',
+    '{"type":"set_max_in_a_row","kind":"duty","max":3}',
     '{"type":"weekly_off","staff":"s1","weekdays":[5,6],"start":null,"end":null}',
     '{"type":"build","from":null,"to":null,"historyFrom":null}',
     'If nothing in the note can be turned into an action, reply {"actions": [], "unclear": [...]}.',
@@ -578,6 +590,13 @@ function checkAnswer(answer, input, today) {
           add: add.map((p) => ({ staffId: p.id, staffName: p.name })),
           remove: remove.map((p) => ({ staffId: p.id, staffName: p.name })),
         });
+        break;
+      }
+      case 'set_max_in_a_row': {
+        const kind = raw.kind === 'night' ? 'night' : raw.kind === 'duty' ? 'duty' : null;
+        const max = Number.isInteger(raw.max) && raw.max >= 1 && raw.max <= MAX_IN_A_ROW ? raw.max : null;
+        if (!kind || max === null) { note('The limit on days in a row did not make sense, so it was left out.'); break; }
+        actions.push({ type: 'set_max_in_a_row', kind, max });
         break;
       }
       case 'weekly_off': {

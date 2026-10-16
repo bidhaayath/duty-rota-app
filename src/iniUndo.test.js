@@ -164,6 +164,77 @@ test("standing settings and weekly days off save with everything else, one Undo 
   expect([offDays("Fewest"), offDays("Most")]).toEqual(["1", "2"]);
 });
 
+test("days and nights in a row save in one step, Smart Roster shows them, and one Undo reverts them", async () => {
+  global.fetch = jest.fn(() => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({
+      ok: true, unclear: [],
+      actions: [
+        { type: "set_max_in_a_row", kind: "duty", max: 3 },
+        { type: "set_max_in_a_row", kind: "night", max: 3 },
+        { type: "set_code", staffId: "ali", start: "2026-11-09", end: "2026-11-09", codeId: "N", code: "N" },
+      ],
+    }),
+  }));
+  render(<App withSmartRoster />);
+  act(() => { api.open(loaded()); });
+  await screen.findByLabelText("Ask Ini");
+  const before = JSON.stringify(api.data);
+
+  const daysBox = () => screen.getByLabelText("Days in a row (most)");
+  const nightsBox = () => {
+    const inputs = screen.getByText("In a row", { selector: "td" }).closest("tr").querySelectorAll("input");
+    return inputs[inputs.length - 1];
+  };
+  expect([daysBox().value, nightsBox().value]).toEqual(["5", "2"]);
+
+  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(await screen.findByText("Choose dates"));
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-11-01" } });
+  fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-30" } });
+  fireEvent.change(screen.getByPlaceholderText(/Fathimath Easa/), { target: { value: "off after 3 days, max 3 nights in a row, Ali N 9th" } });
+  fireEvent.click(screen.getByText("Read my note"));
+
+  expect(await screen.findByText("Days in a row (most) · 5 → 3")).toBeInTheDocument();
+  expect(screen.getByText("Nights in a row (most) · 2 → 3")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Add 3 items"));
+  await screen.findByText(/^Added /);
+
+  expect(api.history.depth).toBe(1);
+  expect(api.data.rosterRules.maxDaysOn).toBe(3);
+  expect(api.data.rosterRules.blockDays.night).toBe(3);
+  expect(api.data.cells["2026-11-09"].ali).toBe("N");
+  expect([daysBox().value, nightsBox().value]).toEqual(["3", "3"]);
+
+  act(() => { api.history.undo(); });
+  expect(JSON.stringify(api.data)).toBe(before);
+  expect([daysBox().value, nightsBox().value]).toEqual(["5", "2"]);
+});
+
+test("the Days in a row box: 5 by default, saves 1–6 only, and Undo reverts it", async () => {
+  render(<App withSmartRoster />);
+  act(() => { api.open(loaded()); });
+  const box = await screen.findByLabelText("Days in a row (most)");
+  const before = JSON.stringify(api.data);
+  expect(box.value).toBe("5");
+
+  // 0 and 7 are refused: nothing saved, no Undo step, the box keeps 5.
+  fireEvent.change(box, { target: { value: "0" } });
+  fireEvent.change(box, { target: { value: "7" } });
+  expect(api.history.depth).toBe(0);
+  expect(JSON.stringify(api.data)).toBe(before);
+  expect(screen.getByLabelText("Days in a row (most)").value).toBe("5");
+
+  fireEvent.change(box, { target: { value: "4" } });
+  expect(api.data.rosterRules.maxDaysOn).toBe(4);
+  expect(screen.getByLabelText("Days in a row (most)").value).toBe("4");
+  expect(api.history.depth).toBe(1);
+
+  act(() => { api.history.undo(); });
+  expect(JSON.stringify(api.data)).toBe(before);
+  expect(screen.getByLabelText("Days in a row (most)").value).toBe("5");
+});
+
 test("senior lines send the ward's word, save in one step with everything else, and Smart Roster shows them", async () => {
   global.fetch = jest.fn(() => Promise.resolve({
     ok: true, status: 200,
