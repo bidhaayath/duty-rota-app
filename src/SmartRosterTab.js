@@ -470,6 +470,21 @@ export default function SmartRosterTab({
                 ))}
                 <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>—</td>
               </tr>
+              <tr>
+                <td style={{ ...td, fontWeight: 600 }}>Days in a row (most)</td>
+                <td style={{ ...td, textAlign: "center" }}>
+                  <input type="number" min={1} max={6} step={1} style={num} disabled={!staffEditable}
+                    aria-label="Days in a row (most)"
+                    value={rules.maxDaysOn}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (Number.isInteger(n) && n >= 1 && n <= 6) setRules({ maxDaysOn: n });
+                    }} />
+                </td>
+                <td style={{ ...td, textAlign: "center", fontSize: 11.5, color: T.inkSoft }} colSpan={4}>
+                  Any duties, whatever the shift — 1 to 6
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>

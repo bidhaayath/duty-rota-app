@@ -18,7 +18,14 @@
      rosterRules.seniorCover[shift]     how many must be able to take charge
      rosterRules.seniorStaff            who can take charge
    Written as setSeniorCover and toggleSenior write them. Every line uses
-   the ward's own word ("In-charge", "Sister"), never "senior". */
+   the ward's own word ("In-charge", "Sister"), never "senior".
+
+   set_max_in_a_row  { kind: duty|night, max }   1–14 from the server
+     rosterRules.maxDaysOn              most days in a row, any duty (1–6)
+     rosterRules.blockDays.night        most nights in a row (1–7)
+   Written as Smart Roster's "Days in a row (most)" box and the Night box
+   of its "In a row" row write them. Above what those boxes allow is
+   blocked, so Ini never saves a value the screen could not. */
 
 import { mergeRules, seniorTermsOf, seniorNeedOf } from "../rosterConfig";
 import { SHIFTS } from "../rosterEngine";
@@ -136,6 +143,70 @@ export const setOffsPerWeek = {
       weeklyMin: { ...rules.weeklyMin, off: next.min },
       weeklyMax: { ...rules.weeklyMax, off: next.max },
     };
+    return d;
+  },
+};
+
+/* ── set_max_in_a_row ──
+   Smart Roster has no check of its own for this, so the warnings are plain
+   arithmetic: at most k days in a row means at least one off day in every
+   k + 1, so ⌊7 / (k + 1)⌋ off days in any week. */
+const MAX_DAYS_ON = 6;
+const MAX_NIGHTS = 7;
+const IN_A_ROW = { duty: "Days in a row (most)", night: "Nights in a row (most)" };
+const planInARow = (l, data) => {
+  const rules = mergeRules(data.rosterRules || {});
+  const cur = l.kind === "night" ? rules.blockDays.night : rules.maxDaysOn;
+  return { rules, cur, top: l.kind === "night" ? MAX_NIGHTS : MAX_DAYS_ON };
+};
+
+export const setMaxInARow = {
+  type: "set_max_in_a_row",
+  group: "settings",
+  savedAs: "settings",
+  saved: setShifts.saved,
+
+  fromServer: (a) => ((a.kind === "duty" || a.kind === "night") && Number.isInteger(a.max) && a.max >= 1 && a.max <= 14
+    ? { kind: a.kind, max: a.max } : null),
+  describe: (l, { sim }) => ({ what: IN_A_ROW[l.kind], when: `${planInARow(l, sim).cur} → ${l.max}` }),
+
+  check: (l, { sim }) => {
+    const { rules, cur, top } = planInARow(l, sim);
+    if (l.max > top) {
+      return { blocked: l.kind === "night" ? `Smart Roster allows at most ${top} nights in a row.` : `Smart Roster allows at most ${top} days in a row.` };
+    }
+    if (l.max === cur) return { blocked: `${IN_A_ROW[l.kind]} is already set like this.` };
+    const warnings = ["applies to everyone on the ward, every week"];
+    const runs = wardShifts(sim);
+    if (l.kind === "night") {
+      if (!runs.includes("night")) warnings.push("the ward has no night staff set in Smart Roster, so this makes no difference until it does");
+      if (l.max > rules.maxDaysOn) {
+        warnings.push(`days in a row are limited to ${rules.maxDaysOn}, so nobody can reach ${l.max} nights in a row`);
+      }
+      return { warnings };
+    }
+    const offs = Math.floor(7 / (l.max + 1));
+    const offMax = rules.weeklyMax?.off;
+    if (offMax != null && offs > offMax) {
+      warnings.push(`at most ${plural(l.max, "day")} in a row means at least ${plural(offs, "off day")} a week, more than the most off days per week (${offMax})`);
+    }
+    const duties = rules.weeklyDuties?.min;
+    if (duties != null && 7 - offs < duties) {
+      warnings.push(`at most ${plural(l.max, "day")} in a row leaves room for only ${plural(7 - offs, "duty", "duties")} a week, fewer than the fewest duties per week (${duties})`);
+    }
+    const over = runs.filter((s) => (rules.blockDays[s] ?? 0) > l.max);
+    if (over.length) {
+      warnings.push(`${listWords(over.map((s) => `${SHIFT_LABELS[s]} ${rules.blockDays[s]}`))} in a row can no longer be reached, so the most is ${l.max}`);
+    }
+    return { warnings };
+  },
+
+  apply: (d, l) => {
+    const { rules, top } = planInARow(l, d);
+    if (l.max > top) return d;
+    d.rosterRules = l.kind === "night"
+      ? { ...(d.rosterRules || {}), blockDays: { ...rules.blockDays, night: l.max } }
+      : { ...(d.rosterRules || {}), maxDaysOn: l.max };
     return d;
   },
 };

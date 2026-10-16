@@ -90,6 +90,74 @@ describe("set_offs_per_week", () => {
   });
 });
 
+/* Smart Roster's defaults: 5 days in a row, nights 2 in a row and the other
+   shifts 3, 1–2 off days and 5 duties a week. */
+describe("set_max_in_a_row", () => {
+  const days = (max) => ({ type: "set_max_in_a_row", kind: "duty", max });
+  const nights = (max) => ({ type: "set_max_in_a_row", kind: "night", max });
+
+  test("days: shows current → new, and saves where Smart Roster keeps it", () => {
+    const [l] = check([days(3)]);
+    expect(l.on).toBe(true);
+    expect(l.words).toMatchObject({ what: "Days in a row (most)", when: "5 → 3" });
+    expect(l.warnings).toEqual(["applies to everyone on the ward, every week"]);
+    const d = save(makeData(), [l]);
+    expect(d.rosterRules.maxDaysOn).toBe(3);
+    expect(d.rosterRules.blockDays).toBeUndefined();
+    expect(d.rosterRules.staffShifts).toEqual({ a: ["night"] });
+  });
+
+  test("nights: saved as the Night box of the In a row row saves it", () => {
+    const [l] = check([nights(3)]);
+    expect(l.words).toMatchObject({ what: "Nights in a row (most)", when: "2 → 3" });
+    expect(l.warnings).toEqual(["applies to everyone on the ward, every week"]);
+    const d = save(makeData(), [l]);
+    expect(d.rosterRules.blockDays).toEqual({ morning: 3, afternoon: 3, evening: 3, night: 3 });
+    expect(mergeRules(d.rosterRules).maxDaysOn).toBe(5);
+  });
+
+  test("no change is blocked; above what Smart Roster allows is blocked and not saved", () => {
+    expect(check([days(5)])[0].blocked).toBe("Days in a row (most) is already set like this.");
+    expect(check([nights(2)])[0].blocked).toBe("Nights in a row (most) is already set like this.");
+    const [seven] = check([days(7)]);
+    expect(seven.blocked).toBe("Smart Roster allows at most 6 days in a row.");
+    expect(seven.words.when).toBe("5 → 7");
+    expect(save(makeData(), [seven]).rosterRules.maxDaysOn).toBeUndefined();
+    expect(check([nights(8)])[0].blocked).toBe("Smart Roster allows at most 7 nights in a row.");
+    expect(check([days(6)])[0].on).toBe(true);
+  });
+
+  test("days: warns about off days, duties and shift runs, but can still be added", () => {
+    const [two] = check([days(2)]);
+    expect(two.on).toBe(true);
+    expect(text(two)).toMatch(/morning 3 and afternoon 3 in a row can no longer be reached, so the most is 2/);
+    expect(text(two)).not.toMatch(/off days per week|duties per week/);
+
+    const [one] = check([days(1)]);
+    expect(one.on).toBe(true);
+    expect(text(one)).toMatch(/at most 1 day in a row means at least 3 off days a week, more than the most off days per week \(2\)/);
+    expect(text(one)).toMatch(/leaves room for only 4 duties a week, fewer than the fewest duties per week \(5\)/);
+    expect(text(one)).toMatch(/morning 3, afternoon 3 and night 2 in a row can no longer be reached/);
+    expect(save(makeData(), [one]).rosterRules.maxDaysOn).toBe(1);
+  });
+
+  test("nights: warns above the days limit, including one set earlier in the same note, and with no night staff", () => {
+    expect(text(check([nights(6)])[0])).toMatch(/days in a row are limited to 5, so nobody can reach 6 nights in a row/);
+    const ls = check([days(3), nights(4)]);
+    expect(text(ls[1])).toMatch(/limited to 3, so nobody can reach 4 nights/);
+
+    const data = makeData();
+    data.rosterRules.coverage = { night: { min: 0, max: 0 } };
+    const [l] = check([nights(3)], data);
+    expect(l.on).toBe(true);
+    expect(text(l)).toMatch(/the ward has no night staff set in Smart Roster/);
+  });
+
+  test("a reply with nothing usable makes no line", () => {
+    expect(check([{ type: "set_max_in_a_row", kind: "week", max: 3 }, days(0), days(15), nights(1.5)])).toEqual([]);
+  });
+});
+
 describe("weekly_off", () => {
   const line = { type: "weekly_off", staffId: "h", weekdays: [5, 6], start: "2026-11-01", end: "2026-11-30" };
 
