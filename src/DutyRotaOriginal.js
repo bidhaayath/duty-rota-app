@@ -15,6 +15,7 @@ import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
 import AssistantPanel from "./AssistantPanel";
 import { exportRotaToExcel } from "./rotaExcel";
+import { effectivePlan, deptPlanLoading } from "./deptPlan";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 /* The rota's counting rules (cells, leave, employment, totals and coverage)
    live in rotaCounts.js so Ini's month preview counts the same way. */
@@ -767,7 +768,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false, features = null, staffLimit = null, departmentLimit = null, role = null, orgName = "", onSaveOrgName = null, canEditOrgName = false, onOpenBilling = null }) {
+export default function DutyRota({ locked = false, features: viewerFeatures = null, staffLimit: viewerStaffLimit = null, departmentLimit = null, role = null, orgName = "", onSaveOrgName = null, canEditOrgName = false, onOpenBilling = null }) {
   const [data, setData] = useState(null);
   /* Role and editability belong to a person IN A DEPARTMENT, not to a person.
      Someone can own their own organisation and be a manager in another: at
@@ -794,6 +795,27 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
   }, [deptId]);
   const effectiveOrgName = deptOrg ? deptOrg.name : orgName;
   const ownsThisOrg = deptOrg ? !!deptOrg.is_owner : true;
+  /* The plan belongs to the DEPARTMENT too: billing follows its owner, so a
+     manager in someone else's department gets that owner's Smart Roster,
+     logo and staff cap — better or worse than their own. Tagged with the
+     department it answers for, so a late reply for the one just left is
+     ignored. Until it lands, or if it fails, the viewer's own plan applies,
+     as it always did. The department allowance stays on the viewer's plan. */
+  const [deptPlan, setDeptPlan] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!deptId) { setDeptPlan(null); return; }
+    (async () => {
+      const { data, error } = await supabase.rpc("department_plan", { p_dept: deptId });
+      if (cancelled) return;
+      // A failure is still an answer: it ends the loading state and falls
+      // back to the viewer's own plan.
+      setDeptPlan(error || !data || !data.ok ? { deptId, ok: false } : { ...data, deptId });
+    })();
+    return () => { cancelled = true; };
+  }, [deptId]);
+  const { features, staffLimit } = effectivePlan(
+    { features: viewerFeatures, staffLimit: viewerStaffLimit }, deptPlan, deptId);
   const [deptMenuOpen, setDeptMenuOpen] = useState(false);
   const switchingDept = useRef(false); // guards the autosave while a switch loads
   const [tab, setTab] = useState("rota");
@@ -2012,7 +2034,25 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
           />
         )}
         {tab === "smart" && (
-          features?.smart_roster === false ? (
+          deptPlanLoading(deptPlan, deptId) ? (
+            /* Whose plan applies here is not known yet. Saying so briefly
+               beats flashing an upgrade card at someone whose department's
+               owner already pays for Smart Roster. */
+            <Card>
+              <p style={{ fontSize: 13.5, color: T.inkSoft, margin: 0 }}>Loading…</p>
+            </Card>
+          ) : features?.smart_roster === false && currentPerm && currentPerm.isOwner === false ? (
+            /* Someone else's department, on a plan without Smart Roster. The
+               viewer cannot change that plan, so there is nothing to offer. */
+            <Card>
+              <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 18, margin: "0 0 8px" }}>
+                Smart Roster
+              </h2>
+              <p style={{ fontSize: 13.5, color: T.inkSoft, margin: 0 }}>
+                Smart Roster isn’t included in this department’s plan. Only the department’s owner can upgrade it.
+              </p>
+            </Card>
+          ) : features?.smart_roster === false ? (
             /* Trial ended and not on a plan that includes Smart Roster. The
                data is untouched — they can still see and export everything.
                If they subscribe, the feature reappears with no migration. */
@@ -2032,17 +2072,18 @@ export default function DutyRota({ locked = false, features = null, staffLimit =
                 a full week automatically, covers every shift, and improves the result until nothing
                 is left uncovered.
               </p>
-              <p style={{ fontSize: 13, color: T.inkSoft, margin: "0 0 18px" }}>
+              <p style={{ fontSize: 13, color: T.inkSoft, margin: onOpenBilling ? "0 0 18px" : 0 }}>
                 Your rota data is safe — subscribe any time to keep editing and to unlock Smart Roster.
               </p>
-              <a href={`https://wa.me/9607666261?text=${encodeURIComponent(
-                "Hi! I'd like to upgrade my DutyRota plan to get Smart Roster.")}`}
-                target="_blank" rel="noreferrer"
-                style={{ background: T.lagoon, color: "#fff", fontWeight: 700, fontSize: 13.5,
-                  padding: "10px 20px", borderRadius: 8, textDecoration: "none",
-                  display: "inline-flex", alignItems: "center", gap: 8 }}>
-                Upgrade on WhatsApp
-              </a>
+              {/* The same page as My plan in the header. Only opens it. */}
+              {onOpenBilling && (
+                <button type="button" onClick={onOpenBilling}
+                  style={{ background: T.lagoon, color: "#fff", fontWeight: 700, fontSize: 13.5,
+                    fontFamily: "inherit", padding: "10px 20px", borderRadius: 8, border: "none",
+                    cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  See plans
+                </button>
+              )}
             </Card>
           ) : (
             <SmartRosterTab
