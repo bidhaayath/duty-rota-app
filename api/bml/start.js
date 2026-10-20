@@ -1,8 +1,11 @@
-/* POST /api/bml/start   body: { tier, cycle }
+/* POST /api/bml/start   body: { tier, cycle, expectedAmountLaari }
    Called when a signed-in customer presses Subscribe.
    1. Checks who they are.
-   2. Creates the pending payment in our database (price from plan_limits).
-   3. Asks BML to create the payment and returns BML's payment page address. */
+   2. Creates the pending payment in our database (price from plan_limits,
+      less any promotion this account can still use).
+   3. If the price is not the one the customer was shown, cancels that
+      payment and stops, so nobody pays an amount they did not agree to.
+   4. Asks BML to create the payment and returns BML's payment page address. */
 
 const {
   getConfig, getAdmin, bmlRequest, getBaseUrl, getUserFromRequest,
@@ -20,7 +23,7 @@ module.exports = async (req, res) => {
     const user = await getUserFromRequest(cfg, req);
     if (!user) return res.status(401).json({ error: 'not_signed_in' });
 
-    const { tier, cycle } = req.body || {};
+    const { tier, cycle, expectedAmountLaari } = req.body || {};
     const db = getAdmin(cfg);
 
     // Our own record first. The database decides the price and the rules
@@ -33,6 +36,21 @@ module.exports = async (req, res) => {
     if (error) throw error;
     if (!started || !started.ok) {
       return res.status(400).json({ error: (started && started.reason) || 'could_not_start', details: started });
+    }
+
+    // The checkout dialog says exactly what will be charged. If the database
+    // now says otherwise (an offer ended while the page was open, say), the
+    // customer has not agreed to this amount: cancel before BML sees it.
+    // A page from before this check sends nothing, and goes through as before.
+    if (expectedAmountLaari !== undefined && expectedAmountLaari !== started.amount_laari) {
+      await db.from('payments')
+        .update({
+          status: 'cancelled',
+          raw_payload: { stage: 'price_check', expected: expectedAmountLaari, amount: started.amount_laari },
+        })
+        .eq('local_id', started.local_id)
+        .eq('status', 'pending');
+      return res.status(409).json({ error: 'price_changed', amountLaari: started.amount_laari });
     }
 
     const base = getBaseUrl(req);
@@ -78,6 +96,8 @@ module.exports = async (req, res) => {
       url: tx.url,
       localId: started.local_id,
       amountLaari: started.amount_laari,
+      listAmountLaari: started.list_amount_laari,
+      percentOff: started.percent_off || null,
       currency: 'MVR',
     });
   } catch (e) {
