@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Crown } from 'lucide-react';
 import supabase from './supabaseClient';
+import {
+  fetchPromo, planPrice, openOffers, countdownParts, isLastDay, offerEndDate, useServerNow,
+} from './promo';
 
 /* ─────────────── Pricing page ───────────────
    Built to the "Duty Rota Pricing Page — Final Specification" document.
@@ -17,9 +20,14 @@ import supabase from './supabaseClient';
 
    Choosing a plan opens the checkout dialog, which hands over to the BML
    Payment Gateway. The card is charged in MVR, so the checkout dialog shows
-   the MVR amount as the charge and USD underneath as the reference.     */
+   the MVR amount as the charge and USD underneath as the reference.
 
-const WHATSAPP = '9607666261'; // +960 Maldives
+   Promotions: plan_prices() returns, per tier, the normal price and what
+   this account would pay today. The cards and the checkout dialog show
+   those, and the dialog sends the amount it showed, so the server refuses
+   to go on if the price has changed (see /api/bml/start).               */
+
+export const WHATSAPP = '9607666261'; // +960 Maldives
 
 /* ── Feature flags ──
    All false today. Turning one on moves its feature from "In development"
@@ -113,6 +121,9 @@ const annualSavingUsd = (p) => {
 const DOWNGRADE_MESSAGE =
   'You are currently on a higher plan. A change to a smaller plan takes effect when your paid period ends, so there is nothing to pay today. Message us on WhatsApp if you would like us to arrange it.';
 
+const PRICE_CHANGED_MESSAGE =
+  'The price changed while this page was open, usually because an offer has just ended. Nothing has been charged. The total above is now up to date — please check it and press Pay again.';
+
 /* Plain-English wording for every way the payment can be refused before
    the customer reaches the bank. Anything unrecognised falls back to the
    last line, so a new reason can never show a raw code to a customer.  */
@@ -120,6 +131,7 @@ const checkoutErrorMessage = (status, data) => {
   const reason = (data && (data.error || data.reason)) || '';
   const map = {
     downgrade_wait: DOWNGRADE_MESSAGE,
+    price_changed: PRICE_CHANGED_MESSAGE,
     not_signed_in:
       'Your session has expired. Please sign in again and try once more.',
     payments_not_configured:
@@ -165,6 +177,58 @@ function DevList({ items, note }) {
   );
 }
 
+/* The promotion banner. It ticks on its own every second so the rest of the
+   page doesn't re-render with it. The countdown runs to the server's ends_at
+   on the server's clock; on the final day it turns red, and once the offer
+   ends (or this account has used every offer) it disappears.          */
+function PromoBanner({ promo }) {
+  const now = useServerNow(promo?.offset, 1000);
+  const { offers, endsAt } = openOffers(promo, now);
+  if (!offers.length) return null;
+
+  const left = endsAt - now;
+  const last = isLastDay(left);
+  const c = countdownParts(left);
+  const two = (n) => String(n).padStart(2, '0');
+  const boxes = [[c.days, c.days === 1 ? 'day' : 'days'], [two(c.hours), 'hrs'], [two(c.minutes), 'min'], [two(c.seconds), 'sec']];
+
+  return (
+    <div role="region" aria-label="Special offer" style={{
+      borderRadius: 14, padding: '20px 18px', marginBottom: 16, color: '#fff', textAlign: 'center',
+      background: last ? 'linear-gradient(135deg, #C0392B, #7F1D1D)' : 'linear-gradient(135deg, #0F8B7E, #0B5A52)',
+      boxShadow: last ? '0 6px 20px rgba(192,57,43,0.30)' : '0 6px 20px rgba(11,106,96,0.25)',
+    }}>
+      <div style={{ fontSize: 'clamp(19px, 5vw, 26px)', fontWeight: 900, letterSpacing: 0.3, lineHeight: 1.25 }}>
+        NOVEMBER ROSTER, SORTED! 🚀
+      </div>
+      <div style={{ fontSize: 'clamp(16px, 4.4vw, 21px)', fontWeight: 900, color: '#FFE08A', margin: '8px 0 6px', lineHeight: 1.35 }}>
+        {offers.map((o) => `${o.percentOff}% OFF ${o.cycle === 'annual' ? 'ANNUAL' : 'MONTHLY'}`).join(' · ')}
+      </div>
+      <div style={{ fontSize: 13.5, opacity: 0.95, lineHeight: 1.5 }}>
+        Make holiday duty planning easier with EasyDutyRota.
+      </div>
+
+      <div style={{ margin: '14px 0 10px', fontSize: 15, fontWeight: 800, lineHeight: 1.5 }}>
+        {last && (
+          <span style={{ display: 'inline-block', background: '#fff', color: '#C0392B', borderRadius: 20, padding: '2px 11px', marginRight: 8, fontSize: 13, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            Last day!
+          </span>
+        )}
+        Offer ends {offerEndDate(endsAt)} — Subscribe now!
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {boxes.map(([n, label]) => (
+          <div key={label} style={{ background: 'rgba(255,255,255,0.16)', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 10, minWidth: 58, padding: '7px 6px' }}>
+            <div style={{ fontSize: 24, fontWeight: 900, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{n}</div>
+            <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, opacity: 0.9 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Billing({ onExit, email }) {
   const [sub, setSub] = useState(null);
   const [plans, setPlans] = useState(null);
@@ -178,16 +242,31 @@ export default function Billing({ onExit, email }) {
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState('');
 
+  // This account's prices from plan_prices(), by tier, and the promotion.
+  // Empty / null when there is none, and then every list price stands.
+  const [priceRows, setPriceRows] = useState({});
+  const [promo, setPromo] = useState(null);
+
+  const applyPrices = useCallback(({ rows, promo: p }) => {
+    setPriceRows(Object.fromEntries(rows.map((r) => [r.tier, r])));
+    setPromo(p);
+  }, []);
+  const loadPrices = useCallback(async () => { applyPrices(await fetchPromo()); }, [applyPrices]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [subRes, planRes] = await Promise.all([
+      // Prices load with the plans, so a discounted card never first shows
+      // the normal price and then jumps.
+      const [subRes, planRes, priceRes] = await Promise.all([
         supabase.rpc('my_subscription'),
         supabase.from('plan_limits').select('*').order('rank', { ascending: true }),
+        fetchPromo(),
       ]);
       if (cancelled) return;
       if (subRes.error) setError('Could not load your subscription details.');
       setSub(subRes.data || null);
+      applyPrices(priceRes);
       setPlans(planRes.error ? [] : (planRes.data || []));
       // Someone already paying should see the cycle they are actually billed
       // on, so the page matches their bill rather than the sales default.
@@ -196,7 +275,20 @@ export default function Billing({ onExit, email }) {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [applyPrices]);
+
+  // When an offer ends with the page open, ask the server again shortly
+  // after, so the cards and the checkout drop to the normal price.
+  useEffect(() => {
+    if (!promo) return undefined;
+    const now = Date.now() + promo.offset;
+    const ends = [promo.monthly, promo.annual].filter(Boolean).map((o) => o.endsAt).filter((t) => t > now);
+    if (!ends.length) return undefined;
+    const wait = Math.min(...ends) - now + 1500;
+    if (wait > 2147483647) return undefined; // beyond setTimeout's range
+    const id = setTimeout(loadPrices, wait);
+    return () => clearTimeout(id);
+  }, [promo, loadPrices]);
 
   const state = sub?.state;
   const currentTier = sub?.paid_tier || null;
@@ -219,9 +311,31 @@ export default function Billing({ onExit, email }) {
     setAgreed(false);
   };
 
+  // Everything the checkout dialog needs, worked out once. The plan is
+  // looked up again by tier so a price reload shows up in an open dialog.
+  const co = (() => {
+    if (!checkout) return null;
+    const p = (plans || []).find((x) => x.tier === checkout.plan.tier) || checkout.plan;
+    const annual = checkout.cycle === 'annual';
+    const pr = planPrice(p, priceRows[p.tier], checkout.cycle);
+    return {
+      label: p.label || p.tier,
+      annual,
+      amountLaari: pr.laari,
+      totalMvr: mvrExact(pr.laari),
+      listMvr: pr.discounted ? mvrExact(pr.listLaari) : null,
+      totalUsd: usd(pr.usdCents),
+      percentOff: pr.discounted ? (promo?.[checkout.cycle]?.percentOff || null) : null,
+      period: annual ? 'One payment for 12 months' : 'One payment for 1 month',
+      isCycleSwitch: checkout.isCycleSwitch,
+    };
+  })();
+
   /* Ask our own server to start the payment. The server decides the price
-     from plan_limits and the rules (renewal, upgrade, downgrade), creates
-     the pending payment and hands back the gateway's payment page address. */
+     from plan_limits, any promotion and the rules (renewal, upgrade,
+     downgrade), creates the pending payment and hands back the gateway's
+     payment page address. It is also told the amount this dialog showed,
+     and refuses to continue if its own price is different.            */
   const payNow = async () => {
     if (!checkout || !agreed || paying) return;
     setPaying(true);
@@ -237,7 +351,7 @@ export default function Billing({ onExit, email }) {
       const res = await fetch('/api/bml/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ tier: checkout.plan.tier, cycle: checkout.cycle }),
+        body: JSON.stringify({ tier: checkout.plan.tier, cycle: checkout.cycle, expectedAmountLaari: co.amountLaari }),
       });
       let data = null;
       try { data = await res.json(); } catch { data = null; }
@@ -245,6 +359,9 @@ export default function Billing({ onExit, email }) {
         window.location.href = data.url; // over to the gateway
         return;
       }
+      // The price moved under the customer: fetch the current one so the
+      // dialog shows it, and let them decide again.
+      if (res.status === 409) await loadPrices();
       setPayError(checkoutErrorMessage(res.status, data));
       setPaying(false);
     } catch (e) {
@@ -281,6 +398,16 @@ export default function Billing({ onExit, email }) {
   })();
 
   const maxSaving = Math.max(0, ...(plans || []).map((p) => annualSavingUsd(p)?.pct || 0));
+
+  // The promotion on a cycle that this account can still use. Once it ends,
+  // the reload after ends_at clears it.
+  const offerFor = (c) => (promo?.[c] && !promo[c].used ? promo[c] : null);
+  const toggleLabel = (c) => {
+    const o = offerFor(c);
+    if (c === 'monthly') return o ? `Monthly — ${o.percentOff}% off` : 'Monthly';
+    if (o) return `Annual — ${o.percentOff}% off`;
+    return maxSaving > 0 ? `Annual — save up to ${maxSaving}%` : 'Annual';
+  };
 
   /* ── FAQ content ──
      The change/cancel answers describe the policy actually implemented in
@@ -323,21 +450,6 @@ export default function Billing({ onExit, email }) {
   // another press that produces the same message.
   const blocked = payError === DOWNGRADE_MESSAGE;
 
-  // Everything the checkout dialog needs, worked out once.
-  const co = (() => {
-    if (!checkout) return null;
-    const p = checkout.plan;
-    const annual = checkout.cycle === 'annual';
-    return {
-      label: p.label || p.tier,
-      annual,
-      totalMvr: mvrExact(annual ? p.price_annual_laari : p.price_monthly_laari),
-      totalUsd: usd(annual ? p.price_annual_usd_cents : p.price_monthly_usd_cents),
-      period: annual ? 'One payment for 12 months' : 'One payment for 1 month',
-      isCycleSwitch: checkout.isCycleSwitch,
-    };
-  })();
-
   return (
     <div style={{ background: T.bg, minHeight: '100vh', fontFamily: 'Arial, sans-serif', color: T.ink }}>
       <div style={{ background: T.deep, color: '#fff', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
@@ -348,6 +460,8 @@ export default function Billing({ onExit, email }) {
       </div>
 
       <div style={{ maxWidth: 1120, margin: '0 auto', padding: '18px 18px 60px' }}>
+        <PromoBanner promo={promo} />
+
         {error && (
           <div style={{ ...card, background: T.badBg, borderColor: T.badLine, color: T.bad, fontSize: 13.5 }}>⚠ {error}</div>
         )}
@@ -380,7 +494,7 @@ export default function Billing({ onExit, email }) {
                 background: cycle === c ? T.teal : 'transparent',
                 color: cycle === c ? '#fff' : T.soft,
               }}>
-                {c === 'monthly' ? 'Monthly' : maxSaving > 0 ? `Annual — save up to ${maxSaving}%` : 'Annual'}
+                {toggleLabel(c)}
               </button>
             ))}
           </div>
@@ -408,15 +522,21 @@ export default function Billing({ onExit, email }) {
             const isCurrentExact = isCurrentPlan && (!subCycle || subCycle === cycle);
             const isCycleSwitch = isCurrentPlan && !isCurrentExact;
             const isCurrent = isCurrentExact; // controls the highlighted border
-            const saving = annual ? annualSavingUsd(p) : null;
             const isPlus = p.tier === 'plus';
 
-            const headUsd = annual
-              ? usd(p.price_annual_usd_cents ? Math.round(p.price_annual_usd_cents / 12) : null)
-              : usd(p.price_monthly_usd_cents);
-            const headMvr = annual
-              ? mvr(p.price_annual_laari ? p.price_annual_laari / 12 : null)
-              : mvr(p.price_monthly_laari);
+            // What this account pays on this cycle, next to the normal price.
+            // An account that has used this cycle's offer gets list prices
+            // back from the server, plus a note saying why.
+            const pr = planPrice(p, priceRows[p.tier], cycle);
+            const offerPct = pr.discounted ? (promo?.[cycle]?.percentOff || null) : null;
+            const offerUsed = !!promo?.[cycle]?.used;
+            // The offer badge takes the corner the usual annual saving uses.
+            const saving = annual && !pr.discounted ? annualSavingUsd(p) : null;
+
+            const perMonthUsd = (cents) => usd(cents ? (annual ? Math.round(cents / 12) : cents) : null);
+            const headUsd = perMonthUsd(pr.usdCents);
+            const headListUsd = pr.discounted ? perMonthUsd(pr.listUsdCents) : null;
+            const headMvr = mvr(pr.laari ? (annual ? pr.laari / 12 : pr.laari) : null);
 
             // Live features, straight from the database limits.
             const live = [
@@ -463,8 +583,13 @@ export default function Billing({ onExit, email }) {
                     Save {saving.pct}%
                   </span>
                 )}
+                {pr.discounted && (
+                  <span style={{ position: 'absolute', top: -10, right: 14, background: '#C0392B', color: '#fff', fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                    {offerPct ? `${offerPct}% off` : 'Offer'}
+                  </span>
+                )}
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, marginTop: copy.badge || saving ? 6 : 0, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, marginTop: copy.badge || saving || pr.discounted ? 6 : 0, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 15, fontWeight: 800 }}>{p.label || p.tier}</span>
                   {isCurrentPlan && (
                     <span style={{ background: T.goodBg, color: T.good, fontSize: 10.5, fontWeight: 800, padding: '3px 8px', borderRadius: 20, textTransform: 'uppercase', letterSpacing: 0.3 }}>
@@ -477,13 +602,23 @@ export default function Billing({ onExit, email }) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                  {headListUsd && (
+                    <s title="Normal price" style={{ fontSize: 15, fontWeight: 700, color: T.soft }}>{headListUsd}</s>
+                  )}
                   <span style={{ fontSize: 22, fontWeight: 800, color: T.teal }}>{headUsd || '—'}</span>
                   <span style={{ fontSize: 12.5, color: T.soft }}>/month</span>
                 </div>
                 <div style={{ fontSize: 11.5, color: T.soft, marginTop: 3, marginBottom: 12, lineHeight: 1.6 }}>
                   Approx. {headMvr || '—'}/month
-                  {annual && p.price_annual_usd_cents && (
-                    <><br />{usd(p.price_annual_usd_cents)} billed annually</>
+                  {annual && pr.usdCents && (
+                    <>
+                      <br />
+                      {pr.discounted && <><s title="Normal price">{usd(pr.listUsdCents)}</s>{' '}</>}
+                      {usd(pr.usdCents)} billed annually
+                    </>
+                  )}
+                  {offerUsed && (
+                    <><br /><span style={{ fontWeight: 700 }}>Offer already used</span></>
                   )}
                 </div>
 
@@ -728,12 +863,23 @@ export default function Billing({ onExit, email }) {
               <div style={{ fontSize: 11.5, color: T.soft, textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 800 }}>
                 Total to pay
               </div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: T.ink, lineHeight: 1.3 }}>
-                {co.totalMvr || '—'}
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                {co.listMvr && (
+                  <s title="Normal price" style={{ fontSize: 15, fontWeight: 700, color: T.soft }}>{co.listMvr}</s>
+                )}
+                <span style={{ fontSize: 26, fontWeight: 800, color: T.ink, lineHeight: 1.3 }}>
+                  {co.totalMvr || '—'}
+                </span>
               </div>
               {co.totalUsd && (
                 <div style={{ fontSize: 12, color: T.soft, marginTop: 2 }}>
                   Approximately {co.totalUsd} — your card is charged in rufiyaa
+                </div>
+              )}
+              {co.listMvr && (
+                <div style={{ fontSize: 12, color: '#C0392B', fontWeight: 700, marginTop: 8, lineHeight: 1.6 }}>
+                  {co.percentOff ? `${co.percentOff}% off` : 'Offer price'} for this payment.
+                  {' '}Renewals are at the normal price.
                 </div>
               )}
 

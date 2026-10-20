@@ -154,6 +154,12 @@ async function syncTransaction(cfg, transactionId) {
       console.error('BML payment in unexpected currency', tx.id, tx.currency);
       return { handled: false, reason: 'wrong_currency', state: tx.state, payment };
     }
+    // bml_confirm_payment refuses this and activates nothing; say so plainly
+    // so it can be found in the log and the customer refunded or activated.
+    if (tx.amount !== payment.amount_laari) {
+      console.error('BML paid amount differs from the saved payment', tx.id,
+        { localId: payment.local_id, paidLaari: tx.amount, expectedLaari: payment.amount_laari });
+    }
     const { data, error: rpcError } = await db.rpc('bml_confirm_payment', {
       p_local_id: payment.local_id,
       p_provider_txn_id: tx.id,

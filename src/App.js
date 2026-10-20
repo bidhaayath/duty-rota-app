@@ -3,7 +3,8 @@ import supabase from './supabaseClient';
 import Auth from './Auth';
 import DutyRota, { resetRotaVersionTracking } from './DutyRotaOriginal';
 import Admin from './Admin';
-import Billing from './Billing';
+import Billing, { WHATSAPP } from './Billing';
+import { fetchPromo, openOffers, endsInText, isLastDay, maldivesDay, useServerNow } from './promo';
 import AcceptInvite from "./AcceptInvite";
 import LogoMark from "./LogoMark";
 
@@ -162,13 +163,60 @@ function Paywall({ onSeePlans, everPaid, paidTier, paidUntil }) {
   );
 }
 
+/* ─────────────── Promotion strip ───────────────
+   One slim line above the app while an offer is open to this account. The
+   countdown runs on the server's clock to the server's ends_at. ✕ hides it
+   until the next day in the Maldives; it goes for good once every offer has
+   ended or been used.                                                     */
+const PROMO_STRIP_HIDDEN = 'edr:promoStripHiddenOn';
+
+function PromoStrip({ promo, onSeePlans }) {
+  const now = useServerNow(promo?.offset, 30000);
+  const [hiddenOn, setHiddenOn] = useState(() => {
+    try { return localStorage.getItem(PROMO_STRIP_HIDDEN); } catch { return null; }
+  });
+  const { offers, endsAt } = openOffers(promo, now);
+  const today = maldivesDay(now);
+  if (!offers.length || hiddenOn === today) return null;
+
+  const hide = () => {
+    try { localStorage.setItem(PROMO_STRIP_HIDDEN, today); } catch { /* ignore */ }
+    setHiddenOn(today);
+  };
+  const last = isLastDay(endsAt - now);
+  const text = offers.map((o) => `${o.percentOff}% off ${o.cycle}`).join(' · ');
+
+  return (
+    <div className="no-print dr-anim-in" style={{
+      position: 'relative', background: last ? '#C0392B' : '#0B6A60', color: '#fff',
+      padding: '7px 40px', fontSize: 13, fontWeight: 700, textAlign: 'center', lineHeight: 1.5,
+    }}>
+      🚀 {text} · {endsInText(endsAt - now)} ·{' '}
+      <button onClick={onSeePlans} style={{
+        background: 'none', border: 'none', padding: 0, color: '#FFE08A', fontWeight: 800,
+        fontSize: 13, textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit',
+      }}>
+        See plans
+      </button>
+      <button onClick={hide} aria-label="Hide until tomorrow" title="Hide until tomorrow" style={{
+        position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+        background: 'none', border: 'none', color: '#fff', opacity: 0.85, fontSize: 16,
+        lineHeight: 1, padding: 6, cursor: 'pointer', fontFamily: 'inherit',
+      }}>
+        ✕
+      </button>
+    </div>
+  );
+}
+
 /* ─────────────── Payment result ───────────────
    Shown on its own, full screen, when the customer comes back from the bank.
-   Three outcomes: it worked, it did not, or the bank has not finished telling
-   us yet — in which case the customer can check again rather than be left
-   guessing. Never claims a payment succeeded on the strength of the address
-   bar; everything here comes from our server's answer.                   */
-function PaymentResult({ status, paidUntil, onDone, onSeePlans, onCheckAgain }) {
+   Outcomes: it worked, it did not, the bank has not finished telling us yet
+   (the customer can check again rather than be left guessing), or the bank
+   took the money but the plan was not switched on — that one needs a person,
+   so it says so. Never claims a payment succeeded on the strength of the
+   address bar; everything here comes from our server's answer.           */
+function PaymentResult({ status, paidUntil, txnId, onDone, onSeePlans, onCheckAgain }) {
   const endsOn = paidUntil
     ? new Date(paidUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
     : null;
@@ -198,6 +246,13 @@ function PaymentResult({ status, paidUntil, onDone, onSeePlans, onCheckAgain }) 
       body: 'This payment was not completed, so nothing has been charged and your plan ' +
             'is unchanged. You can try again from the plans page, or message us on ' +
             'WhatsApp if you would like help.',
+    },
+    review: {
+      icon: '!', tint: '#8A5A0F',
+      title: 'We’re checking your payment',
+      body: 'The bank has confirmed this payment, but your plan did not switch on ' +
+            'automatically. Nothing is lost. Please message us on WhatsApp so we can ' +
+            'sort it out for you straight away.',
     },
     error: {
       icon: '!', tint: '#8A5A0F',
@@ -234,6 +289,19 @@ function PaymentResult({ status, paidUntil, onDone, onSeePlans, onCheckAgain }) 
                 fontFamily: 'inherit', fontSize: 13.5, fontWeight: 800, cursor: 'pointer',
               }}>
                 Check again
+              </button>
+            )}
+
+            {status === 'review' && (
+              <button onClick={() => {
+                const msg = `Hi! I paid for Easy Duty Rota but my plan has not switched on yet.${txnId ? ` Transaction: ${txnId}` : ''}`;
+                window.open(`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(msg)}`, '_blank', 'noreferrer');
+              }} style={{
+                width: '100%', padding: 11, marginTop: 8, borderRadius: 8, boxSizing: 'border-box',
+                border: '1px solid #0F8B7E', background: '#fff', color: '#0F8B7E',
+                fontFamily: 'inherit', fontSize: 13.5, fontWeight: 800, cursor: 'pointer',
+              }}>
+                Message us on WhatsApp
               </button>
             )}
 
@@ -306,7 +374,9 @@ export default function App() {
   // address once and then removed from it, so a refresh does not repeat the
   // whole result screen.
   const [returnTxn, setReturnTxn] = useState(() => paymentReturnId());
-  const [payResult, setPayResult] = useState(null); // null | checking | success | pending | failed | error
+  const [payResult, setPayResult] = useState(null); // null | checking | success | pending | review | failed | error
+  // The promotion as plan_prices() reports it for this account, for the strip.
+  const [promo, setPromo] = useState(null);
   const [payPaidUntil, setPayPaidUntil] = useState(null);
   // Owner, manager or employee. null means this account has no membership
   // row, which is every account created before invites existed — those get
@@ -379,10 +449,16 @@ export default function App() {
 
       if (!res.ok || !data) { setPayResult('error'); return; }
 
-      if (data.activated || data.alreadyActive || data.state === 'CONFIRMED') {
+      if (data.activated || data.alreadyActive) {
         setPayPaidUntil(data.paidUntil || null);
         setPayResult('success');
         refreshSub(); // lift any paywall without waiting for a reload
+        return;
+      }
+      // The bank took the money but the database refused to activate (a
+      // wrong amount or currency, say). Not a success: a person must look.
+      if (data.state === 'CONFIRMED') {
+        setPayResult('review');
         return;
       }
       if (['CANCELLED', 'FAILED', 'VOIDED'].includes(data.state)) {
@@ -511,6 +587,17 @@ export default function App() {
     return true;
   }, [org.id]);
 
+  // Asked again whenever the person comes back to the rota (from the plans
+  // page or a payment), since they may just have used an offer. A failure
+  // just means no strip.
+  useEffect(() => {
+    if (!session?.user?.id) { setPromo(null); return; }
+    if (showBilling || returnTxn) return;
+    let cancelled = false;
+    fetchPromo().then(({ promo: p }) => { if (!cancelled) setPromo(p); });
+    return () => { cancelled = true; };
+  }, [session?.user?.id, showBilling, returnTxn]);
+
   useEffect(() => {
     if (!session?.user?.id) { setIsAdmin(false); setShowAdmin(false); return; }
     let cancelled = false;
@@ -541,6 +628,7 @@ export default function App() {
       <PaymentResult
         status={payResult}
         paidUntil={payPaidUntil}
+        txnId={returnTxn}
         onCheckAgain={checkPayment}
         onDone={() => { setReturnTxn(null); setPayResult(null); refreshSub(); }}
         onSeePlans={() => { setReturnTxn(null); setPayResult(null); refreshSub(); setShowBilling(true); }}
@@ -570,6 +658,11 @@ export default function App() {
 
   return (
     <div>
+      {/* Staff invited into someone else's organisation don't buy the plan,
+          so only owners (and accounts from before roles existed) see offers. */}
+      {(role === null || role === 'owner') && (
+        <PromoStrip promo={promo} onSeePlans={() => setShowBilling(true)} />
+      )}
       {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} />}
       {showEndingNote && <EndingSoonNote daysLeft={sub.daysLeft} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} onSeePlans={() => setShowBilling(true)} />}
       <style>{`
