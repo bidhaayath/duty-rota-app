@@ -58,8 +58,12 @@ const safeFileName = (s) =>
  *   rangeLabel  string  e.g. "6 Sept 2026 – 12 Sept 2026"
  *   days        [{ date, dayName, dayLabel, nonOff }]
  *   totalHeads  [string]  e.g. ["M","A","N","OD","RD","OFF"]
- *   rows        [{ num, name, designation, cells, totals, nonOfficialDuty }]
- *                 cells: [{ span, text, post, second, secondPost, bg, fg, muted }]
+ *   extras      [{ key, label }]  staff detail columns between NAME and the
+ *                 days, in order; key is designation/contact/email/recc
+ *   rows        [{ num, name, designation, contact, email, recc,
+ *                  cells, totals, nonOfficialDuty }]
+ *                 cells: [{ span, text, sub, post, second, secondPost, bg, fg, muted }]
+ *                   sub: a leave span's date range, "" when not shown
  *                 totals: [number] aligned with totalHeads
  *   onCall      [string]  one per day, "" when nobody
  *   staff       [{ name, designation, email, contact, recc, licence,
@@ -68,8 +72,14 @@ const safeFileName = (s) =>
 export async function exportRotaToExcel(model) {
   const {
     orgName = "", deptName = "Rota", rangeLabel = "",
-    days = [], totalHeads = [], rows = [], onCall = [], staff = [], coverage = [],
+    days = [], totalHeads = [], extras = [], rows = [], onCall = [], staff = [], coverage = [],
   } = model || {};
+  /* Ticked staff details sit in columns 3 .. 2+E, so the days and totals
+     move right by E. With designation as its own column the name cell
+     no longer repeats it. */
+  const E = extras.length;
+  const nameOnly = extras.some((x) => x.key === "designation");
+  const hasEmail = extras.some((x) => x.key === "email");
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Easy Duty Rota";
@@ -77,7 +87,7 @@ export async function exportRotaToExcel(model) {
 
   /* ── Sheet 1: the rota grid ─────────────────────────────────────────── */
   const ws = wb.addWorksheet(safeSheetName(deptName), {
-    views: [{ state: "frozen", xSplit: 2, ySplit: 4 }],
+    views: [{ state: "frozen", xSplit: 2 + E, ySplit: 4 }],
     pageSetup: {
       orientation: days.length > 10 ? "landscape" : "portrait",
       fitToPage: true, fitToWidth: 1, fitToHeight: 0,
@@ -85,7 +95,7 @@ export async function exportRotaToExcel(model) {
     },
   });
 
-  const lastCol = 2 + days.length + totalHeads.length + 1;
+  const lastCol = 2 + E + days.length + totalHeads.length + 1;
 
   /* Title block. The boss needs to know whose rota this is at a glance,
      which is why the organisation name leads, exactly as on the PDF. */
@@ -112,17 +122,18 @@ export async function exportRotaToExcel(model) {
   head.height = 30;
   head.getCell(1).value = "#";
   head.getCell(2).value = "NAME";
+  extras.forEach((x, i) => { head.getCell(3 + i).value = x.label; });
   days.forEach((d, i) => {
-    const c = head.getCell(3 + i);
+    const c = head.getCell(3 + E + i);
     c.value = d.nonOff ? `${d.dayName}\n${d.dayLabel}\nNON-OFFICIAL` : `${d.dayName}\n${d.dayLabel}`;
   });
-  totalHeads.forEach((h, i) => { head.getCell(3 + days.length + i).value = h; });
+  totalHeads.forEach((h, i) => { head.getCell(3 + E + days.length + i).value = h; });
   head.getCell(lastCol).value = "NON-OFF DUTY";
 
   for (let c = 1; c <= lastCol; c++) {
     const cell = head.getCell(c);
-    const isDay = c >= 3 && c < 3 + days.length;
-    const gold = (isDay && days[c - 3].nonOff) || c === lastCol;
+    const isDay = c >= 3 + E && c < 3 + E + days.length;
+    const gold = (isDay && days[c - 3 - E].nonOff) || c === lastCol;
     cell.font = { bold: true, size: 9, color: { argb: gold ? GOLD_FG : "FF4A6570" } };
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: gold ? GOLD_BG : HEAD_BG } };
@@ -133,22 +144,32 @@ export async function exportRotaToExcel(model) {
   rows.forEach((r, ri) => {
     const row = ws.getRow(HEAD + 1 + ri);
     /* Tall enough for the busiest cell in the row: a duty, its post, a second
-       duty and its post is four lines. */
+       duty and its post is four lines. An email counts as two, so a long
+       address wraps and stays readable instead of being clipped. */
     const maxLines = r.cells.reduce((n, c) => Math.max(n,
-      (c.text ? 1 : 0) + (c.post ? 1 : 0) + (c.second ? 1 : 0) + (c.secondPost ? 1 : 0)), 1);
+      (c.text ? 1 : 0) + (c.sub ? 1 : 0) + (c.post ? 1 : 0) + (c.second ? 1 : 0) + (c.secondPost ? 1 : 0)),
+      hasEmail && r.email ? 2 : 1);
     row.height = maxLines > 1 ? 12 + maxLines * 11 : 20;
 
     row.getCell(1).value = r.num;
     row.getCell(1).font = { size: 9, color: { argb: "FF4A6570" } };
     row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
 
-    row.getCell(2).value = r.designation ? `${r.name} — ${r.designation}` : r.name;
+    row.getCell(2).value = (r.designation && !nameOnly) ? `${r.name} — ${r.designation}` : r.name;
     row.getCell(2).font = { bold: true, size: 10 };
     row.getCell(2).alignment = { vertical: "middle", wrapText: false };
 
+    extras.forEach((x, i) => {
+      const cell = row.getCell(3 + i);
+      cell.value = r[x.key] || "";
+      cell.font = { size: 10 };
+      cell.alignment = { horizontal: "left", vertical: "middle", wrapText: x.key === "email" };
+      cell.border = BORDER;
+    });
+
     /* Cells arrive as segments so a leave period or a not-yet-joined gap
        covers several days as one block, exactly as it looks on screen. */
-    let col = 3;
+    let col = 3 + E;
     r.cells.forEach((seg) => {
       const span = Math.max(1, seg.span || 1);
       const cell = row.getCell(col);
@@ -160,6 +181,7 @@ export async function exportRotaToExcel(model) {
          export for the person receiving it. */
       const lines = [];
       if (seg.text) lines.push(seg.text);
+      if (seg.sub) lines.push(seg.sub);
       if (seg.post) lines.push(seg.post);
       if (seg.second) lines.push(seg.second);
       if (seg.secondPost) lines.push(seg.secondPost);
@@ -177,7 +199,7 @@ export async function exportRotaToExcel(model) {
 
     /* Totals, then the payment-relevant count on the far right. */
     (r.totals || []).forEach((v, i) => {
-      const cell = row.getCell(3 + days.length + i);
+      const cell = row.getCell(3 + E + days.length + i);
       cell.value = v;
       cell.font = { bold: true, size: 10 };
       cell.alignment = { horizontal: "center", vertical: "middle" };
@@ -200,15 +222,16 @@ export async function exportRotaToExcel(model) {
     row.getCell(2).alignment = { vertical: "middle" };
     row.getCell(1).border = BORDER;
     row.getCell(2).border = BORDER;
+    for (let c = 3; c < 3 + E; c++) row.getCell(c).border = BORDER;
     onCall.forEach((name, i) => {
-      const cell = row.getCell(3 + i);
+      const cell = row.getCell(3 + E + i);
       cell.value = name || "";
       cell.alignment = { horizontal: "center", vertical: "middle" };
       cell.font = { size: 9.5 };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDF8EE" } };
       cell.border = BORDER;
     });
-    for (let c = 3 + days.length; c <= lastCol; c++) row.getCell(c).border = BORDER;
+    for (let c = 3 + E + days.length; c <= lastCol; c++) row.getCell(c).border = BORDER;
   }
 
   /* Coverage rows: how many people are on each shift each day. On screen
@@ -220,31 +243,32 @@ export async function exportRotaToExcel(model) {
     coverage.forEach((cov) => {
       const row = ws.getRow(r);
       row.height = 18;
-      ws.mergeCells(r, 1, r, 2);
+      ws.mergeCells(r, 1, r, 2 + E);
       const lab = ws.getCell(r, 1);
       lab.value = cov.label;
       lab.font = { bold: true, size: 10, color: { argb: argb(cov.fg, "FF142B33") } };
       lab.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       lab.fill = { type: "pattern", pattern: "solid", fgColor: { argb: argb(cov.color) } };
       lab.border = BORDER;
-      ws.getCell(r, 2).border = BORDER;
+      for (let c = 2; c <= 2 + E; c++) ws.getCell(r, c).border = BORDER;
       (cov.counts || []).forEach((n, i) => {
-        const cell = row.getCell(3 + i);
+        const cell = row.getCell(3 + E + i);
         cell.value = n;
         cell.font = { bold: true, size: 10 };
         cell.alignment = { horizontal: "center", vertical: "middle" };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: argb(cov.soft, "FFF4F8F7") } };
         cell.border = BORDER;
       });
-      for (let c = 3 + days.length; c <= lastCol; c++) row.getCell(c).border = BORDER;
+      for (let c = 3 + E + days.length; c <= lastCol; c++) row.getCell(c).border = BORDER;
       r += 1;
     });
   }
 
   ws.getColumn(1).width = 4;
   ws.getColumn(2).width = 30;
-  for (let i = 0; i < days.length; i++) ws.getColumn(3 + i).width = 11;
-  for (let i = 0; i < totalHeads.length; i++) ws.getColumn(3 + days.length + i).width = 5.5;
+  extras.forEach((x, i) => { ws.getColumn(3 + i).width = x.key === "email" ? 28 : 20; });
+  for (let i = 0; i < days.length; i++) ws.getColumn(3 + E + i).width = 11;
+  for (let i = 0; i < totalHeads.length; i++) ws.getColumn(3 + E + days.length + i).width = 5.5;
   ws.getColumn(lastCol).width = 13;
 
   /* ── Sheet 2: staff records ─────────────────────────────────────────── */
