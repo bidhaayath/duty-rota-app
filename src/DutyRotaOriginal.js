@@ -848,6 +848,11 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   // Off by default, so an export looks exactly as it always has unless the
   // person asks for the plain version.
   const [rotaOnly, setRotaOnly] = useState(false);
+  // Which staff details sit beside the name on the rota export, and whether
+  // the on-call row is printed. Like orientOverride, not persisted — they
+  // last as long as the app is open.
+  const [exportCols, setExportCols] = useState({ designation: true, contact: false, email: false, recc: false });
+  const [showOnCall, setShowOnCall] = useState(true);
   // Print orientation. null = automatic (weekly portrait, monthly landscape),
   // which is what every export did before this control existed. Setting it
   // to "portrait"/"landscape" is the customer overriding that choice. It is
@@ -1765,10 +1770,25 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               Rota only (hide totals)
             </label>
           )}
+          {printView.kind === "rota" && (
+            <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, fontSize: 13, color: T.ink }}>
+              Include:
+              {[["designation", "Designation"], ["contact", "Contact no."], ["email", "Email"], ["recc", "RECC no."]].map(([k, label]) => (
+                <label key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: T.ink, cursor: "pointer" }}>
+                  <input type="checkbox" checked={exportCols[k]} onChange={(e) => setExportCols({ ...exportCols, [k]: e.target.checked })} style={{ cursor: "pointer" }} />
+                  {label}
+                </label>
+              ))}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: T.ink, cursor: "pointer" }}>
+                <input type="checkbox" checked={showOnCall} onChange={(e) => setShowOnCall(e.target.checked)} style={{ cursor: "pointer" }} />
+                On-call row
+              </label>
+            </span>
+          )}
           <Btn kind="ghost" small onClick={() => setPrintView(null)}><ChevronLeft size={14} /> Back to app</Btn>
         </div>
         <div ref={printBodyRef} className={rotaOnly && printView.kind === "rota" ? "rota-only" : undefined}>
-        {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} rotaOnly={rotaOnly} orientation={orientation} />}
+        {printView.kind === "rota" && <RotaPrint data={viewData} days={rotaDays} rotaOnly={rotaOnly} orientation={orientation} cols={exportCols} showOnCall={showOnCall} />}
         {printView.kind === "records" && <RecordsPrint data={viewData} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={viewData} from={statRange.from} to={statRange.to} />}
         {printView.kind === "insights" && <InsightsPrint data={viewData} cfg={printView.cfg} />}
@@ -3618,7 +3638,7 @@ const CountUp = ({ value, decimals = 0, ms = 520, style }) => {
 const pth = { border: "1px solid #999", padding: "5px 7px", fontSize: 10.5, fontWeight: 700, textAlign: "center", background: "#E8E8E8" };
 const ptd = { border: "1px solid #999", padding: "5px 7px", fontSize: 11, textAlign: "center" };
 
-function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
+function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { designation: true }, showOnCall = true }) {
   const codeById = codeByIdOf(data);
   const shownStaff = staffForDays(data, days);
   /* A fortnight is about where a full-size grid stops fitting an A4 sheet
@@ -3626,6 +3646,17 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
      smaller text — so a month prints on one page instead of two, without the
      reader having to find the scale box in the print dialog. */
   const compact = days.length > 14;
+  // Staff detail columns the person chose to include, in table order.
+  const extras = [
+    ["designation", "DESIGNATION", (s) => s.designation || ""],
+    ["contact", "CONTACT", (s) => s.contact || ""],
+    ["email", "EMAIL", (s) => s.email || ""],
+    ["recc", "RECC NO.", (s) => s.recc || ""],
+  ].filter(([k]) => cols[k]);
+  /* On a long range the name column is capped by the compact CSS; the extra
+     columns get the same treatment inline (the image export drops classes),
+     so a long email can't take a quarter of the page. */
+  const extraCap = compact ? { maxWidth: 140 } : null;
   /* A minimum width for the grid, worked out from the number of columns.
 
      Without it the table is simply width:100%, so on a phone it squeezes into
@@ -3638,7 +3669,8 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
      and both the PNG and the PDF come out the same whichever way the phone is
      held. On a desktop the container is wider than this, so nothing changes. */
   const gridMinWidth = 150 + days.length * (compact ? 34 : 74)
-    + (rotaOnly ? 0 : (data.eveningEnabled ? 8 : 7) * 34);
+    + (rotaOnly ? 0 : (data.eveningEnabled ? 8 : 7) * 34)
+    + extras.length * 90;
   // Collect notes shown this week, numbered, to list under the rota
   const noteList = [];
   const noteNum = (date, staffId) => {
@@ -3676,7 +3708,8 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
         <thead>
           <tr>
             <th style={{ ...pth, width: 24 }}>#</th>
-            <th className="rota-name-col" style={{ ...pth, textAlign: "left", ...(rotaOnly ? { width: 200 } : null) }}>NAME &amp; DESIGNATION</th>
+            <th className="rota-name-col" style={{ ...pth, textAlign: "left", ...(rotaOnly ? { width: 200 } : null) }}>NAME</th>
+            {extras.map(([k, h]) => <th key={k} style={{ ...pth, textAlign: "left", ...extraCap }}>{h}</th>)}
             {days.map((date, di) => {
               const d = parseD(date);
               const nonOff = isNonOff(data, date);
@@ -3720,7 +3753,10 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
             return (
               <tr key={s.id}>
                 <td style={{ ...ptd, fontWeight: 700, color: "#666" }}>{i + 1}</td>
-                <td className="rota-name-cell" style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{displayName(s)}</td>
+                <td className="rota-name-cell" style={{ ...ptd, textAlign: "left", fontWeight: 700 }}>{s.name}</td>
+                {extras.map(([k, , get]) => (
+                  <td key={k} style={{ ...ptd, textAlign: "left", ...extraCap, ...(k === "email" ? { whiteSpace: "normal", wordBreak: "break-word" } : null) }}>{get(s)}</td>
+                ))}
                 {segs.map((seg, i2) => {
                   if (seg.kind === "notEmployed") {
                     return (
@@ -3812,9 +3848,10 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
               </tr>
             );
           })}
+          {showOnCall && (
           <tr>
             <td style={{ ...ptd, fontWeight: 700, color: "#666" }} />
-            <td style={{ ...ptd, textAlign: "left", fontWeight: 700, color: "#8A5E10" }}>ON-CALL</td>
+            <td colSpan={1 + extras.length} style={{ ...ptd, textAlign: "left", fontWeight: 700, color: "#8A5E10" }}>ON-CALL</td>
             {days.map((date) => {
               const picked = data.onCall?.[date] || "";
               const pickedStaff = picked ? data.staff.find((x) => x.id === picked) : null;
@@ -3829,13 +3866,14 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null }) {
             })}
             <td className="rota-stats" colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
           </tr>
+          )}
         </tbody>
         <tfoot className="rota-stats">
           {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
             ...(data.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []), ["NIGHT", "night", "#6FA8DC"],
             ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color]) => (
             <tr key={cat}>
-              <td colSpan={2} style={{ ...ptd, textAlign: "left", background: color, color: textOn(color), fontWeight: 800 }}>{label}</td>
+              <td colSpan={2 + extras.length} style={{ ...ptd, textAlign: "left", background: color, color: textOn(color), fontWeight: 800 }}>{label}</td>
               {days.map((date) => <td key={date} style={ptd}>{dayCountFor(data, date, cat)}</td>)}
               <td className="rota-stats" colSpan={data.eveningEnabled ? 8 : 7} style={{ border: "none" }} />
             </tr>
