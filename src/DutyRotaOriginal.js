@@ -3870,7 +3870,12 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
               const onCallStaff = data.staff.filter((s) => isEmployedOn(s, date));
               return (
                 <td key={date} style={{ ...ptd, background: "#FDF8EE", fontWeight: 700 }}>
-                  {pickedStaff ? uniqueLabel(pickedStaff, onCallStaff) : ""}
+                  {/* Capped so one long label ("SRN MISA — Ward Manager") wraps
+                      instead of widening its whole day column. Inline styles
+                      only: the image export copies inline styles and drops classes. */}
+                  <div style={{ maxWidth: compact ? 44 : 64, whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.15, margin: "0 auto" }}>
+                    {pickedStaff ? uniqueLabel(pickedStaff, onCallStaff) : ""}
+                  </div>
                 </td>
               );
             })}
