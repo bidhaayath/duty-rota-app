@@ -1637,6 +1637,11 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         const cby = codeByIdOf(viewData);
         const heads = ["M", "A", ...(viewData.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "OFF"];
         const staffRows = staffForDays(viewData, rotaDays);
+        // The same staff detail columns the PDF and image exports include.
+        const extras = [
+          ["designation", "DESIGNATION"], ["contact", "CONTACT"],
+          ["email", "EMAIL"], ["recc", "RECC NO."],
+        ].filter(([k]) => exportCols[k]).map(([key, label]) => ({ key, label }));
 
         const model = {
           orgName: viewData.orgName || "",
@@ -1654,6 +1659,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             };
           }),
           totalHeads: heads,
+          extras,
           rows: staffRows.map((s, i) => {
             const t = weekTotalsFor(viewData, s, rotaDays);
             const cells = weekSegments(s, rotaDays).map((seg) => {
@@ -1664,7 +1670,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               if (seg.kind === "leave") {
                 const st = styleFor(seg.period);
                 return { span: seg.span, bg: st.bg, fg: st.fg,
-                         text: seg.span >= 3 ? st.label : st.abbrev };
+                         text: seg.span >= 3 ? st.label : st.abbrev,
+                         sub: seg.span >= 3 ? `(${niceDate(seg.period.start)} – ${niceDate(seg.period.end)})` : "" };
               }
               const code = cby(firstCodeId(viewData, seg.date, s.id));
               const ents = cellEntries(viewData, seg.date, s.id);
@@ -1685,9 +1692,12 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             const totals = [t.morning, t.afternoon, ...(viewData.eveningEnabled ? [t.evening] : []),
                             t.night, t.other, t.release, t.off];
             return { num: i + 1, name: s.name, designation: s.designation || "",
+                     contact: s.contact || "", email: s.email || "", recc: s.recc || "",
                      cells, totals, nonOfficialDuty: t.nonOfficialDuty };
           }),
+          // All blank when the on-call row is unticked, so none is written.
           onCall: rotaDays.map((date) => {
+            if (!showOnCall) return "";
             const id = viewData.onCall?.[date] || "";
             if (!id) return "";
             const who = viewData.staff.find((x) => x.id === id);
