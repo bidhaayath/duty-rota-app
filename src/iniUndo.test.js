@@ -183,7 +183,7 @@ test("days and nights in a row save in one step, Smart Roster shows them, and on
 
   const daysBox = () => screen.getByLabelText("Days in a row (most)");
   const nightsBox = () => {
-    const inputs = screen.getByText("In a row", { selector: "td" }).closest("tr").querySelectorAll("input");
+    const inputs = screen.getByText("In a row — most", { selector: "td" }).closest("tr").querySelectorAll("input");
     return inputs[inputs.length - 1];
   };
   expect([daysBox().value, nightsBox().value]).toEqual(["5", "2"]);

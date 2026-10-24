@@ -437,7 +437,7 @@ export function checkFeasible(cfg) {
           (block <= 2 ? `, and worked ${block} at a time that reaches about ${reach} people` : '') +
           `, so ${usable.length - reach} of your ${usable.length} staff will get no ${sh} duty ` +
           `this week. Raise the ${sh} minimum per day to spread it wider` +
-          (block <= 2 ? `, or set "${sh} in a row" to 1.` : '.')
+          (block <= 2 ? `, or set "In a row — most" for ${sh} to 1.` : '.')
         );
       }
     }

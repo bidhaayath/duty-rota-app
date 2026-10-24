@@ -39,7 +39,7 @@ const weekStartOf = (d, firstDay = 0) => {
 };
 const DAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-/* What an empty "In a row" box stores: longer than any run can be, so the
+/* What an empty "In a row — most" box stores: longer than any run can be, so the
    engine never stops a run for it. A missing value would mean its default. */
 const NO_LIMIT = 99;
 
@@ -117,6 +117,9 @@ export default function SmartRosterTab({
   const [proposal, setProposal] = useState(null);
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  /* Decided once, when the page opens: a ward with its own plural keeps the
+     box for the whole visit, so clearing it to retype does not make it vanish. */
+  const [showPlural] = useState(() => !!(rules.seniorTermPlural || "").trim());
 
   const setRules = (patch) => update((d) => { d.rosterRules = { ...rules, ...patch }; return d; });
 
@@ -437,10 +440,10 @@ export default function SmartRosterTab({
           Laid out the same way as the results, so you can set a rule and check it in the same
           shape. Leave a box empty for no limit. <strong>Fewest</strong> is a goal — the generator
           works towards it but cannot always reach it. <strong>Most</strong> is a limit.
-          <strong> In a row</strong> is how many of that shift can come together before a change:
-          two nights together is normal, and keeping the others to about three is what stops a
-          whole week of afternoons. Left empty, it has no limit — but a run still stops at{" "}
-          <strong>Days in a row (most)</strong>. <strong>Together (fewest)</strong> asks for that
+          <strong> In a row — most</strong> is how many of that shift can come together before a
+          change: two nights together is normal, and keeping the others to about three is what
+          stops a whole week of afternoons. Left empty, it has no limit — but a run still stops at{" "}
+          <strong>Days in a row (most)</strong>. <strong>In a row — fewest</strong> asks for that
           shift to come in runs of at least that many when someone gets more than one — two nights
           together rather than two singles. It is a goal, not a limit, and while{" "}
           <strong>Fewest</strong> asks for at least one of that shift, it never comes before
@@ -479,7 +482,27 @@ export default function SmartRosterTab({
                 ))}
               </tr>
               <tr>
-                <td style={{ ...td, fontWeight: 600 }}>In a row</td>
+                <td style={{ ...td, fontWeight: 600 }}>In a row — fewest</td>
+                {SHIFTS.map((sh) => (
+                  <td key={sh} style={{ ...td, textAlign: "center" }}>
+                    <input type="number" min={1} max={7} style={{ ...num, width: 84 }} disabled={!staffEditable}
+                      aria-label={`In a row — fewest — ${SHIFT_LABELS[sh]}`}
+                      value={rules.blockTogether?.[sh] ?? ""}
+                      onChange={(e) => {
+                        /* Empty or 1 means no ask; empty is stored as null. Anything
+                           else outside 1–7 is ignored and the box shows the saved value. */
+                        const raw = e.target.value;
+                        const n = raw === "" ? null : Number(raw);
+                        if (n !== null && !(Number.isInteger(n) && n >= 1 && n <= 7)) return;
+                        if (n === (rules.blockTogether?.[sh] ?? null)) return;
+                        setRules({ blockTogether: { ...rules.blockTogether, [sh]: n } });
+                      }} />
+                  </td>
+                ))}
+                <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>—</td>
+              </tr>
+              <tr>
+                <td style={{ ...td, fontWeight: 600 }}>In a row — most</td>
                 {SHIFTS.map((sh) => (
                   <td key={sh} style={{ ...td, textAlign: "center" }}>
                     <input type="number" min={1} max={7} style={{ ...num, width: 84 }} disabled={!staffEditable}
@@ -496,32 +519,12 @@ export default function SmartRosterTab({
                       }} />
                   </td>
                 ))}
-                {/* One setting for both In a row and Days in a row (most): the
-                    engine's working pattern covers the two together. */}
+                {/* One setting for both In a row — most and Days in a row (most):
+                    the engine's working pattern covers the two together. */}
                 <td style={{ ...td, textAlign: "center" }}>
                   <div style={{ fontSize: 11, color: T.inkSoft, marginBottom: 3 }}>How strongly</div>
-                  {scaleSelect("workPattern", "How strongly — In a row and Days in a row (most)")}
+                  {scaleSelect("workPattern", "How strongly — In a row — most and Days in a row (most)")}
                 </td>
-              </tr>
-              <tr>
-                <td style={{ ...td, fontWeight: 600 }}>Together (fewest)</td>
-                {SHIFTS.map((sh) => (
-                  <td key={sh} style={{ ...td, textAlign: "center" }}>
-                    <input type="number" min={1} max={7} style={{ ...num, width: 84 }} disabled={!staffEditable}
-                      aria-label={`Together (fewest) — ${SHIFT_LABELS[sh]}`}
-                      value={rules.blockTogether?.[sh] ?? ""}
-                      onChange={(e) => {
-                        /* Empty or 1 means no ask; empty is stored as null. Anything
-                           else outside 1–7 is ignored and the box shows the saved value. */
-                        const raw = e.target.value;
-                        const n = raw === "" ? null : Number(raw);
-                        if (n !== null && !(Number.isInteger(n) && n >= 1 && n <= 7)) return;
-                        if (n === (rules.blockTogether?.[sh] ?? null)) return;
-                        setRules({ blockTogether: { ...rules.blockTogether, [sh]: n } });
-                      }} />
-                  </td>
-                ))}
-                <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>—</td>
               </tr>
               <tr style={{ background: "#F7FAFA" }}>
                 <td style={{ ...td, fontWeight: 700 }}>Duties in total</td>
@@ -572,7 +575,7 @@ export default function SmartRosterTab({
               gives way first; Protect most is held longest.
             </li>
             <li>
-              <strong>Ignore</strong> — the limit is switched off. On <strong>In a row</strong>,
+              <strong>Ignore</strong> — the limit is switched off. On <strong>In a row — most</strong>,
               Ignore also stops the generator trying to keep someone's two off days together.
             </li>
           </ul>
@@ -583,8 +586,9 @@ export default function SmartRosterTab({
             held, whatever else is set.
           </p>
           <p style={{ margin: "0 0 8px" }}>
-            <strong>In a row</strong> and <strong>Days in a row (most)</strong> share one setting —
-            the box at the end of the In a row row — so they are always set together.
+            <strong>In a row — most</strong> and <strong>Days in a row (most)</strong> share one
+            setting — the box at the end of that row — so they are always set together.{" "}
+            <strong>In a row — fewest</strong> has no How strongly setting: it is always a goal.
           </p>
           <p style={{ margin: 0 }}>
             Covering the shift always comes first, and anything given up is listed after generating.
@@ -611,11 +615,16 @@ export default function SmartRosterTab({
               value={rules.seniorTerm} placeholder="Senior"
               onChange={(e) => setRules({ seniorTerm: e.target.value })} />
           </Field>
-          <Field label="More than one of them">
-            <input style={{ ...inputStyle, width: 170 }} disabled={!staffEditable}
-              value={rules.seniorTermPlural} placeholder={`${termOne}s`}
-              onChange={(e) => setRules({ seniorTermPlural: e.target.value })} />
-          </Field>
+          {/* Only for a ward that already saved its own plural, so it can still
+              change or clear it. New wards get the word plus "s". Once cleared,
+              the box is gone the next time the page opens. */}
+          {showPlural && (
+            <Field label="More than one of them">
+              <input style={{ ...inputStyle, width: 170 }} disabled={!staffEditable}
+                value={rules.seniorTermPlural} placeholder={`${termOne}s`}
+                onChange={(e) => setRules({ seniorTermPlural: e.target.value })} />
+            </Field>
+          )}
           <p style={{ ...hint, margin: "0 0 9px", flex: "1 1 220px", minWidth: 200 }}>
             In-charge, team leader, sister — whatever you say on the ward. It is used everywhere on
             this page, including the warnings.
