@@ -751,9 +751,18 @@ export function rosterContext(cfg, dates, staff) {
    a rule. That was misleading, because a later repair often un-bent it and
    the note stayed. What is reported now is what the finished rota actually
    does.                                                                  */
+/* A week's off-day number scaled to the days somebody is actually here:
+   one off day for every 7/n days, never more than n. With n = 2 that is
+   0, 0, 1, 1, 1, 2, 2 for one to seven days. Empty means no limit. */
+const partWeekOffs = (n, days) => {
+  if (n == null) return null;
+  if (n === 0) return 0;
+  return Math.min(n, Math.floor(days / Math.max(1, Math.floor(7 / n))));
+};
+
 export function auditRoster(cfg, ctx, cells) {
   const {
-    staff, dates, weekOf, weekDays, fridayOf, nonOff,
+    staff, dates, weekOf, weekDays, fridayOf, nonOff, requested,
     banned, allowed, forced, cov, seniorNeed, blockMax, seed, seniorIds,
     maxDaysOn, absMax, W,
   } = ctx;
@@ -845,10 +854,11 @@ export function auditRoster(cfg, ctx, cells) {
 
       const wk = weekOf[date];
       const w = weeks[wk] || (weeks[wk] = {
-        days: 0, duties: 0, off: 0, rest: 0,
+        days: 0, duties: 0, off: 0, rest: 0, fixed: 0,
         morning: 0, afternoon: 0, evening: 0, night: 0,
       });
       w.days += 1;
+      if (requested[`${id}|${date}`]) w.fixed += 1;
       if (cat === OFF_CAT) {
         w.off += 1;
         // A rest day after a night is recognisable, and the ward decides
@@ -878,7 +888,36 @@ export function auditRoster(cfg, ctx, cells) {
       if (dMax != null && w.duties > dMax) {
         flag(W.dutyMax * (w.duties - dMax), { date: wk, staffId: id, shift: OFF_CAT, kind: 'dutyMax' });
       }
-      if (!whole) continue;
+      if (!whole) {
+        /* Away for part of a week that is otherwise inside the range — on
+           leave, or joining or leaving mid-week. Without a target they get
+           whatever is left once everyone else is placed, which is usually
+           rest while the ward is short. So the ward's off days are scaled to
+           the days they are here, each end on its own: at seven days this
+           is exactly Fewest and Most. Against Most only free off days count,
+           since a rest day after a night is not one they chose; against
+           Fewest every off day counts. A week cut by the edge of the
+           range is still not judged, and nor is one where every day is
+           fixed, since nothing the generator does can change it.
+
+           Priced as a preference whatever the ward has set: a scaled target
+           must lose to an uncovered shift and to a shift over its most, or
+           the ward is left short — or overstaffed — for the sake of somebody
+           who was away. Ignore still switches it off.                     */
+        if (weekDays[wk] === 7 && w.days > w.fixed) {
+          const free = w.off - w.rest;
+          const hi = partWeekOffs(cfg.weeklyPerStaff?.offMax, w.days);
+          if (W.offMax && hi != null && free > hi) {
+            flag(COST.offMax * (free - hi), { date: wk, staffId: id, shift: OFF_CAT, kind: 'partOffMax' });
+          }
+          // The floor counts every off day: a rest after a night is still rest.
+          const lo = partWeekOffs(cfg.weeklyPerStaff?.off, w.days);
+          if (W.offMin && !single && lo != null && w.off < lo) {
+            flag(COST.offMin * (lo - w.off), { date: wk, staffId: id, shift: OFF_CAT, kind: 'partOffMin' });
+          }
+        }
+        continue;
+      }
       const dMin = cfg.weeklyDuties?.min;
       if (dMin != null && w.duties < dMin) {
         flag(W.dutyMin * (dMin - w.duties), { date: wk, staffId: id, shift: OFF_CAT, kind: 'dutyMin' });
@@ -1115,6 +1154,8 @@ const ISSUE_NAMES = {
   dutyMin: 'weekly duty minimum',
   offMax: 'maximum off days',
   offMin: 'minimum off days',
+  partOffMax: 'off days for part-week staff',
+  partOffMin: 'off days for part-week staff',
   weeklyCap: 'weekly limit',
 };
 function issuesToRelaxations(issues) {

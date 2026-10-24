@@ -296,7 +296,8 @@ export const plainProblems = (prep, problems) => (problems || []).map((p) => {
 
 /* ── The engine's answer, turned into writes and a summary ── */
 const RULE_SORT = ["weekly duty maximum", "duty rule", "days in a row", "working pattern",
-  "maximum off days", "minimum off days", "weekly duty minimum", "two off days together"];
+  "maximum off days", "minimum off days", "off days for part-week staff", "weekly duty minimum",
+  "two off days together"];
 
 export function finishMonth(prep, result, data) {
   const { periodFrom, periodTo, pinned, blocked, config } = prep;
