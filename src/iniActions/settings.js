@@ -22,7 +22,7 @@
 
    set_max_in_a_row  { kind: duty|night, max }   1–14 from the server
      rosterRules.maxDaysOn              most days in a row, any duty (1–6)
-     rosterRules.blockDays.night        most nights in a row (1–7)
+     rosterRules.blockDays.night        most nights in a row (1–7, or 99 = no limit)
    Written as Smart Roster's "Days in a row (most)" box and the Night box
    of its "In a row" row write them. Above what those boxes allow is
    blocked, so Ini never saves a value the screen could not. */
@@ -154,6 +154,9 @@ export const setOffsPerWeek = {
 const MAX_DAYS_ON = 6;
 const MAX_NIGHTS = 7;
 const IN_A_ROW = { duty: "Days in a row (most)", night: "Nights in a row (most)" };
+// What Smart Roster's "In a row" box stores when it is left empty.
+const NO_LIMIT = 99;
+const inARowWords = (n) => (n >= NO_LIMIT ? "no limit" : n);
 const planInARow = (l, data) => {
   const rules = mergeRules(data.rosterRules || {});
   const cur = l.kind === "night" ? rules.blockDays.night : rules.maxDaysOn;
@@ -168,7 +171,7 @@ export const setMaxInARow = {
 
   fromServer: (a) => ((a.kind === "duty" || a.kind === "night") && Number.isInteger(a.max) && a.max >= 1 && a.max <= 14
     ? { kind: a.kind, max: a.max } : null),
-  describe: (l, { sim }) => ({ what: IN_A_ROW[l.kind], when: `${planInARow(l, sim).cur} → ${l.max}` }),
+  describe: (l, { sim }) => ({ what: IN_A_ROW[l.kind], when: `${inARowWords(planInARow(l, sim).cur)} → ${l.max}` }),
 
   check: (l, { sim }) => {
     const { rules, cur, top } = planInARow(l, sim);
@@ -194,7 +197,8 @@ export const setMaxInARow = {
     if (duties != null && 7 - offs < duties) {
       warnings.push(`at most ${plural(l.max, "day")} in a row leaves room for only ${plural(7 - offs, "duty", "duties")} a week, fewer than the fewest duties per week (${duties})`);
     }
-    const over = runs.filter((s) => (rules.blockDays[s] ?? 0) > l.max);
+    // A shift with no limit loses nothing, so it is not "no longer reached".
+    const over = runs.filter((s) => (rules.blockDays[s] ?? 0) > l.max && rules.blockDays[s] < NO_LIMIT);
     if (over.length) {
       warnings.push(`${listWords(over.map((s) => `${SHIFT_LABELS[s]} ${rules.blockDays[s]}`))} in a row can no longer be reached, so the most is ${l.max}`);
     }
