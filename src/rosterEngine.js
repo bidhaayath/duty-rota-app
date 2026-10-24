@@ -605,6 +605,7 @@ const COST = {
   offMin: 25,        // fewer off days than promised
   dutyMin: 25,       // fewer duties than the person's week should hold
   shiftMin: 25,      // fewer of a shift than the person's week should hold
+  blockTogether: 15, // a shift split into more runs than it needed
   doubleOff: 12,     // two off days together
   fair: 3,           // per point of spread on a fairness measure
 };
@@ -692,8 +693,12 @@ export function rosterContext(cfg, dates, staff) {
     weekOf[d] = startOfWeek(d, cfg.weekStartsOn ?? 0);
     fridayOf[d] = isFriday(d);
   });
-  const weekDays = {};
-  dates.forEach((d) => { weekDays[weekOf[d]] = (weekDays[weekOf[d]] || 0) + 1; });
+  const weekDays = {}, datesOfWeek = {}, nextOf = {};
+  dates.forEach((d, i) => {
+    weekDays[weekOf[d]] = (weekDays[weekOf[d]] || 0) + 1;
+    (datesOfWeek[weekOf[d]] = datesOfWeek[weekOf[d]] || []).push(d);
+    nextOf[d] = i < dates.length - 1 ? dates[i + 1] : null;   // null: beyond the range
+  });
   const nonOff = new Set(cfg.nonOfficialDates || []);
 
   // Sequence rules, resolved per category rather than re-derived per cell.
@@ -735,7 +740,7 @@ export function rosterContext(cfg, dates, staff) {
 
   return {
     W: costWeights(cfg),
-    staff, dates, keep, histCats, requested, prevOf, weekOf, weekDays, fridayOf,
+    staff, dates, keep, histCats, requested, prevOf, nextOf, weekOf, weekDays, datesOfWeek, fridayOf,
     nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed,
     seniorIds: new Set(staff.filter((s) => isSenior(cfg, s)).map((s) => String(s.id))),
     maxDaysOn: cfg.maxConsecutiveDays ?? 4,
@@ -765,8 +770,14 @@ export function auditRoster(cfg, ctx, cells) {
   const {
     staff, dates, weekOf, weekDays, fridayOf, nonOff, requested,
     banned, allowed, forced, cov, seniorNeed, blockMax, seed, seniorIds,
-    maxDaysOn, absMax, W,
+    maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek,
   } = ctx;
+  /* Shifts the ward wants kept together, and how many to a run. Never more
+     than In a row allows, or the ask could not be met. None set: nothing
+     below looks at runs at all. */
+  const together = SHIFTS
+    .map((sh) => ({ sh, n: Math.min(cfg.blockTogether?.[sh] ?? 1, blockMax[sh]) }))
+    .filter((t) => t.n > 1);
 
   const shortfalls = [], seniorGaps = [], issues = [];
   let cost = 0;
@@ -926,6 +937,37 @@ export function auditRoster(cfg, ctx, cells) {
       const offMax = cfg.weeklyPerStaff?.offMax;
       if (offMax != null && offs > offMax) {
         flag(W.offMax * (offs - offMax), { date: wk, staffId: id, shift: OFF_CAT, kind: 'offMax' });
+      }
+      /* Kept together: a shift worked in more separate runs than its count
+         needed. Not a minimum run — one night alone is one run, needs one,
+         and costs nothing. A run touching the start of the week is not
+         judged if the day before was the same shift or blank (leave, a kept
+         cell, before they joined, no history), nor one touching the end if
+         the next day is the same shift, blank or beyond the range: it may
+         carry on where we cannot see. Applies to single-shift staff too —
+         this is the shape of their nights, not a rotation.             */
+      if (together.length) {
+        const days = datesOfWeek[wk];
+        const pv = prevOf[days[0]];
+        const before = weekOf[pv] !== undefined ? cells[`${id}|${pv}`] : seed[id].runCat;
+        const nx = nextOf[days[6]];
+        const after = nx ? cells[`${id}|${nx}`] : null;
+        for (const { sh, n } of together) {
+          let count = 0, runs = 0;
+          for (let i = 0; i < 7; i++) {
+            if (cells[`${id}|${days[i]}`] !== sh) continue;
+            let j = i;
+            while (j < 6 && cells[`${id}|${days[j + 1]}`] === sh) j += 1;
+            const open = (i === 0 && (before == null || before === sh))
+              || (j === 6 && (after == null || after === sh));
+            if (!open) { count += j - i + 1; runs += 1; }
+            i = j;
+          }
+          const ideal = Math.ceil(count / n);
+          if (runs > ideal) {
+            flag(W.blockTogether * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'blockTogether' });
+          }
+        }
       }
       /* The weekly table describes a rotation. Somebody tied to one shift
          has nothing to rotate, so none of it applies to them. */
@@ -1174,7 +1216,8 @@ function issuesToRelaxations(issues) {
     staffId: i.staffId,
     rule: i.kind === 'weeklyCap' ? `weekly ${i.shift} limit`
       : i.kind === 'shiftMin' ? `fewest ${i.shift}s a week`
-        : (ISSUE_NAMES[i.kind] || i.kind),
+      : i.kind === 'blockTogether' ? `${i.shift}s not kept together`
+      : (ISSUE_NAMES[i.kind] || i.kind),
   }));
 }
 

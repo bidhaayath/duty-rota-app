@@ -298,6 +298,8 @@ export const plainProblems = (prep, problems) => (problems || []).map((p) => {
 const RULE_SORT = ["weekly duty maximum", "duty rule", "days in a row", "working pattern",
   "maximum off days", "minimum off days", "off days for part-week staff", "weekly duty minimum",
   "fewest mornings a week", "fewest afternoons a week", "fewest evenings a week", "fewest nights a week",
+  "mornings not kept together", "afternoons not kept together", "evenings not kept together",
+  "nights not kept together",
   "two off days together"];
 
 export function finishMonth(prep, result, data) {

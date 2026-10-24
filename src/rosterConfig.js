@@ -252,6 +252,8 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     // Blocks are kept short so a week reads as a mix rather than five
     // afternoons running. Nights are the exception: they pair.
     maxBlock: rules.blockDays,
+    // Runs of at least this many when someone gets more than one; absent = no ask.
+    blockTogether: rules.blockTogether,
     maxConsecutiveDays: rules.maxDaysOn ?? 5,
     // The working pattern is held firm: it is what stops one person
     // collecting a whole week of the same duty. Only the off-day floor

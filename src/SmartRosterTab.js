@@ -440,7 +440,11 @@ export default function SmartRosterTab({
           <strong> In a row</strong> is how many of that shift can come together before a change:
           two nights together is normal, and keeping the others to about three is what stops a
           whole week of afternoons. Left empty, it has no limit — but a run still stops at{" "}
-          <strong>Days in a row (most)</strong>.
+          <strong>Days in a row (most)</strong>. <strong>Together (fewest)</strong> asks for that
+          shift to come in runs of at least that many when someone gets more than one — two nights
+          together rather than two singles. It is a goal, not a limit, and while{" "}
+          <strong>Fewest</strong> asks for at least one of that shift, it never comes before
+          someone getting their first.
         </p>
         <div style={{ overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse", minWidth: 640 }}>
@@ -498,6 +502,26 @@ export default function SmartRosterTab({
                   <div style={{ fontSize: 11, color: T.inkSoft, marginBottom: 3 }}>How strongly</div>
                   {scaleSelect("workPattern", "How strongly — In a row and Days in a row (most)")}
                 </td>
+              </tr>
+              <tr>
+                <td style={{ ...td, fontWeight: 600 }}>Together (fewest)</td>
+                {SHIFTS.map((sh) => (
+                  <td key={sh} style={{ ...td, textAlign: "center" }}>
+                    <input type="number" min={1} max={7} style={{ ...num, width: 84 }} disabled={!staffEditable}
+                      aria-label={`Together (fewest) — ${SHIFT_LABELS[sh]}`}
+                      value={rules.blockTogether?.[sh] ?? ""}
+                      onChange={(e) => {
+                        /* Empty or 1 means no ask; empty is stored as null. Anything
+                           else outside 1–7 is ignored and the box shows the saved value. */
+                        const raw = e.target.value;
+                        const n = raw === "" ? null : Number(raw);
+                        if (n !== null && !(Number.isInteger(n) && n >= 1 && n <= 7)) return;
+                        if (n === (rules.blockTogether?.[sh] ?? null)) return;
+                        setRules({ blockTogether: { ...rules.blockTogether, [sh]: n } });
+                      }} />
+                  </td>
+                ))}
+                <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>—</td>
               </tr>
               <tr style={{ background: "#F7FAFA" }}>
                 <td style={{ ...td, fontWeight: 700 }}>Duties in total</td>
