@@ -16,6 +16,7 @@ import SmartRosterTab from "./SmartRosterTab";
 import AssistantPanel from "./AssistantPanel";
 import { exportRotaToExcel } from "./rotaExcel";
 import { effectivePlan, deptPlanLoading } from "./deptPlan";
+import { tagDept, ownedByMe, deptAllowance, ownerLevel } from "./deptAllowance";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 /* The rota's counting rules (cells, leave, employment, totals and coverage)
    live in rotaCounts.js so Ini's month preview counts the same way. */
@@ -92,18 +93,36 @@ const saveUserRota = async (rotaData) => {
    Everyone currently trialing gets the Plus-level limit; the paywall
    tiers will feed this number later.                                 */
 
+// The columns every department row is read with. organisation_id is what
+// the server counts the allowance by; owner_user_id says who may delete it.
+const DEPT_COLS = "id, name, created_at, organisation_id, owner_user_id";
+
+// my_org_id() — the organisation the server counts this person's allowance
+// against. undefined when it could not be asked, which deptAllowance treats
+// as unknown; null is a real answer: no organisation.
+const fetchMyOrgId = async () => {
+  try {
+    const { data, error } = await supabase.rpc("my_org_id");
+    return error ? undefined : (data ?? null);
+  } catch (e) {
+    return undefined;
+  }
+};
+
 // Lists this user's departments, and self-heals accounts that predate the
 // department system (or signed up between migration and deploy): any rota
 // without a department gets one, named after the rota's title.
+// Returns the departments together with my_org_id(), so the app learns
+// which departments are its own in the same moment it learns of them.
 const setupDepartments = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return [];
+    if (!user) return { deps: [], myOrgId: undefined };
     let { data: deps } = await supabase
       .from("departments")
-      .select("id, name, created_at")
+      .select(DEPT_COLS)
       .order("created_at", { ascending: true });
-    deps = deps || [];
+    deps = (deps || []).map((d) => tagDept(d, user.id));
     const { data: orphans } = await supabase
       .from("rotas").select("id, title")
       .is("department_id", null).eq("user_id", user.id);
@@ -111,10 +130,10 @@ const setupDepartments = async () => {
       const { data: d } = await supabase
         .from("departments")
         .insert({ owner_user_id: user.id, name: (o.title || "").trim() || "Department 1" })
-        .select("id, name, created_at").single();
+        .select(DEPT_COLS).single();
       if (d) {
         await supabase.from("rotas").update({ department_id: d.id }).eq("id", o.id);
-        deps.push(d);
+        deps.push(tagDept(d, user.id));
       }
     }
     if (deps.length === 0) {
@@ -133,14 +152,16 @@ const setupDepartments = async () => {
         const { data: d } = await supabase
           .from("departments")
           .insert({ owner_user_id: user.id, name: "Department 1" })
-          .select("id, name, created_at").single();
-        if (d) deps.push(d);
+          .select(DEPT_COLS).single();
+        if (d) deps.push(tagDept(d, user.id));
       }
     }
-    return deps;
+    // Asked after the inserts above, because a brand-new account's first
+    // department may be what gives it an organisation.
+    return { deps, myOrgId: await fetchMyOrgId() };
   } catch (e) {
     console.error("Department setup failed, falling back to single-rota mode:", e);
-    return []; // legacy mode — the app still loads
+    return { deps: [], myOrgId: undefined }; // legacy mode — the app still loads
   }
 };
 
@@ -768,7 +789,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false, features: viewerFeatures = null, staffLimit: viewerStaffLimit = null, departmentLimit = null, role = null, orgName = "", onSaveOrgName = null, canEditOrgName = false, onOpenBilling = null }) {
+export default function DutyRota({ locked = false, features: viewerFeatures = null, staffLimit: viewerStaffLimit = null, departmentLimit = null, role = null, roleKnown = false, orgName = "", onSaveOrgName = null, canEditOrgName = false, onOpenBilling = null }) {
   const [data, setData] = useState(null);
   /* Role and editability belong to a person IN A DEPARTMENT, not to a person.
      Someone can own their own organisation and be a manager in another: at
@@ -778,6 +799,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
      and look up whichever one is on screen. */
   const [deptPerms, setDeptPerms] = useState(null); // null = not loaded yet
   const [departments, setDepartments] = useState([]);
+  // my_org_id(), set together with the departments. undefined = unknown.
+  const [myOrgId, setMyOrgId] = useState(undefined);
   const [deptId, setDeptId] = useState(null); // null = legacy single-rota mode
   // The organisation name belongs to the DEPARTMENT, not to the viewer. A
   // manager looking at someone else's department must see — and export —
@@ -875,7 +898,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     try { localStorage.removeItem("rota:v2"); } catch (e) { /* ignore */ }
 
     (async () => {
-      const deps = await setupDepartments();
+      const { deps, myOrgId: orgId } = await setupDepartments();
+      setMyOrgId(orgId);
       if (deps.length > 0) {
         setDepartments(deps);
         switchingDept.current = true;
@@ -1086,18 +1110,48 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   const isDuplicateNameError = (error) =>
     error && (error.code === "23505" || /duplicate key|unique constraint/i.test(error.message || ""));
 
+  const plural = (n) => `${n} department${n === 1 ? "" : "s"}`;
+
+  // Why canManageDepts is false, for the add and delete handlers.
+  const cannotManageDeptsReason = () => {
+    if (!ownerRole.known) return "Your access could not be checked just now. Please reload and try again.";
+    if (!ownerRole.isOwner) return "Only the owner of the organisation can add or delete departments.";
+    return "This department is view-only right now, so departments cannot be added or deleted.";
+  };
+
+  /* The INSERT policy enforces the allowance, so a refusal is the server's
+     final word. Postgres reports an RLS refusal as 42501, which on its own
+     cannot say whether the limit was the reason, so ask the same two
+     functions the policy uses. */
+  const refusedAddMessage = async () => {
+    try {
+      const [{ data: lim, error: e1 }, { data: count, error: e2 }] = await Promise.all([
+        supabase.rpc("department_limit"),
+        supabase.rpc("org_department_count"),
+      ]);
+      if (!e1 && !e2 && lim != null && count != null && count >= lim) {
+        return `Your plan includes up to ${plural(lim)}, and your organisation already has ${count}.\n\nUpgrade to add more.`;
+      }
+    } catch (e) { /* fall through to the general reason */ }
+    return "The department could not be created. Your plan may need renewing, or your access may not allow adding departments here.";
+  };
+
   const addDepartment = async () => {
-    if (departmentLimit != null && departments.length >= departmentLimit) {
-      window.alert(`Your plan includes up to ${departmentLimit} department${departmentLimit === 1 ? "" : "s"}. Upgrade to add more.`);
+    // Checked here, not only by hiding the button: hiding is presentation.
+    if (!canManageDepts) { window.alert(cannotManageDeptsReason()); return; }
+    // A prediction only — the server has the final say. With nothing to
+    // predict from, the insert goes ahead and the server decides.
+    if (allowance.addPrediction === false) {
+      window.alert(`Your plan includes up to ${plural(departmentLimit)}. Upgrade to add more.`);
       return;
     }
-    const name = window.prompt("Name for the new department:", `Department ${departments.length + 1}`);
+    const name = window.prompt("Name for the new department:", allowance.nextName);
     if (!name || !name.trim()) return;
     const clean = name.trim();
     // Catch it here first so the person gets a clear answer straight away,
-    // rather than a database error. Compared case-insensitively so "ICU" and
-    // "icu" are treated as the same name to a human reading the list.
-    if (departments.some((x) => (x.name || "").trim().toLowerCase() === clean.toLowerCase())) {
+    // rather than a database error. Only their own organisation's names can
+    // clash — a department shared from elsewhere is not theirs to collide with.
+    if (allowance.nameTaken(clean)) {
       window.alert(`You already have a department called "${clean}".\n\nPlease choose a different name.`);
       return;
     }
@@ -1105,14 +1159,18 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     const { data: d, error } = await supabase
       .from("departments")
       .insert({ owner_user_id: user.id, name: clean })
-      .select("id, name, created_at").single();
+      .select(DEPT_COLS).single();
     if (error || !d) {
       window.alert(isDuplicateNameError(error)
         ? `You already have a department called "${clean}".\n\nPlease choose a different name.`
-        : "Could not create the department. Please try again.");
+        : error?.code === "42501"
+          ? await refusedAddMessage()
+          : "Could not create the department. Please try again.");
       return;
     }
-    setDepartments((prev) => [...prev, d]);
+    setDepartments((prev) => [...prev, tagDept(d, user.id)]);
+    // A first department can be what gives an account its organisation.
+    if (myOrgId == null) fetchMyOrgId().then(setMyOrgId);
     // Same as switching: a held edit belongs to the department it was made
     // in and must not follow you into a brand-new one.
     setLostEdit(null);
@@ -1133,7 +1191,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     if (!name || !name.trim() || name.trim() === cur.name) return;
     const clean = name.trim();
     // Same check as adding — a rename can collide with an existing name too.
-    if (departments.some((x) => x.id !== deptId && (x.name || "").trim().toLowerCase() === clean.toLowerCase())) {
+    if (allowance.nameTaken(clean, deptId)) {
       window.alert(`You already have a department called "${clean}".\n\nPlease choose a different name.`);
       return;
     }
@@ -1156,13 +1214,37 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   };
 
   const deleteDepartment = async () => {
-    if (departments.length <= 1) { window.alert("You need at least one department."); return; }
     const cur = departments.find((x) => x.id === deptId);
     if (!cur) return;
+    // Checked here, not only by hiding the menu item.
+    if (!canManageDepts) { window.alert(cannotManageDeptsReason()); return; }
+    if (!ownedByMe(cur)) {
+      window.alert("Only the person who created this department can delete it.");
+      return;
+    }
+    if (!allowance.canDelete(deptId)) {
+      window.alert(allowance.known
+        ? "You need at least one department of your own."
+        : "Your departments could not be checked just now, so nothing can be deleted. Please reload and try again.");
+      return;
+    }
     if (!window.confirm(`Delete "${cur.name}" and ALL its rota data?\n\nThis cannot be undone.`)) return;
+    // rotas does not cascade, so its rows have to go first.
     const { error: rotaErr } = await supabase.from("rotas").delete().eq("department_id", deptId);
-    const { error: depErr } = rotaErr ? { error: rotaErr } : await supabase.from("departments").delete().eq("id", deptId);
+    const { data: gone, error: depErr } = rotaErr
+      ? { data: null, error: rotaErr }
+      : await supabase.from("departments").delete().eq("id", deptId).select("id");
     if (rotaErr || depErr) { window.alert("Could not delete the department. Please try again."); return; }
+    /* RLS refuses a delete WITHOUT an error — it simply removes nothing — so
+       only the rows coming back prove it happened. By now the rota rows are
+       already gone; the copy on screen and in this browser is not. */
+    if (!gone || gone.length === 0) {
+      window.alert(
+        `"${cur.name}" could not be deleted, but its rota had already been removed from the server.\n\n` +
+        "The rota is still open on this screen. Please don't close this tab — export it before trying again."
+      );
+      return;
+    }
     try { localStorage.removeItem("rota:v2:" + deptId); } catch (e) { /* ignore */ }
     const remaining = departments.filter((x) => x.id !== deptId);
     setDepartments(remaining);
@@ -1211,7 +1293,9 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       if (cancelled || error || !Array.isArray(rows)) return;
       const m = new Map();
       rows.forEach((r) => m.set(r.department_id, {
-        role: r.role, canEdit: r.can_edit, isOwner: r.is_owner,
+        // Not is_owner: that is owner_user_id = auth.uid(), which the rows
+        // already carry as ownerIsMe from the moment they load.
+        role: r.role, canEdit: r.can_edit,
       }));
       setDeptPerms(m);
     });
@@ -1225,10 +1309,31 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   const currentPerm = (deptPerms && deptId) ? deptPerms.get(deptId) : null;
   const deptRole = currentPerm ? currentPerm.role : role;
   const viewOnlyRole = deptRole === "employee";
-  const isOwnerLevel = deptRole == null || deptRole === "owner";
+  /* Owner-only actions — adding and deleting departments, granting manager
+     access — fail closed: a role nobody has answered for is not "owner".
+     A real null from my_role() (no membership row, an account from before
+     invites) still is, exactly as before. */
+  const ownerRole = ownerLevel({ deptRole: currentPerm?.role, accountRole: role, accountRoleKnown: roleKnown });
+  const isOwnerLevel = ownerRole.isOwner;
   // Whether editing is blocked HERE: either this department's organisation is
   // not paying, or this person's role in it does not allow writing.
   const editBlocked = currentPerm ? !currentPerm.canEdit : locked;
+  // Who may add or delete departments. The buttons and the handlers both
+  // read this one value.
+  const canManageDepts = isOwnerLevel && !editBlocked && !viewOnlyRole;
+
+  /* Department allowance. A plan limits the departments in the person's
+     ORGANISATION — the same count the server makes — and not every
+     department they can see. Departments shared from another organisation
+     are covered by that owner's plan and never locked by this one. The
+     first `departmentLimit` stay editable and anything beyond that is
+     read-only until they upgrade; the saved data is never touched. null =
+     unlimited. Worked out here, above the early returns, because undo
+     needs it too and must never disagree with the edit gate. */
+  const allowance = deptAllowance({
+    departments, myOrgId, limit: departmentLimit, accountRole: role, accountRoleKnown: roleKnown,
+  });
+  const currentDeptLocked = allowance.isLocked(deptId);
 
   /* Changing the setting would otherwise leave the rota sitting on a date
      that is no longer the start of a week — showing Wednesday to Tuesday
@@ -1242,22 +1347,19 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
      know this exists. It has to sit ABOVE the early return below, because a
      hook cannot come after one.
 
-     The department lock is worked out again here rather than reused from
-     further down for the same reason: currentDeptLocked is defined after
-     the return, and undo writes to the rota directly, so it needs its own
-     gate or a view-only department could be edited through it. */
-  const deptIsLocked = departmentLimit != null && deptId != null &&
-    !departments.slice(0, departmentLimit).some((x) => x.id === deptId);
-  const history = useRotaHistory(data, setData, deptId, { disabled: editBlocked || deptIsLocked || viewOnlyRole });
+     Undo writes to the rota directly, so it needs the department lock too,
+     or a view-only department could be edited through it. */
+  const history = useRotaHistory(data, setData, deptId, { disabled: editBlocked || currentDeptLocked || viewOnlyRole });
 
   if (tab === "dashboard") {
     return (
       <Dashboard
         departments={departments}
+        isMyDept={allowance.showsAsMine}
         deptPerms={deptPerms}
         orgName={effectiveOrgName}
         loadRota={loadRotaFor}
-        canAddDepartment={isOwnerLevel && !editBlocked && !viewOnlyRole}
+        canAddDepartment={canManageDepts}
         onAddDepartment={addDepartment}
         onOpenDepartment={(id) => { switchDept(id); setTab("rota"); }}
         onOpenPlans={onOpenBilling}
@@ -1292,30 +1394,6 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   // All four print views read from viewData, so adding the organisation name
   // here puts it on every export without touching each one.
   const viewData = { ...(canUseLogo ? data : { ...data, logo: "" }), orgName: effectiveOrgName };
-
-  // Department allowance. A person's plan limits the departments THEY OWN.
-  // Departments shared with them belong to someone else's organisation and
-  // are already covered by that owner's plan, so they never consume this
-  // allowance and are never locked by it. Owned departments are held
-  // oldest-first, so the first `departmentLimit` stay editable and anything
-  // beyond that is read-only until they upgrade. null = unlimited. Deleting
-  // an editable one promotes the next in line automatically, since this is
-  // purely positional. The saved data is never touched.
-  const editableDeptIds = (departmentLimit == null)
-    ? null // unlimited — every department editable
-    : new Set(
-        departments
-          .filter((d) => (deptPerms ? deptPerms.get(d.id)?.isOwner !== false : true))
-          .slice(0, departmentLimit)
-          .map((d) => d.id)
-      );
-  const deptEditable = (id) => {
-    if (editableDeptIds == null || id == null) return true;
-    // Shared departments are the other organisation's to pay for.
-    if (deptPerms && deptPerms.get(id)?.isOwner === false) return true;
-    return editableDeptIds.has(id);
-  };
-  const currentDeptLocked = !deptEditable(deptId);
 
   // Staff allowance. On a tier with a staff limit, the first N ACTIVE staff
   // (in list order) stay editable; active staff beyond N are read-only —
@@ -1853,10 +1931,12 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               }}
             >
                   {(() => {
-                    const owned = departments.filter((d) => deptPerms?.get(d.id)?.isOwner !== false);
-                    const member = departments.filter((d) => deptPerms?.get(d.id)?.isOwner === false);
+                    // Never waits on my_departments(), so nothing moves between
+                    // the two groups when it lands.
+                    const owned = departments.filter(allowance.showsAsMine);
+                    const member = departments.filter((d) => !allowance.showsAsMine(d));
                     const renderDept = (d) => {
-                      const ro = !deptEditable(d.id);
+                      const ro = allowance.isLocked(d.id);
                       return (
                         <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
                           fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
@@ -1883,7 +1963,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
                     );
                   })()}
                   <div style={{ borderTop: `1px solid ${T.line}` }}>
-                    {!editBlocked && !viewOnlyRole && isOwnerLevel && (
+                    {canManageDepts && (
                       <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -1897,12 +1977,14 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
                         fontWeight: 600, cursor: "pointer", textAlign: "left",
                       }}><Pencil size={14} /> Rename this department</button>
                     )}
-                    {!isOwnerLevel && (
+                    {/* Only once the role is actually known — an owner whose
+                        role lookups failed is not "a member". */}
+                    {ownerRole.known && !isOwnerLevel && (
                       <div style={{ padding: "10px 14px", fontSize: 12, color: T.inkSoft, lineHeight: 1.5, borderTop: `1px solid ${T.line}` }}>
                         You're a member of this department. Only its owner can add or delete departments here.
                       </div>
                     )}
-                    {!editBlocked && !viewOnlyRole && isOwnerLevel && departments.length > 1 && (
+                    {canManageDepts && allowance.canDelete(deptId) && (
                       <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
                         padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
@@ -2071,7 +2153,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             <Card>
               <p style={{ fontSize: 13.5, color: T.inkSoft, margin: 0 }}>Loading…</p>
             </Card>
-          ) : features?.smart_roster === false && currentPerm && currentPerm.isOwner === false ? (
+          ) : features?.smart_roster === false && deptId != null && !allowance.showsAsMine(departments.find((d) => d.id === deptId)) ? (
             /* Someone else's department, on a plan without Smart Roster. The
                viewer cannot change that plan, so there is nothing to offer. */
             <Card>

@@ -382,6 +382,9 @@ export default function App() {
   // row, which is every account created before invites existed — those get
   // full access, exactly as they always have.
   const [role, setRole] = useState(null);
+  // Whether my_role() has actually answered. A failed call also leaves role
+  // null, and owner-only actions must not mistake that for "no membership".
+  const [roleKnown, setRoleKnown] = useState(false);
   // The organisation this account belongs to. The name is blank for every
   // account created before this existed, and a blank name renders nothing —
   // so exports look exactly as they always have until someone fills it in.
@@ -553,12 +556,16 @@ export default function App() {
   // app needs to know so it can show the rota as view-only rather than let
   // someone type changes that quietly go nowhere.
   useEffect(() => {
+    setRoleKnown(false);
     if (!session?.user?.id) { setRole(null); return; }
     let cancelled = false;
     supabase.rpc('my_role').then(({ data, error }) => {
       // Fail open, like the subscription check: a hiccup must never take
-      // editing away from someone who is entitled to it.
-      if (!cancelled) setRole(error ? null : data);
+      // editing away from someone who is entitled to it. Owner-only actions
+      // in the rota look at roleKnown and fail closed instead.
+      if (cancelled) return;
+      setRole(error ? null : data);
+      setRoleKnown(!error);
     });
     return () => { cancelled = true; };
   }, [session?.user?.id]);
@@ -706,7 +713,7 @@ export default function App() {
         </div>
       </div>
       <DutyRota locked={sub.locked} features={sub.features} staffLimit={sub.staffLimit}
-        departmentLimit={sub.departmentLimit} role={role}
+        departmentLimit={sub.departmentLimit} role={role} roleKnown={roleKnown}
         orgName={org.name} onSaveOrgName={saveOrgName}
         canEditOrgName={role === null || role === 'owner'}
         onOpenBilling={() => setShowBilling(true)} />

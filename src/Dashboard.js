@@ -7,6 +7,7 @@ import supabase from "./supabaseClient";
 import Account from "./Account";
 import SubscriptionHistory from "./SubscriptionHistory";
 import Members from "./Members";
+import { ownedByMe } from "./deptAllowance";
 
 /* ────────────────────────────────────────────────────────────────────────
    My Dashboard — full-screen personal home.
@@ -76,6 +77,7 @@ const roleLabel = (role) => {
 
 export default function Dashboard({
   departments = [],
+  isMyDept = ownedByMe,
   deptPerms = null,
   orgName = "",
   loadRota,
@@ -153,16 +155,16 @@ export default function Dashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deptKey]);
 
-  /* Owned vs shared. With no permission info (legacy single-organisation
-     accounts, or the lookup hasn't landed yet) treat a department as owned —
-     that's how a solo owner's departments have always behaved. Only an
-     explicit is_owner === false moves one under My Membership. */
+  /* Owned vs shared, decided by the parent (deptAllowance's showsAsMine):
+     in my organisation and I own it, with owner_user_id standing in until
+     that is known. It never waits on my_departments(), so nothing moves
+     between the two lists when that lands. deptPerms is only needed for
+     the role shown beside a shared one. */
   const owned = [];
   const memberships = [];
   departments.forEach((d) => {
-    const perm = deptPerms ? deptPerms.get(d.id) : null;
-    if (perm && perm.isOwner === false) memberships.push({ ...d, role: perm.role });
-    else owned.push(d);
+    if (isMyDept(d)) owned.push(d);
+    else memberships.push({ ...d, role: deptPerms ? deptPerms.get(d.id)?.role : undefined });
   });
 
   const myMemberships = useMemo(() => {
@@ -553,9 +555,7 @@ export default function Dashboard({
                 fontSize: 12.5, color: "rgba(255,255,255,0.75)", border: "1px dashed rgba(255,255,255,0.32)",
                 borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
               }}>
-                {deptPerms
-                  ? "No departments have been shared with you yet. When someone invites you to their department, it will appear here."
-                  : "Checking for shared departments…"}
+                No departments have been shared with you yet. When someone invites you to their department, it will appear here.
               </div>
             : memberships.map((d) => (
                 <DeptRow key={d.id} id={d.id} name={d.name} tag={roleLabel(d.role)} />
