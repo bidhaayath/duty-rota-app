@@ -2154,16 +2154,23 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
    Click a cell to open a panel: filter/pick a code, add a note, or add a
    brand-new code without leaving the rota. Chips are finger-sized.       */
 const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", "#4DB6AC", "#F06292", "#A1887F", "#9575CD", "#4DD0E1"];
+// The same five leave types as the Staff tab's leave form.
+const LEAVE_TYPE_OPTIONS = [
+  ["annual", "Annual leave"], ["maternity", "Maternity"], ["prematernity", "Pre-maternity"],
+  ["emergency", "Emergency leave"], ["other", "Other extended leave (custom name)"],
+];
 
 function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled, exchange, onExchange,
   posts = [], postsEnabled = false, postId = "", onPickPost, postName = "",
   splitEnabled = false, secondValue = "", secondPostId = "", secondPostName = "",
-  onPickSecond, onPickSecondPost }) {
+  onPickSecond, onPickSecondPost, date = "", countDutiesIn = () => 0, onAddLeave }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState("pick"); // 'pick' | 'post' | 'second' | 'post2' | 'note' | 'add' | 'swap'
+  const [mode, setMode] = useState("pick"); // 'pick' | 'post' | 'second' | 'post2' | 'note' | 'add' | 'swap' | 'leave'
   const [noteText, setNoteText] = useState(note || "");
   const [nc, setNc] = useState({ code: "", label: "", color: NEW_CODE_COLORS[0], counts: "morning" });
+  const [lv, setLv] = useState({ type: "annual", label: "", start: "", end: "", clear: true });
+  const [leaveErr, setLeaveErr] = useState("");
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
   const [pos, setPos] = useState(null);
@@ -2272,6 +2279,24 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
     onPick(id); // apply the new code to this cell straight away
     close();
   };
+  /* Leave from the cell itself, so a manager doesn't have to go to the Staff
+     tab. Both dates start on the tapped day — a one-day leave is one tap on
+     Save. A clash keeps the panel open with the reason; removing a period
+     stays in the Staff tab. */
+  const openLeave = () => {
+    setLv({ type: "annual", label: "", start: date, end: date, clear: true });
+    setLeaveErr("");
+    setMode("leave");
+  };
+  const setLvField = (patch) => { setLv({ ...lv, ...patch }); setLeaveErr(""); };
+  const leaveValid = !!lv.start && !!lv.end && lv.end >= lv.start;
+  const leaveDuties = leaveValid ? countDutiesIn(lv.start, lv.end) : 0;
+  const saveLeave = () => {
+    if (!leaveValid || !onAddLeave) return;
+    const err = onAddLeave({ ...lv, clear: lv.clear && leaveDuties > 0 });
+    if (err) { setLeaveErr(err); return; }
+    close();
+  };
 
   const CATS = [
     ["morning", "Morning"], ["afternoon", "Afternoon"],
@@ -2356,12 +2381,13 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
               </div>
               <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKey} placeholder="Type to search… Enter = pick"
                 style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 7 }} />
-              {/* The four actions for a cell, in one block: note, new code,
-                  post, and the changed-duty mark. A two-column grid keeps them
-                  the same size and inside the panel — the post button was
-                  previously on its own above and spilled out of it. When the
-                  department has no posts there are three, so the changed-duty
-                  mark takes the full width rather than leaving a gap. */}
+              {/* The actions for a cell, in one block: note, new code, second
+                  duty, post, the changed-duty mark and leave. A two-column grid
+                  keeps them the same size and inside the panel — the post button
+                  was previously on its own above and spilled out of it. Second
+                  duty and post come and go, so when the count is odd the last
+                  button (Add Leave) takes the full width rather than leaving a
+                  gap. */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                 <button onClick={() => setMode("note")} style={{ ...btnMini, background: note ? "#E7F0FA" : T.mist, color: note ? "#2F6DB5" : T.ink, border: `1px solid ${T.line}` }}>
                   {note ? "✎ Edit note" : "+ Note"}
@@ -2396,10 +2422,6 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 
                 <button onClick={() => setMode("swap")} style={{
                   ...btnMini,
-                  // Two per row; this one stretches when the count is odd so
-                  // the block never ends with a gap.
-                  gridColumn: ((usesPosts && hasCode ? 1 : 0) + (usesSplit ? 1 : 0)) % 2 === 0
-                    ? "1 / -1" : "auto",
                   background: exchange ? EXCHANGE_BY[exchange.requestedBy].bg : T.mist,
                   color: exchange ? EXCHANGE_BY[exchange.requestedBy].color : T.ink,
                   border: `1px solid ${T.line}`, display: "flex", alignItems: "center",
@@ -2407,6 +2429,19 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
                 }}>
                   <ArrowLeftRight size={12} />
                   {exchange ? `Changed · ${EXCHANGE_BY[exchange.requestedBy].short}` : "Mark as changed"}
+                </button>
+
+                <button onClick={openLeave} style={{
+                  ...btnMini,
+                  // Two per row; this one stretches when the count is odd so
+                  // the block never ends with a gap.
+                  gridColumn: ((usesPosts && hasCode ? 1 : 0) + (usesSplit ? 1 : 0)) % 2 === 1
+                    ? "1 / -1" : "auto",
+                  background: T.mist, color: T.ink,
+                  border: `1px solid ${T.line}`, display: "flex", alignItems: "center",
+                  justifyContent: "center", gap: 6, overflow: "hidden", whiteSpace: "nowrap",
+                }}>
+                  <Plane size={12} /> Add Leave
                 </button>
               </div>
             </>
@@ -2582,6 +2617,64 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
               </div>
             </div>
           )}
+
+          {mode === "leave" && (() => {
+            const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 6 };
+            return (
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Add leave</div>
+                <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 4 }}>Type</div>
+                <select value={lv.type} onChange={(e) => setLvField({ type: e.target.value })}
+                  style={{ ...fieldStyle, cursor: "pointer" }}>
+                  {LEAVE_TYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                {lv.type === "other" && (
+                  <input value={lv.label} onChange={(e) => setLvField({ label: e.target.value })} placeholder="Leave name (e.g. Study leave)"
+                    style={fieldStyle} />
+                )}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 4 }}>From</div>
+                    <input type="date" value={lv.start} onChange={(e) => setLvField({ start: e.target.value })}
+                      style={{ ...fieldStyle, padding: "7px 5px" }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 4 }}>To</div>
+                    <input type="date" value={lv.end} onChange={(e) => setLvField({ end: e.target.value })}
+                      style={{ ...fieldStyle, padding: "7px 5px" }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11.5, color: leaveValid ? T.inkSoft : T.coral, marginBottom: 6 }}>
+                  {leaveValid
+                    ? `Covers ${spanDays(lv.start, lv.end)} day${spanDays(lv.start, lv.end) === 1 ? "" : "s"}`
+                    : (!lv.start || !lv.end) ? "Pick both dates" : "To can't be before From"}
+                </div>
+                {leaveDuties > 0 && (
+                  <div style={{ fontSize: 11.5, color: T.ink, marginBottom: 8, lineHeight: 1.5 }}>
+                    {leaveDuties} day{leaveDuties === 1 ? " has a duty" : "s have duties"} in this range.
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, fontWeight: 600, cursor: "pointer" }}>
+                      <input type="checkbox" checked={lv.clear} onChange={(e) => setLvField({ clear: e.target.checked })}
+                        style={{ accentColor: T.lagoon, width: 14, height: 14 }} />
+                      Clear these duties
+                    </label>
+                    {lv.clear && (
+                      <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 2 }}>Changed marks go with them; notes are kept.</div>
+                    )}
+                  </div>
+                )}
+                {leaveErr && (
+                  <div style={{ fontSize: 12, color: "#8A5A0F", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 6, padding: "7px 9px", marginBottom: 8, lineHeight: 1.45, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                    <span style={{ minWidth: 0 }}>{leaveErr}</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => setMode("pick")} style={{ ...btnMini, flex: 1, background: "#fff", color: T.inkSoft, border: `1px solid ${T.line}` }}>Cancel</button>
+                  <button onClick={saveLeave} disabled={!leaveValid} style={{ ...btnMini, flex: 1, background: leaveValid ? T.lagoon : "#B9CDCA", color: "#fff", cursor: leaveValid ? "pointer" : "not-allowed" }}>Save</button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -2835,6 +2928,60 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
     const created = { ...codeObj, id: uid() };
     update((d) => { d.codes = [...d.codes, created]; return d; });
     return created.id;
+  };
+
+  /* A leave period added from the cell picker. Built exactly like the Staff
+     tab's addPeriod, and saved together with any cleared duties in one
+     update, so it is one save and one Undo. Returns a message when it can't
+     be added, which keeps the picker open; null means done.
+
+     Clearing a duty also clears its changed mark — the mark describes a duty
+     that no longer exists. Notes are kept: a manager typed them. On-call is
+     left alone; that is the department's choice to reassign. */
+  const addLeave = (staffId, lv) => {
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their leave.");
+      return "This staff member is view-only.";
+    }
+    const s = data.staff.find((x) => x.id === staffId);
+    if (!s) return "This staff member no longer exists.";
+    const dates = datesBetween(lv.start, lv.end);
+    const clashWith = (person) => dates.map((dt) => leaveOn(person, dt)).find(Boolean);
+    const describe = (p) => `${styleFor(p).label}: ${niceDate(p.start)} – ${niceDate(p.end)}`;
+    const clash = clashWith(s);
+    if (clash) return `Overlaps existing leave (${describe(clash)}). Change the dates, or edit that period in the Staff tab.`;
+    const period = { type: lv.type, start: lv.start, end: lv.end, id: uid() };
+    if (lv.type === "other" && lv.label.trim()) period.label = lv.label.trim();
+    // The updater can run more than once (React StrictMode) and runs after this
+    // function returns, so a late clash is reported once, outside it.
+    let warned = false;
+    update((d) => {
+      const i = d.staff.findIndex((x) => x.id === staffId);
+      const late = i < 0 ? null : clashWith(d.staff[i]);
+      if (i < 0 || late) {
+        if (!warned) {
+          warned = true;
+          setTimeout(() => alert(i < 0
+            ? "The leave was not saved — this staff member no longer exists."
+            : `The leave was not saved — it overlaps leave that was just added (${describe(late)}).`), 0);
+        }
+        return d;
+      }
+      d.staff[i] = { ...d.staff[i], leavePeriods: [...(d.staff[i].leavePeriods || []), period] };
+      if (lv.clear) {
+        dates.forEach((dt) => {
+          if (!d.cells[dt] || !(staffId in d.cells[dt])) return;
+          delete d.cells[dt][staffId];
+          const meta = d.cellMeta?.[dt]?.[staffId];
+          if (meta && meta.exchange) {
+            delete meta.exchange;
+            if (Object.keys(meta).length === 0) delete d.cellMeta[dt][staffId];
+          }
+        });
+      }
+      return d;
+    });
+    return null;
   };
 
   const toggleNonOfficial = (date) => {
@@ -3103,6 +3250,9 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                           onAddCode={addCode}
                           exchange={ex}
                           onExchange={(who) => setExchange(date, s.id, who)}
+                          date={date}
+                          countDutiesIn={(from, to) => datesBetween(from, to).filter((dt) => cellEntries(data, dt, s.id).length > 0).length}
+                          onAddLeave={(lv) => addLeave(s.id, lv)}
                         />
                       </td>
                     );
