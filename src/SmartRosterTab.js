@@ -39,6 +39,10 @@ const weekStartOf = (d, firstDay = 0) => {
 };
 const DAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+/* What an empty "In a row" box stores: longer than any run can be, so the
+   engine never stops a run for it. A missing value would mean its default. */
+const NO_LIMIT = 99;
+
 /* State and priority as one scale, strongest first. A rule with no saved
    entry is Must, because that is what the engine does with it. */
 const STRENGTH_SCALE = [
@@ -435,7 +439,8 @@ export default function SmartRosterTab({
           works towards it but cannot always reach it. <strong>Most</strong> is a limit.
           <strong> In a row</strong> is how many of that shift can come together before a change:
           two nights together is normal, and keeping the others to about three is what stops a
-          whole week of afternoons.
+          whole week of afternoons. Left empty, it has no limit — but a run still stops at{" "}
+          <strong>Days in a row (most)</strong>.
         </p>
         <div style={{ overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse", minWidth: 640 }}>
@@ -473,9 +478,18 @@ export default function SmartRosterTab({
                 <td style={{ ...td, fontWeight: 600 }}>In a row</td>
                 {SHIFTS.map((sh) => (
                   <td key={sh} style={{ ...td, textAlign: "center" }}>
-                    <input type="number" min={1} max={7} style={num} disabled={!staffEditable}
-                      value={rules.blockDays?.[sh] ?? ""}
-                      onChange={(e) => setRules({ blockDays: { ...rules.blockDays, [sh]: Math.max(1, Number(e.target.value) || 1) } })} />
+                    <input type="number" min={1} max={7} style={{ ...num, width: 84 }} disabled={!staffEditable}
+                      placeholder="No limit"
+                      value={rules.blockDays?.[sh] === NO_LIMIT ? "" : (rules.blockDays?.[sh] ?? "")}
+                      onChange={(e) => {
+                        /* Empty means no limit, stored as NO_LIMIT. Anything else
+                           outside 1–7 is ignored and the box shows the saved value. */
+                        const raw = e.target.value;
+                        const n = raw === "" ? NO_LIMIT : Number(raw);
+                        if (n !== NO_LIMIT && !(Number.isInteger(n) && n >= 1 && n <= 7)) return;
+                        if (n === rules.blockDays?.[sh]) return;
+                        setRules({ blockDays: { ...rules.blockDays, [sh]: n } });
+                      }} />
                   </td>
                 ))}
                 {/* One setting for both In a row and Days in a row (most): the
