@@ -604,6 +604,7 @@ const COST = {
   offMax: 25,        // more off days than allowed
   offMin: 25,        // fewer off days than promised
   dutyMin: 25,       // fewer duties than the person's week should hold
+  shiftMin: 25,      // fewer of a shift than the person's week should hold
   doubleOff: 12,     // two off days together
   fair: 3,           // per point of spread on a fairness measure
 };
@@ -938,6 +939,14 @@ export function auditRoster(cfg, ctx, cells) {
         if (cap != null && w[sh] > cap) {
           flag(W.caps[sh] * (w[sh] - cap), { date: wk, staffId: id, shift: sh, kind: 'weeklyCap' });
         }
+        /* Fewest of a shift: a goal, so always priced as one whatever the
+           ward has set — it must never outrank covering a shift. Not for a
+           shift the ward does not run, nor one this person is not set up
+           for: neither is something they could have been given. */
+        const want = cfg.weeklyMin?.[sh];
+        if (want != null && w[sh] < want && cov[sh].max !== 0 && !(restricted && !only.includes(sh))) {
+          flag(W.shiftMin * (want - w[sh]), { date: wk, staffId: id, shift: sh, kind: 'shiftMin' });
+        }
       }
     }
   }
@@ -1163,7 +1172,9 @@ function issuesToRelaxations(issues) {
     date: i.date,
     shift: i.shift,
     staffId: i.staffId,
-    rule: i.kind === 'weeklyCap' ? `weekly ${i.shift} limit` : (ISSUE_NAMES[i.kind] || i.kind),
+    rule: i.kind === 'weeklyCap' ? `weekly ${i.shift} limit`
+      : i.kind === 'shiftMin' ? `fewest ${i.shift}s a week`
+        : (ISSUE_NAMES[i.kind] || i.kind),
   }));
 }
 
