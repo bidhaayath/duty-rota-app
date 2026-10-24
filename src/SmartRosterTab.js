@@ -39,7 +39,24 @@ const weekStartOf = (d, firstDay = 0) => {
 };
 const DAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-/* Hard, Soft with a priority, or Off. Sits beside a section heading so the
+/* State and priority as one scale, strongest first. A rule with no saved
+   entry is Must, because that is what the engine does with it. */
+const STRENGTH_SCALE = [
+  { id: "must", label: "Must", state: "hard", priority: 1 },
+  { id: "soft1", label: "Protect most", state: "soft", priority: 1 },
+  { id: "soft2", label: "Protect", state: "soft", priority: 2 },
+  { id: "soft3", label: "Bend if needed", state: "soft", priority: 3 },
+  { id: "soft4", label: "Bend first", state: "soft", priority: 4 },
+  { id: "ignore", label: "Ignore", state: "disabled", priority: 1 },
+];
+// A soft priority outside 1–4 keeps its own id, so it is shown as it is.
+const scaleIdOf = (v) => {
+  if (!v?.state || v.state === "hard") return "must";
+  if (v.state === "disabled") return "ignore";
+  return `soft${v.priority ?? 2}`;
+};
+
+/* Must, Try with a priority, or Ignore. Sits beside a section heading so the
    strength of a whole group of rules is set in one place. */
 function Strength({ value, onChange, disabled, T, sel }) {
   const st = value?.state || "soft";
@@ -53,15 +70,15 @@ function Strength({ value, onChange, disabled, T, sel }) {
               padding: "4px 9px", cursor: disabled ? "not-allowed" : "pointer",
               background: st === v ? (v === "hard" ? T.lagoon : v === "soft" ? T.sand : "#9AACA9") : "transparent",
               color: st === v ? "#fff" : T.inkSoft }}>
-            {v === "hard" ? "Hard" : v === "soft" ? "Soft" : "Off"}
+            {v === "hard" ? "Must" : v === "soft" ? "Try" : "Ignore"}
           </button>
         ))}
       </span>
       {st === "soft" && (
-        <select value={pr} disabled={disabled} style={{ ...sel, minWidth: 60, padding: "4px 6px", fontSize: 11.5 }}
+        <select value={pr} disabled={disabled} style={{ ...sel, minWidth: 110, padding: "4px 6px", fontSize: 11.5 }}
           onChange={(e) => onChange({ state: st, priority: Number(e.target.value) })}>
-          <option value={1}>P1</option><option value={2}>P2</option>
-          <option value={3}>P3</option><option value={4}>P4</option>
+          <option value={1}>Protect most</option><option value={2}>Protect</option>
+          <option value={3}>Bend if needed</option><option value={4}>Bend first</option>
         </select>
       )}
     </span>
@@ -309,6 +326,25 @@ export default function SmartRosterTab({
     background: on ? (colour === T.coral ? "#FBEAE7" : "#D8EEE9") : "#fff",
     color: on ? colour : T.inkSoft,
   });
+  /* The one "How strongly" box, for any ruleStates key. Only a real change
+     is written; re-picking the same option saves nothing. */
+  const scaleSelect = (key, label) => {
+    const cur = scaleIdOf(rules.ruleStates?.[key]);
+    const known = STRENGTH_SCALE.some((o) => o.id === cur);
+    return (
+      <select value={cur} disabled={!staffEditable} aria-label={label}
+        onChange={(e) => {
+          const pick = STRENGTH_SCALE.find((o) => o.id === e.target.value);
+          if (!pick || pick.id === cur) return;
+          setRules({ ruleStates: { ...rules.ruleStates,
+            [key]: { state: pick.state, priority: pick.priority } } });
+        }}
+        style={{ ...sel, minWidth: 108, padding: "6px 6px", fontSize: 12 }}>
+        {STRENGTH_SCALE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+        {!known && <option value={cur}>Bend (P{rules.ruleStates?.[key]?.priority})</option>}
+      </select>
+    );
+  };
 
   // The sum lives in rosterConfig.js so Ini warns with the same numbers.
   const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = seniorNeedOf(rules, activeStaff);
@@ -348,12 +384,12 @@ export default function SmartRosterTab({
       <Card>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
           <h3 style={{ ...title, margin: 0 }}>How many staff on each shift</h3>
-          <Strength value={rules.ruleStates?.coverage} disabled={!staffEditable} T={T} sel={sel}
-            onChange={(v) => setRules({ ruleStates: { ...rules.ruleStates, coverage: v } })} />
+          <span style={{ ...chip(true, T.lagoon), cursor: "default" }}>Must — always</span>
         </div>
         <p style={hint}>
-          Set the minimum to 0 for a shift you do not run. Kept <strong>Hard</strong>, a shift is
-          never left below its minimum. The last column is how many of those people must be a{" "}
+          Set the minimum to 0 for a shift you do not run. A shift is never left below its
+          minimum — covering it comes before every other rule. The last column is how many of
+          those people must be a{" "}
           {lower} — leave it at 0 if it does not matter who is on.
         </p>
         <table style={{ borderCollapse: "collapse" }}>
@@ -402,7 +438,7 @@ export default function SmartRosterTab({
           whole week of afternoons.
         </p>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", minWidth: 460 }}>
+          <table style={{ borderCollapse: "collapse", minWidth: 640 }}>
             <thead>
               <tr>
                 <th style={th}></th>
@@ -423,6 +459,32 @@ export default function SmartRosterTab({
                   ))}
                 </tr>
               ))}
+              <tr>
+                <td style={{ ...td, fontWeight: 600 }}>How strongly</td>
+                {[...SHIFTS, "off"].map((sh) => (
+                  <td key={sh} style={{ ...td, textAlign: "center" }}>
+                    {sh === "off"
+                      ? scaleSelect("offMin", "How strongly — fewest off days")
+                      : scaleSelect(`weeklyCaps:${sh}`, `How strongly — most ${SHIFT_LABELS[sh]}`)}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td style={{ ...td, fontWeight: 600 }}>In a row</td>
+                {SHIFTS.map((sh) => (
+                  <td key={sh} style={{ ...td, textAlign: "center" }}>
+                    <input type="number" min={1} max={7} style={num} disabled={!staffEditable}
+                      value={rules.blockDays?.[sh] ?? ""}
+                      onChange={(e) => setRules({ blockDays: { ...rules.blockDays, [sh]: Math.max(1, Number(e.target.value) || 1) } })} />
+                  </td>
+                ))}
+                {/* One setting for both In a row and Days in a row (most): the
+                    engine's working pattern covers the two together. */}
+                <td style={{ ...td, textAlign: "center" }}>
+                  <div style={{ fontSize: 11, color: T.inkSoft, marginBottom: 3 }}>How strongly</div>
+                  {scaleSelect("workPattern", "How strongly — In a row and Days in a row (most)")}
+                </td>
+              </tr>
               <tr style={{ background: "#F7FAFA" }}>
                 <td style={{ ...td, fontWeight: 700 }}>Duties in total</td>
                 <td style={{ ...td, textAlign: "center" }} colSpan={2}>
@@ -438,37 +500,8 @@ export default function SmartRosterTab({
                   </span>
                 </td>
                 <td style={{ ...td, textAlign: "center", fontSize: 11.5, color: T.inkSoft }} colSpan={3}>
-                  Hard rule — how many days someone works, whatever the shifts
+                  Must — never broken. How many days someone works, whatever the shifts.
                 </td>
-              </tr>
-              <tr>
-                <td style={{ ...td, fontWeight: 600 }}>Priority</td>
-                {[...SHIFTS, "off"].map((sh) => {
-                  const key = sh === "off" ? "offMin" : `weeklyCaps:${sh}`;
-                  const cur = rules.ruleStates?.[key]?.priority ?? 3;
-                  return (
-                    <td key={sh} style={{ ...td, textAlign: "center" }}>
-                      <select value={cur} disabled={!staffEditable}
-                        onChange={(e) => setRules({ ruleStates: { ...rules.ruleStates,
-                          [key]: { state: rules.ruleStates?.[key]?.state || "soft", priority: Number(e.target.value) } } })}
-                        style={{ ...sel, minWidth: 62, padding: "6px 6px", fontSize: 12 }}>
-                        <option value={1}>P1</option><option value={2}>P2</option>
-                        <option value={3}>P3</option><option value={4}>P4</option>
-                      </select>
-                    </td>
-                  );
-                })}
-              </tr>
-              <tr>
-                <td style={{ ...td, fontWeight: 600 }}>In a row</td>
-                {SHIFTS.map((sh) => (
-                  <td key={sh} style={{ ...td, textAlign: "center" }}>
-                    <input type="number" min={1} max={7} style={num} disabled={!staffEditable}
-                      value={rules.blockDays?.[sh] ?? ""}
-                      onChange={(e) => setRules({ blockDays: { ...rules.blockDays, [sh]: Math.max(1, Number(e.target.value) || 1) } })} />
-                  </td>
-                ))}
-                <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>—</td>
               </tr>
               <tr>
                 <td style={{ ...td, fontWeight: 600 }}>Days in a row (most)</td>
@@ -488,13 +521,39 @@ export default function SmartRosterTab({
             </tbody>
           </table>
         </div>
-        <p style={{ ...hint, margin: "12px 0 0" }}>
-          <strong>Priority</strong> decides which limit gives way first when a shift would
-          otherwise go uncovered: P4 is sacrificed before P3, and P1 is protected longest.
-          Covering the shift always comes first, and anything given up is listed after generating.
-          Anyone tied to a single shift is not held to any of this — these limits exist to rotate
-          people between shifts, and they have nowhere else to go.
-        </p>
+        <div style={{ ...hint, margin: "12px 0 0" }}>
+          <p style={{ margin: 0 }}>
+            <strong>How strongly</strong> says what the generator may bend when a shift would
+            otherwise go uncovered:
+          </p>
+          <ul style={{ margin: "4px 0 8px", paddingLeft: 18 }}>
+            <li><strong>Must</strong> — never broken.</li>
+            <li>
+              <strong>Protect most</strong>, <strong>Protect</strong>, <strong>Bend if needed</strong>,{" "}
+              <strong>Bend first</strong> — bent only as a last resort, in that order. Bend first
+              gives way first; Protect most is held longest.
+            </li>
+            <li>
+              <strong>Ignore</strong> — the limit is switched off. On <strong>In a row</strong>,
+              Ignore also stops the generator trying to keep someone's two off days together.
+            </li>
+          </ul>
+          <p style={{ margin: "0 0 8px" }}>
+            It applies to the <strong>Most</strong> box above it, and under Off days to Fewest off
+            days. It does not apply to <strong>Fewest</strong> on a shift — that one is a goal the
+            generator works towards, not a limit, so it can be missed. Most off days is always
+            held, whatever else is set.
+          </p>
+          <p style={{ margin: "0 0 8px" }}>
+            <strong>In a row</strong> and <strong>Days in a row (most)</strong> share one setting —
+            the box at the end of the In a row row — so they are always set together.
+          </p>
+          <p style={{ margin: 0 }}>
+            Covering the shift always comes first, and anything given up is listed after generating.
+            Anyone tied to a single shift is not held to any of this — these limits exist to rotate
+            people between shifts, and they have nowhere else to go.
+          </p>
+        </div>
       </Card>
 
       {/* ── Exceptions ── */}
@@ -568,12 +627,9 @@ export default function SmartRosterTab({
         </button>
         {showMore && (
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "12px 0 0" }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Duty rules</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>What may follow what</span>
             <Strength value={rules.ruleStates?.sequence} disabled={!staffEditable} T={T} sel={sel}
               onChange={(v) => setRules({ ruleStates: { ...rules.ruleStates, sequence: v } })} />
-            <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 12 }}>Working pattern</span>
-            <Strength value={rules.ruleStates?.workPattern} disabled={!staffEditable} T={T} sel={sel}
-              onChange={(v) => setRules({ ruleStates: { ...rules.ruleStates, workPattern: v } })} />
           </div>
         )}
         {showMore && (
