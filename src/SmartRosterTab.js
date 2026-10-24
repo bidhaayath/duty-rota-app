@@ -91,7 +91,7 @@ function Strength({ value, onChange, disabled, T, sel }) {
 
 export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
-  onApplied,
+  onApplied, deptId,
 }) {
   const rules = mergeRules(data.rosterRules || {});
 
@@ -115,6 +115,10 @@ export default function SmartRosterTab({
     // defined once at the top of the app and handed down unchanged.
   }, [firstDay, dstr]);
   const [proposal, setProposal] = useState(null);
+  /* A week belongs to the department it was generated for. Normally the tab
+     starts afresh on a new department (it is keyed on it), but this does not
+     rely on that: a week from elsewhere is never shown as appliable. */
+  const proposalElsewhere = !!proposal && proposal.deptId !== deptId;
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
   /* Decided once, when the page opens: a ward with its own plural keeps the
@@ -200,9 +204,10 @@ export default function SmartRosterTab({
     setTimeout(() => {
       try {
         const res = generateRoster(buildConfig());
-        if (!res.ok) { setProposal({ failed: true, problems: res.problems }); return; }
+        if (!res.ok) { setProposal({ failed: true, problems: res.problems, deptId }); return; }
         const yearStart = `${weekStart.slice(0, 4)}-01-01`;
         setProposal({
+          deptId,
           cells: res.cells, report: res.report,
           yearToDate: flattenCells(data.cells, codeById, yearStart, weekEnd),
           yearStart,
@@ -211,7 +216,7 @@ export default function SmartRosterTab({
         });
       } catch (e) {
         console.error("Roster generation failed:", e);
-        setProposal({ failed: true, problems: ["Something went wrong. Nothing has been changed."] });
+        setProposal({ failed: true, problems: ["Something went wrong. Nothing has been changed."], deptId });
       } finally { setBusy(false); }
     }, 30);
   };
@@ -226,6 +231,10 @@ export default function SmartRosterTab({
 
   useEffect(() => {
     if (!verify) return undefined;
+    /* The department changed before the check ran. The week went to the
+       department it was applied in; comparing it against this one would
+       report every cell as missing, which is not true. */
+    if (verify.deptId !== deptId) { setVerify(null); return undefined; }
     /* update() hands the change to the parent, which clones the rota and
        sets it again — so a successful write always arrives as a NEW data
        object. Until it does there is nothing to compare against, and
@@ -269,9 +278,16 @@ export default function SmartRosterTab({
       if (onApplied) onApplied(verify.week);
     }
     return undefined;
-  }, [data, verify, codeById, onApplied]);
+  }, [data, verify, codeById, onApplied, deptId]);
 
   const apply = () => {
+    // Checked again here, not only in what is shown: a week is only ever
+    // written into the department it was generated for.
+    if (proposal.deptId !== deptId) {
+      setProposal(null);
+      window.alert("Not applied: this week was generated for a different department. Nothing was written.");
+      return;
+    }
     // Plan the write before touching anything, so a code that cannot be
     // resolved stops the whole thing rather than leaving half a week behind.
     const { writes, missing } = planWrites(proposal.rotaCells, idByCode);
@@ -305,7 +321,7 @@ export default function SmartRosterTab({
     // notes on the cells stay.
     update((d) => writeCells(d, writes));
     setProposal(null);
-    setVerify({ writes, before: data, week: weekStart });
+    setVerify({ writes, before: data, week: weekStart, deptId });
   };
 
   const setCoverage = (shift, key, v) =>
@@ -868,7 +884,20 @@ export default function SmartRosterTab({
         )}
       </Card>
 
-      {proposal?.failed && (
+      {proposalElsewhere && (
+        <Card style={{ background: "#FBF1DC", borderColor: "#E7D9B8" }}>
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start", fontSize: 13, color: "#8A5A0F", lineHeight: 1.6 }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>
+              This week was generated for a different department, so it has been set aside.
+              Nothing was written here. Press <strong>Generate this week</strong> to build one for
+              this department.
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {proposal?.failed && !proposalElsewhere && (
         <Card style={{ background: "#FBEAE7", borderColor: "#F1B8AE" }}>
           <strong style={{ fontSize: 14, color: "#8A2E1E" }}>Could not generate</strong>
           <ul style={{ margin: "7px 0 0", paddingLeft: 18, fontSize: 13, color: "#8A2E1E", lineHeight: 1.7 }}>
@@ -877,7 +906,7 @@ export default function SmartRosterTab({
         </Card>
       )}
 
-      {proposal && !proposal.failed && (
+      {proposal && !proposal.failed && !proposalElsewhere && (
         <Week proposal={proposal} data={data} activeStaff={activeStaff} weekLabel={weekLabel}
           codeById={codeById} termOne={termOne} termMany={termMany}
           onApply={apply} onDiscard={() => setProposal(null)}

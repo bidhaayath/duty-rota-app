@@ -2117,6 +2117,9 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             </Card>
           ) : (
             <SmartRosterTab
+              /* Keyed on the department, so a new one always starts the tab
+                 afresh — adding a department never passes through "Loading". */
+              key={deptId} deptId={deptId}
               data={data} update={update} staffEditable={staffEditable}
               T={T} Card={Card} Btn={Btn} Field={Field}
               inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
