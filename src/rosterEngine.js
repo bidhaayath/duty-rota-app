@@ -437,7 +437,7 @@ export function checkFeasible(cfg) {
           (block <= 2 ? `, and worked ${block} at a time that reaches about ${reach} people` : '') +
           `, so ${usable.length - reach} of your ${usable.length} staff will get no ${sh} duty ` +
           `this week. Raise the ${sh} minimum per day to spread it wider` +
-          (block <= 2 ? `, or set "${sh} in a row" to 1.` : '.')
+          (block <= 2 ? `, or set "In a row — most" for ${sh} to 1.` : '.')
         );
       }
     }
@@ -604,6 +604,8 @@ const COST = {
   offMax: 25,        // more off days than allowed
   offMin: 25,        // fewer off days than promised
   dutyMin: 25,       // fewer duties than the person's week should hold
+  shiftMin: 25,      // fewer of a shift than the person's week should hold
+  blockTogether: 15, // a shift split into more runs than it needed
   doubleOff: 12,     // two off days together
   fair: 3,           // per point of spread on a fairness measure
 };
@@ -691,8 +693,12 @@ export function rosterContext(cfg, dates, staff) {
     weekOf[d] = startOfWeek(d, cfg.weekStartsOn ?? 0);
     fridayOf[d] = isFriday(d);
   });
-  const weekDays = {};
-  dates.forEach((d) => { weekDays[weekOf[d]] = (weekDays[weekOf[d]] || 0) + 1; });
+  const weekDays = {}, datesOfWeek = {}, nextOf = {};
+  dates.forEach((d, i) => {
+    weekDays[weekOf[d]] = (weekDays[weekOf[d]] || 0) + 1;
+    (datesOfWeek[weekOf[d]] = datesOfWeek[weekOf[d]] || []).push(d);
+    nextOf[d] = i < dates.length - 1 ? dates[i + 1] : null;   // null: beyond the range
+  });
   const nonOff = new Set(cfg.nonOfficialDates || []);
 
   // Sequence rules, resolved per category rather than re-derived per cell.
@@ -734,7 +740,7 @@ export function rosterContext(cfg, dates, staff) {
 
   return {
     W: costWeights(cfg),
-    staff, dates, keep, histCats, requested, prevOf, weekOf, weekDays, fridayOf,
+    staff, dates, keep, histCats, requested, prevOf, nextOf, weekOf, weekDays, datesOfWeek, fridayOf,
     nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed,
     seniorIds: new Set(staff.filter((s) => isSenior(cfg, s)).map((s) => String(s.id))),
     maxDaysOn: cfg.maxConsecutiveDays ?? 4,
@@ -751,12 +757,27 @@ export function rosterContext(cfg, dates, staff) {
    a rule. That was misleading, because a later repair often un-bent it and
    the note stayed. What is reported now is what the finished rota actually
    does.                                                                  */
+/* A week's off-day number scaled to the days somebody is actually here:
+   one off day for every 7/n days, never more than n. With n = 2 that is
+   0, 0, 1, 1, 1, 2, 2 for one to seven days. Empty means no limit. */
+const partWeekOffs = (n, days) => {
+  if (n == null) return null;
+  if (n === 0) return 0;
+  return Math.min(n, Math.floor(days / Math.max(1, Math.floor(7 / n))));
+};
+
 export function auditRoster(cfg, ctx, cells) {
   const {
-    staff, dates, weekOf, weekDays, fridayOf, nonOff,
+    staff, dates, weekOf, weekDays, fridayOf, nonOff, requested,
     banned, allowed, forced, cov, seniorNeed, blockMax, seed, seniorIds,
-    maxDaysOn, absMax, W,
+    maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek,
   } = ctx;
+  /* Shifts the ward wants kept together, and how many to a run. Never more
+     than In a row allows, or the ask could not be met. None set: nothing
+     below looks at runs at all. */
+  const together = SHIFTS
+    .map((sh) => ({ sh, n: Math.min(cfg.blockTogether?.[sh] ?? 1, blockMax[sh]) }))
+    .filter((t) => t.n > 1);
 
   const shortfalls = [], seniorGaps = [], issues = [];
   let cost = 0;
@@ -845,10 +866,11 @@ export function auditRoster(cfg, ctx, cells) {
 
       const wk = weekOf[date];
       const w = weeks[wk] || (weeks[wk] = {
-        days: 0, duties: 0, off: 0, rest: 0,
+        days: 0, duties: 0, off: 0, rest: 0, fixed: 0,
         morning: 0, afternoon: 0, evening: 0, night: 0,
       });
       w.days += 1;
+      if (requested[`${id}|${date}`]) w.fixed += 1;
       if (cat === OFF_CAT) {
         w.off += 1;
         // A rest day after a night is recognisable, and the ward decides
@@ -878,7 +900,36 @@ export function auditRoster(cfg, ctx, cells) {
       if (dMax != null && w.duties > dMax) {
         flag(W.dutyMax * (w.duties - dMax), { date: wk, staffId: id, shift: OFF_CAT, kind: 'dutyMax' });
       }
-      if (!whole) continue;
+      if (!whole) {
+        /* Away for part of a week that is otherwise inside the range — on
+           leave, or joining or leaving mid-week. Without a target they get
+           whatever is left once everyone else is placed, which is usually
+           rest while the ward is short. So the ward's off days are scaled to
+           the days they are here, each end on its own: at seven days this
+           is exactly Fewest and Most. Against Most only free off days count,
+           since a rest day after a night is not one they chose; against
+           Fewest every off day counts. A week cut by the edge of the
+           range is still not judged, and nor is one where every day is
+           fixed, since nothing the generator does can change it.
+
+           Priced as a preference whatever the ward has set: a scaled target
+           must lose to an uncovered shift and to a shift over its most, or
+           the ward is left short — or overstaffed — for the sake of somebody
+           who was away. Ignore still switches it off.                     */
+        if (weekDays[wk] === 7 && w.days > w.fixed) {
+          const free = w.off - w.rest;
+          const hi = partWeekOffs(cfg.weeklyPerStaff?.offMax, w.days);
+          if (W.offMax && hi != null && free > hi) {
+            flag(COST.offMax * (free - hi), { date: wk, staffId: id, shift: OFF_CAT, kind: 'partOffMax' });
+          }
+          // The floor counts every off day: a rest after a night is still rest.
+          const lo = partWeekOffs(cfg.weeklyPerStaff?.off, w.days);
+          if (W.offMin && !single && lo != null && w.off < lo) {
+            flag(COST.offMin * (lo - w.off), { date: wk, staffId: id, shift: OFF_CAT, kind: 'partOffMin' });
+          }
+        }
+        continue;
+      }
       const dMin = cfg.weeklyDuties?.min;
       if (dMin != null && w.duties < dMin) {
         flag(W.dutyMin * (dMin - w.duties), { date: wk, staffId: id, shift: OFF_CAT, kind: 'dutyMin' });
@@ -886,6 +937,37 @@ export function auditRoster(cfg, ctx, cells) {
       const offMax = cfg.weeklyPerStaff?.offMax;
       if (offMax != null && offs > offMax) {
         flag(W.offMax * (offs - offMax), { date: wk, staffId: id, shift: OFF_CAT, kind: 'offMax' });
+      }
+      /* Kept together: a shift worked in more separate runs than its count
+         needed. Not a minimum run — one night alone is one run, needs one,
+         and costs nothing. A run touching the start of the week is not
+         judged if the day before was the same shift or blank (leave, a kept
+         cell, before they joined, no history), nor one touching the end if
+         the next day is the same shift, blank or beyond the range: it may
+         carry on where we cannot see. Applies to single-shift staff too —
+         this is the shape of their nights, not a rotation.             */
+      if (together.length) {
+        const days = datesOfWeek[wk];
+        const pv = prevOf[days[0]];
+        const before = weekOf[pv] !== undefined ? cells[`${id}|${pv}`] : seed[id].runCat;
+        const nx = nextOf[days[6]];
+        const after = nx ? cells[`${id}|${nx}`] : null;
+        for (const { sh, n } of together) {
+          let count = 0, runs = 0;
+          for (let i = 0; i < 7; i++) {
+            if (cells[`${id}|${days[i]}`] !== sh) continue;
+            let j = i;
+            while (j < 6 && cells[`${id}|${days[j + 1]}`] === sh) j += 1;
+            const open = (i === 0 && (before == null || before === sh))
+              || (j === 6 && (after == null || after === sh));
+            if (!open) { count += j - i + 1; runs += 1; }
+            i = j;
+          }
+          const ideal = Math.ceil(count / n);
+          if (runs > ideal) {
+            flag(W.blockTogether * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'blockTogether' });
+          }
+        }
       }
       /* The weekly table describes a rotation. Somebody tied to one shift
          has nothing to rotate, so none of it applies to them. */
@@ -898,6 +980,14 @@ export function auditRoster(cfg, ctx, cells) {
         const cap = cfg.weeklyPerStaff?.[sh];
         if (cap != null && w[sh] > cap) {
           flag(W.caps[sh] * (w[sh] - cap), { date: wk, staffId: id, shift: sh, kind: 'weeklyCap' });
+        }
+        /* Fewest of a shift: a goal, so always priced as one whatever the
+           ward has set — it must never outrank covering a shift. Not for a
+           shift the ward does not run, nor one this person is not set up
+           for: neither is something they could have been given. */
+        const want = cfg.weeklyMin?.[sh];
+        if (want != null && w[sh] < want && cov[sh].max !== 0 && !(restricted && !only.includes(sh))) {
+          flag(W.shiftMin * (want - w[sh]), { date: wk, staffId: id, shift: sh, kind: 'shiftMin' });
         }
       }
     }
@@ -1115,6 +1205,8 @@ const ISSUE_NAMES = {
   dutyMin: 'weekly duty minimum',
   offMax: 'maximum off days',
   offMin: 'minimum off days',
+  partOffMax: 'off days for part-week staff',
+  partOffMin: 'off days for part-week staff',
   weeklyCap: 'weekly limit',
 };
 function issuesToRelaxations(issues) {
@@ -1122,7 +1214,10 @@ function issuesToRelaxations(issues) {
     date: i.date,
     shift: i.shift,
     staffId: i.staffId,
-    rule: i.kind === 'weeklyCap' ? `weekly ${i.shift} limit` : (ISSUE_NAMES[i.kind] || i.kind),
+    rule: i.kind === 'weeklyCap' ? `weekly ${i.shift} limit`
+      : i.kind === 'shiftMin' ? `fewest ${i.shift}s a week`
+      : i.kind === 'blockTogether' ? `${i.shift}s not kept together`
+      : (ISSUE_NAMES[i.kind] || i.kind),
   }));
 }
 
