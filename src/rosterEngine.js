@@ -663,6 +663,70 @@ function costWeights(cfg) {
   return w;
 }
 
+/* ── One person's own limits ──
+   A person can carry rules of their own: "at most 1 Night a week", "at
+   least 2 days between Nights", "Nights in pairs". Each is laid over the
+   ward's setting for that person alone. Anyone without a rule is handed the
+   ward's own tables — the very same objects — so a ward that sets none
+   measures and builds exactly as it always did.
+
+   Read as limitFor(staffId, key), where key is one of:
+     cap       most of each shift a week
+     min       fewest of each shift a week
+     block     longest run of each shift (In a row)
+     together  the shifts kept in runs, and how long: [{ sh, n }]
+     apart     clear days wanted between two of a shift; none = no ask    */
+const LEAST_COUNT = { atMost: 0, atLeast: 0, apart: 1, together: 2 };
+
+function personLimits(cfg, blockMax) {
+  const ward = { cap: {}, min: {}, block: blockMax, apart: {} };
+  SHIFTS.forEach((sh) => {
+    ward.cap[sh] = cfg.weeklyPerStaff?.[sh];
+    ward.min[sh] = cfg.weeklyMin?.[sh];
+  });
+  // Never more to a run than In a row allows, or the ask could not be met.
+  ward.together = SHIFTS
+    .map((sh) => ({ sh, n: Math.min(cfg.blockTogether?.[sh] ?? 1, blockMax[sh]) }))
+    .filter((t) => t.n > 1);
+
+  // A rule that cannot be read is left out rather than guessed at. Should a
+  // list ever hold two of a kind, the later one wins.
+  const mine = {};
+  (cfg.personRules || []).forEach((r) => {
+    if (!r || !(r.type in LEAST_COUNT) || !SHIFTS.includes(r.shift)) return;
+    if (!Number.isInteger(r.count) || r.count < LEAST_COUNT[r.type]) return;
+    const id = String(r.staffId);
+    (mine[id] = mine[id] || {})[`${r.type}:${r.shift}`] = r;
+  });
+
+  const own = {};
+  for (const [id, rs] of Object.entries(mine)) {
+    const L = { cap: { ...ward.cap }, min: { ...ward.min }, block: { ...blockMax }, apart: {} };
+    const runs = {};
+    SHIFTS.forEach((sh) => {
+      const most = rs[`atMost:${sh}`], least = rs[`atLeast:${sh}`];
+      const apart = rs[`apart:${sh}`], pair = rs[`together:${sh}`];
+      runs[sh] = cfg.blockTogether?.[sh] ?? 1;
+      if (most) L.cap[sh] = most.count;
+      if (least) L.min[sh] = least.count;
+      // Somebody allowed one Night is not then chased for the ward's two.
+      else if (most && L.min[sh] != null && L.min[sh] > most.count) L.min[sh] = most.count;
+      // Spaced out means never kept together, whatever the ward asks.
+      if (apart) { L.apart[sh] = apart.count; runs[sh] = 1; }
+      else if (pair) {
+        runs[sh] = pair.count;
+        // A pair needs In a row to allow one, for this person at least.
+        L.block[sh] = Math.max(blockMax[sh], pair.count);
+      }
+    });
+    L.together = SHIFTS
+      .map((sh) => ({ sh, n: Math.min(runs[sh], L.block[sh]) }))
+      .filter((t) => t.n > 1);
+    own[id] = L;
+  }
+  return (staffId, key) => (own[String(staffId)] || ward)[key];
+}
+
 /* Everything that does not change while a rota is being rearranged, worked
    out once. Local search runs this measurement tens of thousands of times,
    so anything left inside the loop is paid for tens of thousands of times —
@@ -742,6 +806,7 @@ export function rosterContext(cfg, dates, staff) {
     W: costWeights(cfg),
     staff, dates, keep, histCats, requested, prevOf, nextOf, weekOf, weekDays, datesOfWeek, fridayOf,
     nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed,
+    limitFor: personLimits(cfg, blockMax),
     seniorIds: new Set(staff.filter((s) => isSenior(cfg, s)).map((s) => String(s.id))),
     maxDaysOn: cfg.maxConsecutiveDays ?? 4,
     absMax: cfg.absoluteMaxDaysOn ?? 6,
@@ -769,15 +834,9 @@ const partWeekOffs = (n, days) => {
 export function auditRoster(cfg, ctx, cells) {
   const {
     staff, dates, weekOf, weekDays, fridayOf, nonOff, requested,
-    banned, allowed, forced, cov, seniorNeed, blockMax, seed, seniorIds,
-    maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek,
+    banned, allowed, forced, cov, seniorNeed, seed, seniorIds,
+    maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek, limitFor,
   } = ctx;
-  /* Shifts the ward wants kept together, and how many to a run. Never more
-     than In a row allows, or the ask could not be met. None set: nothing
-     below looks at runs at all. */
-  const together = SHIFTS
-    .map((sh) => ({ sh, n: Math.min(cfg.blockTogether?.[sh] ?? 1, blockMax[sh]) }))
-    .filter((t) => t.n > 1);
 
   const shortfalls = [], seniorGaps = [], issues = [];
   let cost = 0;
@@ -818,6 +877,13 @@ export function auditRoster(cfg, ctx, cells) {
     const only = cfg.staffShifts?.[id];
     const restricted = only && only.length;
     const single = only && only.length === 1;
+    // The ward's limits, or this person's own where they have one.
+    const blockMax = limitFor(id, 'block');
+    const caps = limitFor(id, 'cap');
+    const mins = limitFor(id, 'min');
+    /* Shifts kept together, and how many to a run. None set: nothing below
+       looks at runs at all. */
+    const together = limitFor(id, 'together');
     const t = totals[id] = {
       morning: 0, afternoon: 0, evening: 0, night: 0, off: 0, duties: 0,
       fridayOff: 0, fridayAfternoon: 0, nonOfficial: 0, daysAvailable: 0,
@@ -977,7 +1043,7 @@ export function auditRoster(cfg, ctx, cells) {
         flag(W.offMin * (offMin - offs), { date: wk, staffId: id, shift: OFF_CAT, kind: 'offMin' });
       }
       for (const sh of SHIFTS) {
-        const cap = cfg.weeklyPerStaff?.[sh];
+        const cap = caps[sh];
         if (cap != null && w[sh] > cap) {
           flag(W.caps[sh] * (w[sh] - cap), { date: wk, staffId: id, shift: sh, kind: 'weeklyCap' });
         }
@@ -985,7 +1051,7 @@ export function auditRoster(cfg, ctx, cells) {
            ward has set — it must never outrank covering a shift. Not for a
            shift the ward does not run, nor one this person is not set up
            for: neither is something they could have been given. */
-        const want = cfg.weeklyMin?.[sh];
+        const want = mins[sh];
         if (want != null && w[sh] < want && cov[sh].max !== 0 && !(restricted && !only.includes(sh))) {
           flag(W.shiftMin * (want - w[sh]), { date: wk, staffId: id, shift: sh, kind: 'shiftMin' });
         }
@@ -1468,8 +1534,10 @@ function buildOnce(cfg, seed, ctx) {
 
   // How long a block of one shift may run before the person changes to
   // something else. Nights are shorter because two together is the norm.
-  const maxBlock = (sh) =>
-    cfg.maxBlock?.[sh] ?? (sh === 'night' ? 2 : 4);
+  // A person's own rule where they have one, otherwise the ward's.
+  const { limitFor } = ctx;
+  const maxBlock = (id, sh) =>
+    limitFor(id, 'block')[sh] ?? cfg.maxBlock?.[sh] ?? (sh === 'night' ? 2 : 4);
   const maxDaysOn = cfg.maxConsecutiveDays ?? 4;
 
   /* ── The capacity check ──
@@ -1536,7 +1604,7 @@ function buildOnce(cfg, seed, ctx) {
          and every night would spend one of the person's off days. So if
          they are part-way through a block, let it finish first. */
       if (force === 'off' && prev[s.id] && prev[s.id] !== 'off') {
-        if (runOf(s.id, prev[s.id], date) < maxBlock(prev[s.id])) {
+        if (runOf(s.id, prev[s.id], date) < maxBlock(s.id, prev[s.id])) {
           /* The rest day is held back so the block can finish — a second
              night, say. But that is the ONLY thing they may do today:
              letting them take an afternoon instead would break the rule
@@ -1694,12 +1762,12 @@ function buildOnce(cfg, seed, ctx) {
             const singleShift = only && only.length === 1;
             if (!singleShift && stateOf(capKey) !== 'disabled' && !dropped.has(capKey)
                 && (!lastResort || stateOf(capKey) === 'hard')) {
-              const cap = cfg.weeklyPerStaff?.[shift];
+              const cap = limitFor(s.id, 'cap')[shift];
               if (cap != null && weekCount(s.id, date, shift) >= cap) return false;
             }
             if (stateOf('workPattern') !== 'disabled' && !dropped.has('workPattern')
                 && (!lastResort || stateOf('workPattern') === 'hard')) {
-              if (runOf(s.id, shift, date) >= maxBlock(shift)) return false;
+              if (runOf(s.id, shift, date) >= maxBlock(s.id, shift)) return false;
               if (workedRun(s.id, date) >= maxDaysOn) return false;
             }
             if (!singleShift && stateOf('offMin') !== 'disabled' && !dropped.has('offMin')
@@ -1753,7 +1821,7 @@ function buildOnce(cfg, seed, ctx) {
         const blockScore = (id) => {
           const run = runOf(id, shift, date);
           const soFar = weekCount(id, date, shift);
-          const wantMin = cfg.weeklyMin?.[shift];
+          const wantMin = limitFor(id, 'min')[shift];
           /* Having had none of this shift all week outranks everything,
              including finishing a pair of nights. Pairing is a preference,
              not a requirement: with seven nights and six people, insisting
@@ -1922,10 +1990,10 @@ function buildOnce(cfg, seed, ctx) {
             if (senior(s.id) && seniorOnShift(assignedToday, sh) >= seniorNeed(sh)
                 && seniorSlack(s.id, date, assignedToday) <= 0) return false;
           }
-          const cap = cfg.weeklyPerStaff?.[sh];
+          const cap = limitFor(s.id, 'cap')[sh];
           if (cap != null && weekCount(s.id, date, sh) >= cap) return false;
           if (!ignorePattern) {
-            if (runOf(s.id, sh, date) >= maxBlock(sh)) return false;
+            if (runOf(s.id, sh, date) >= maxBlock(s.id, sh)) return false;
             if (workedRun(s.id, date) >= maxDaysOn) return false;
           }
           // Nobody is worked into the ground, whatever the off limit says.

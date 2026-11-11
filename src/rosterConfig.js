@@ -254,6 +254,8 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     maxBlock: rules.blockDays,
     // Runs of at least this many when someone gets more than one; absent = no ask.
     blockTogether: rules.blockTogether,
+    // One person's own limits, laid over the ward's; absent = everyone follows the ward.
+    personRules: rules.personRules,
     maxConsecutiveDays: rules.maxDaysOn ?? 5,
     // The working pattern is held firm: it is what stops one person
     // collecting a whole week of the same duty. Only the off-day floor
