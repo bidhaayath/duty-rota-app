@@ -681,6 +681,10 @@ function costWeights(cfg) {
      together  the shifts kept in runs, and how long: [{ sh, n, rule? }]
      apart     clear days wanted between two of a shift; none = no ask
      own       their own rules by "type:shift", or nothing for the ward's
+     days      their rules for each day of the week, 0 for Sunday to 6 for
+               Saturday: [{ off?, only?, allow? }], or nothing without one
+     offMax    the most off days a week, as it applies to them
+     dutyMin   the fewest duties a week, likewise
 
    Where somebody has their own most or fewest of a shift, the ward's is
    left out for them: their rule replaces it rather than adding to it, and
@@ -691,8 +695,15 @@ function costWeights(cfg) {
      atMost    at most `count` of the shift a week
      atLeast   at least `count` of the shift a week
      apart     at least `count` clear days between two of the shift
-     together  the shift kept in runs of `count`                         */
+     together  the shift kept in runs of `count`
+
+   A rule about days of the week has `days` in place of the shift and the
+   count — weekday numbers, as above — and somebody may hold several:
+     offOn     always off on `days`
+     onlyOn    on `days`, only the shifts listed in `shifts`             */
 const LEAST_COUNT = { atMost: 0, atLeast: 0, apart: 1, together: 2 };
+const DAY_RULES = ['offOn', 'onlyOn'];
+const isWeekday = (d) => Number.isInteger(d) && d >= 0 && d <= 6;
 
 /* The rule as the manager would say it, for reports and the screen. */
 export function personRuleText(rule) {
@@ -706,7 +717,10 @@ export function personRuleText(rule) {
 }
 
 function personLimits(cfg, blockMax) {
-  const ward = { cap: {}, min: {}, block: blockMax, apart: {} };
+  const ward = {
+    cap: {}, min: {}, block: blockMax, apart: {},
+    offMax: cfg.weeklyPerStaff?.offMax, dutyMin: cfg.weeklyDuties?.min,
+  };
   SHIFTS.forEach((sh) => {
     ward.cap[sh] = cfg.weeklyPerStaff?.[sh];
     ward.min[sh] = cfg.weeklyMin?.[sh];
@@ -718,17 +732,34 @@ function personLimits(cfg, blockMax) {
 
   // A rule that cannot be read is left out rather than guessed at. Should a
   // list ever hold two of a kind, the later one wins.
-  const mine = {};
+  const mine = {}, byDay = {};
   (cfg.personRules || []).forEach((r) => {
-    if (!r || !(r.type in LEAST_COUNT) || !SHIFTS.includes(r.shift)) return;
-    if (!Number.isInteger(r.count) || r.count < LEAST_COUNT[r.type]) return;
+    if (!r) return;
     const id = String(r.staffId);
+    if (DAY_RULES.includes(r.type)) {
+      if (!Array.isArray(r.days) || !r.days.length || !r.days.every(isWeekday)) return;
+      const only = r.type === 'onlyOn';
+      if (only && !(Array.isArray(r.shifts) && r.shifts.length
+          && r.shifts.every((sh) => SHIFTS.includes(sh)))) return;
+      const week = byDay[id] || (byDay[id] = [...Array(7)].map(() => ({})));
+      r.days.forEach((d) => {
+        if (only) { week[d].only = r; week[d].allow = new Set(r.shifts); }
+        else week[d].off = r;
+      });
+      return;
+    }
+    if (!(r.type in LEAST_COUNT) || !SHIFTS.includes(r.shift)) return;
+    if (!Number.isInteger(r.count) || r.count < LEAST_COUNT[r.type]) return;
     (mine[id] = mine[id] || {})[`${r.type}:${r.shift}`] = r;
   });
 
   const own = {};
-  for (const [id, rs] of Object.entries(mine)) {
-    const L = { cap: { ...ward.cap }, min: { ...ward.min }, block: { ...blockMax }, apart: {}, own: rs };
+  for (const id of new Set([...Object.keys(mine), ...Object.keys(byDay)])) {
+    const rs = mine[id] || {};
+    const L = {
+      cap: { ...ward.cap }, min: { ...ward.min }, block: { ...blockMax }, apart: {}, own: rs,
+      days: byDay[id], offMax: ward.offMax, dutyMin: ward.dutyMin,
+    };
     const runs = {};
     SHIFTS.forEach((sh) => {
       const most = rs[`atMost:${sh}`], least = rs[`atLeast:${sh}`];
@@ -782,11 +813,12 @@ export function rosterContext(cfg, dates, staff) {
   (cfg.requests || []).forEach((r) => { requested[`${r.staffId}|${r.date}`] = r.category; });
 
   // Date arithmetic, done once and looked up thereafter.
-  const prevOf = {}, weekOf = {}, fridayOf = {};
+  const prevOf = {}, weekOf = {}, fridayOf = {}, dowOf = {};
   dates.forEach((d, i) => {
     prevOf[d] = i > 0 ? dates[i - 1] : shiftDate(d, -1);
     weekOf[d] = startOfWeek(d, cfg.weekStartsOn ?? 0);
-    fridayOf[d] = isFriday(d);
+    dowOf[d] = parseISO(d).getDay();
+    fridayOf[d] = dowOf[d] === 5;
   });
   const weekDays = {}, datesOfWeek = {}, nextOf = {};
   dates.forEach((d, i) => {
@@ -853,7 +885,7 @@ export function rosterContext(cfg, dates, staff) {
   return {
     W: costWeights(cfg),
     staff, dates, keep, histCats, requested, prevOf, nextOf, weekOf, weekDays, datesOfWeek, fridayOf,
-    nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed, limitFor, lastSeen,
+    dowOf, nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed, limitFor, lastSeen,
     seniorIds: new Set(staff.filter((s) => isSenior(cfg, s)).map((s) => String(s.id))),
     maxDaysOn: cfg.maxConsecutiveDays ?? 4,
     absMax: cfg.absoluteMaxDaysOn ?? 6,
@@ -928,6 +960,8 @@ export function auditRoster(cfg, ctx, cells) {
     const blockMax = limitFor(id, 'block');
     const caps = limitFor(id, 'cap');
     const mins = limitFor(id, 'min');
+    const offMax = limitFor(id, 'offMax');
+    const dMin = limitFor(id, 'dutyMin');
     /* Shifts kept together, and how many to a run. None set: nothing below
        looks at runs at all. */
     const together = limitFor(id, 'together');
@@ -1068,7 +1102,7 @@ export function auditRoster(cfg, ctx, cells) {
            who was away. Ignore still switches it off.                     */
         if (weekDays[wk] === 7 && w.days > w.fixed) {
           const free = w.off - w.rest;
-          const hi = partWeekOffs(cfg.weeklyPerStaff?.offMax, w.days);
+          const hi = partWeekOffs(offMax, w.days);
           if (W.offMax && hi != null && free > hi) {
             flag(COST.offMax * (free - hi), { date: wk, staffId: id, shift: OFF_CAT, kind: 'partOffMax' });
           }
@@ -1080,11 +1114,9 @@ export function auditRoster(cfg, ctx, cells) {
         }
         continue;
       }
-      const dMin = cfg.weeklyDuties?.min;
       if (dMin != null && w.duties < dMin) {
         flag(W.dutyMin * (dMin - w.duties), { date: wk, staffId: id, shift: OFF_CAT, kind: 'dutyMin' });
       }
-      const offMax = cfg.weeklyPerStaff?.offMax;
       if (offMax != null && offs > offMax) {
         flag(W.offMax * (offs - offMax), { date: wk, staffId: id, shift: OFF_CAT, kind: 'offMax' });
       }
@@ -2105,11 +2137,11 @@ function buildOnce(cfg, seed, ctx) {
       const allowed = allowedOverride(rules, prev[s.id]);
       const offBanned = banned.has('off') && !allowed.has('off');
 
-      const offMax = cfg.weeklyPerStaff?.offMax;
+      const offMax = limitFor(s.id, 'offMax');
       const hadOff = offMax != null && weekCount(s.id, date, 'off') >= offMax;
       // Below their weekly duty minimum, so a rest day now would leave the
       // week short. Treated the same as having used up the off allowance.
-      const dutyMin = cfg.weeklyDuties?.min;
+      const dutyMin = limitFor(s.id, 'dutyMin');
       const owedDuties = dutyMin != null && weekDuties(s.id, date) < dutyMin;
       /* Off days are taken singly. Two together reads as a weekend, which
          is not how a seven-day rota works — someone off yesterday should
