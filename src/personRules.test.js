@@ -5,7 +5,7 @@
 
 import React, { useState } from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { generateRoster, personRuleText, mustCauseText } from "./rosterEngine";
+import { generateRoster, personRuleText, mustCauseText, rosterContext, auditRoster } from "./rosterEngine";
 import { weekConfig } from "./rosterConfig";
 import SmartRosterTab from "./SmartRosterTab";
 
@@ -94,7 +94,105 @@ describe("the engine", () => {
   });
 });
 
+/* Rules about days of the week: "always off on Friday and Saturday", "on
+   Friday and Saturday only Morning". Days are numbers, 0 for Sunday to 6 for
+   Saturday; in this week Friday is 6 November and Saturday the 7th. */
+describe("the engine, rules about days", () => {
+  const FRI = "2026-11-06", SAT = "2026-11-07";
+  const offOn = (staffId, days, strength = "hard") => ({ id: `${staffId}-off`, staffId, type: "offOn", days, strength });
+  const onlyOn = (staffId, days, shifts, strength = "soft") => ({ id: `${staffId}-only`, staffId, type: "onlyOn", days, shifts, strength });
+  const of = (cells, id) => week.map((d) => cells[`${id}|${d}`]);
+  const offs = (cells, id) => of(cells, id).filter((c) => c === "off").length;
+  /* Somebody always off on certain days was off on them before this week
+     too, so their history says so. Without it the week would open on eight
+     days worked in a row, and the engine would rightly break that up. */
+  const wardWith = (rules, weekdays = [5, 6], staffId = "r2") => {
+    const data = ward(rules);
+    Object.keys(data.cells).forEach((date) => {
+      const [y, m, d] = date.split("-").map(Number);
+      if (weekdays.includes(new Date(y, m - 1, d).getDay())) data.cells[date][staffId] = "OFF";
+    });
+    return data;
+  };
+
+  test.each(["soft", "hard"])("Ana always off Friday and Saturday (%s): those two days, and no others", (strength) => {
+    const out = generateRoster(weekConfig(wardWith([offOn("r2", [5, 6], strength)]), WEEK));
+    expect(out.ok).toBe(true);
+    expect(out.cells[`r2|${FRI}`]).toBe("off");
+    expect(out.cells[`r2|${SAT}`]).toBe("off");
+    // The ward's most is two off days a week: the fixed days are those two.
+    expect(offs(out.cells, "r2")).toBe(2);
+    expect(out.report.relaxations.filter((r) => r.personal || r.staffId === "r2")).toEqual([]);
+    expect(out.report.shortfalls).toEqual([]);
+  }, 60000);
+
+  test.each(["soft", "hard"])("Mariyam on Friday and Saturday only Morning (%s): a morning or off, nothing else", (strength) => {
+    const out = generateRoster(weekConfig(ward([onlyOn("r1", [5, 6], ["morning"], strength)]), WEEK));
+    expect(out.ok).toBe(true);
+    [FRI, SAT].forEach((d) => expect(["morning", "off"]).toContain(out.cells[`r1|${d}`]));
+    expect(out.report.relaxations.filter((r) => r.personal)).toEqual([]);
+    expect(out.report.shortfalls).toEqual([]);
+  }, 60000);
+
+  test("two fixed off days side by side are not counted as two off days together", () => {
+    const withRule = weekConfig(wardWith([offOn("r2", [5, 6])]), WEEK);
+    const without = weekConfig(wardWith(undefined), WEEK);
+    const out = generateRoster({ ...withRule, polishSteps: 3000 });
+    const pairs = (cfg) => {
+      const staff = cfg.staff.filter((s) => !cfg.skipStaff.includes(s.id));
+      return auditRoster(cfg, rosterContext(cfg, week, staff), out.cells).issues
+        .filter((i) => i.kind === "doubleOff" && i.date === SAT).length;
+    };
+    expect(pairs(without) - pairs(withRule)).toBe(1);
+  });
+
+  test("three fixed days where the ward's most is two: her number is hers, and not reported", () => {
+    const out = generateRoster(weekConfig(wardWith([offOn("r2", [1, 2, 3])], [1, 2, 3]), WEEK));
+    expect(of(out.cells, "r2").slice(1, 4)).toEqual(["off", "off", "off"]);
+    expect(offs(out.cells, "r2")).toBe(3);
+    expect(out.report.relaxations.filter((r) => r.staffId === "r2")).toEqual([]);
+  }, 60000);
+
+  test("an approved request on a fixed day wins, and the rule is reported with the day", () => {
+    const data = wardWith([offOn("r2", [5, 6])]);
+    data.dutyRequests = [{ id: "q1", staffId: "r2", date: FRI, category: "night", approved: true }];
+    const out = generateRoster({ ...weekConfig(data, WEEK), polishSteps: 3000 });
+    expect(out.cells[`r2|${FRI}`]).toBe("night");
+    expect(out.report.relaxations).toContainEqual({
+      date: FRI, shift: "night", staffId: "r2", rule: "always off on Friday and Saturday",
+      personal: true, ruleType: "offOn", strength: "hard",
+    });
+  });
+
+  test("a Must that leaves Friday short is named on each gap; a Try is given up to cover it", () => {
+    // Everybody but two is always off on Friday, and Friday needs nine.
+    const rules = (strength) => [...Array(12)].map((_, i) => offOn(`r${i + 2}`, [5], strength));
+    const must = generateRoster({ ...weekConfig(ward(rules("hard")), WEEK), polishSteps: 3000 });
+    expect(must.ok).toBe(true);
+    const gaps = must.report.shortfalls.filter((g) => g.date === FRI);
+    expect(gaps.length).toBeGreaterThan(0);
+    gaps.forEach((g) => expect(mustCauseText(g.because)).toMatch(/ others: always off on Friday \(Must\)$/));
+    week.forEach((d) => { if (d !== FRI) expect(must.report.shortfalls.filter((g) => g.date === d && g.because)).toEqual([]); });
+    for (let i = 2; i < 14; i++) expect(must.cells[`r${i}|${FRI}`]).toBe("off");
+
+    const uncovered = (out) => out.report.shortfalls.reduce((n, g) => n + g.needed, 0);
+    const soft = generateRoster({ ...weekConfig(ward(rules("soft")), WEEK), polishSteps: 3000 });
+    expect(uncovered(soft)).toBeLessThan(uncovered(must));
+    expect(soft.report.relaxations.some((r) => r.personal && r.ruleType === "offOn" && r.strength === "soft")).toBe(true);
+    expect(soft.report.shortfalls.filter((g) => g.because)).toEqual([]);
+  }, 60000);
+});
+
 describe("how a rule is said", () => {
+  test("a rule about days, in the manager's words", () => {
+    expect(personRuleText({ type: "offOn", days: [5, 6] })).toBe("always off on Friday and Saturday");
+    expect(personRuleText({ type: "offOn", days: [0] })).toBe("always off on Sunday");
+    expect(personRuleText({ type: "onlyOn", days: [5, 6], shifts: ["morning"] })).toBe("on Friday and Saturday only mornings");
+    expect(personRuleText({ type: "onlyOn", days: [4], shifts: ["morning", "afternoon"] })).toBe("on Thursday only mornings and afternoons");
+    expect(mustCauseText([{ name: "Ana", rule: { type: "offOn", days: [5, 6], strength: "hard" } }]))
+      .toBe("Ana: always off on Friday and Saturday (Must)");
+  });
+
   test("each kind, in the manager's words", () => {
     expect(personRuleText(rule("x", "atMost", "night", 1))).toBe("at most 1 night a week");
     expect(personRuleText(rule("x", "atMost", "night", 0))).toBe("no nights");
