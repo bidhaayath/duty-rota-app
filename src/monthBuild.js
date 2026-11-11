@@ -335,7 +335,21 @@ export function finishMonth(prep, result, data) {
 
   // Rules bent, grouped, with where. Weekly ones name the person and week.
   const groups = {};
+  const mustGroups = new Set();
   report.relaxations.forEach((r) => {
+    /* One person's own rule, kept apart from the ward's of the same words
+       and marked Must or Try. Days between is missed on a day, so it names
+       the day; the others name the week. */
+    if (r.personal) {
+      const daily = r.ruleType === "apart";
+      if (daily ? !inPeriod(r.date) : !weekTouches(r.date)) return;
+      const must = r.strength === "hard";
+      const key = `${r.rule} (${must ? "Must" : "Try"})`;
+      if (must) mustGroups.add(key);
+      const who = nameOf[r.staffId] || "someone";
+      (groups[key] = groups[key] || []).push(daily ? `${who} (${prettyWeekday(r.date)})` : `${who} (week of ${prettyDay(r.date)})`);
+      return;
+    }
     const weekly = r.staffId != null;
     if (weekly ? !weekTouches(r.date) : !inPeriod(r.date)) return;
     const where = weekly
@@ -343,12 +357,11 @@ export function finishMonth(prep, result, data) {
       : `${prettyWeekday(r.date)}${r.shift && r.shift !== "off" ? ` ${r.shift}` : ""}`;
     (groups[r.rule] = groups[r.rule] || []).push(where);
   });
+  // A personal Must that could not be met comes before everything else.
+  const rank = (rule) => (mustGroups.has(rule) ? -1 : RULE_SORT.indexOf(rule) < 0 ? 99 : RULE_SORT.indexOf(rule));
   const bent = Object.entries(groups)
     .map(([rule, places]) => ({ rule, places: [...new Set(places)] }))
-    .sort((a, b) => {
-      const ia = RULE_SORT.indexOf(a.rule), ib = RULE_SORT.indexOf(b.rule);
-      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || b.places.length - a.places.length;
-    });
+    .sort((a, b) => rank(a.rule) - rank(b.rule) || b.places.length - a.places.length);
 
   // Weeks inside the period that are short of duties on paper.
   const shortWeeks = (report.budget || []).filter((w) => w.spare < 0 && weekTouches(w.week))

@@ -29,6 +29,7 @@ import { X, Check, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { codeTextById, writeCells, findMismatches, exchangeMarksIn, employedOn, mergeRules, seniorTermsOf } from "./rosterConfig";
 import { weekTotalsFor, dayCountFor, isNonOff } from "./rotaCounts";
 import { monthFingerprint, prettyDay, prettyWeekday } from "./monthBuild";
+import { mustCauseText } from "./rosterEngine";
 
 // The rota grid's own reading of a colour (DutyRotaOriginal.js textOn):
 // dark text on light codes, white on dark ones.
@@ -385,7 +386,20 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
           </button>
 
           {/* Shifts left short or with nobody in charge are always on show,
-              on a phone too: they are what a manager must see before Apply. */}
+              on a phone too: they are what a manager must see before Apply.
+              One a person's own Must rule caused comes first, with the rule. */}
+          {proposal.shortfalls.some((s) => s.because) && (
+            <div style={box("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
+              <strong>Left uncovered by a personal Must rule:</strong>
+              <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                {proposal.shortfalls.filter((s) => s.because).map((s) => (
+                  <li key={`${s.date}|${s.shift}`}>
+                    {s.shift.charAt(0).toUpperCase() + s.shift.slice(1)} on {prettyWeekday(s.date)} uncovered: {mustCauseText(s.because)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {proposal.shortfalls.length > 0 && (
             <div style={box("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
               <strong>{plural(proposal.shortfalls.length, "shift")} could not be filled:</strong>{" "}

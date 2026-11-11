@@ -15,7 +15,8 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { Plus, Trash2, Wand2, AlertTriangle, Check, X, ChevronDown, ChevronRight } from "lucide-react";
-import { generateRoster, checkFeasible, toRotaCells, SHIFTS } from "./rosterEngine";
+import { generateRoster, checkFeasible, toRotaCells, SHIFTS, personRuleText, mustCauseText } from "./rosterEngine";
+import { prettyWeekday } from "./monthBuild";
 /* The settings, the engine configuration and the Apply helpers live in
    rosterConfig.js, shared with Ini's month builder so the two never drift
    apart. Moved there unchanged; rosterConfig.test.js proves it. */
@@ -89,6 +90,33 @@ function Strength({ value, onChange, disabled, T, sel }) {
   );
 }
 
+/* Must or Try for one person's rule. No Ignore: a rule nobody wants is removed. */
+function MustTry({ value, onChange, disabled, T }) {
+  const hard = value === "hard";
+  return (
+    <span style={{ display: "inline-flex", borderRadius: 7, overflow: "hidden", border: `1px solid ${T.line}` }}>
+      {["hard", "soft"].map((v) => (
+        <button key={v} disabled={disabled} onClick={() => onChange(v)}
+          style={{ fontFamily: "inherit", fontSize: 11, fontWeight: 700, border: "none",
+            padding: "4px 9px", cursor: disabled ? "not-allowed" : "pointer",
+            background: (v === "hard") === hard ? (v === "hard" ? T.lagoon : T.sand) : "transparent",
+            color: (v === "hard") === hard ? "#fff" : T.inkSoft }}>
+          {v === "hard" ? "Must" : "Try"}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/* What a new rule starts at, and how far its number can go. */
+const RULE_COUNTS = {
+  atMost: { start: 1, min: 0, max: 7 },
+  atLeast: { start: 1, min: 1, max: 7 },
+  apart: { start: 2, min: 1, max: 6 },
+  together: { start: 2, min: 2, max: 2 },
+};
+const upperFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
   onApplied, deptId,
@@ -121,6 +149,8 @@ export default function SmartRosterTab({
   const proposalElsewhere = !!proposal && proposal.deptId !== deptId;
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  // The personal rule being written, before Add.
+  const [draft, setDraft] = useState({ staffId: "", type: "atMost", count: 1, shift: "night" });
   /* Decided once, when the page opens: a ward with its own plural keeps the
      box for the whole visit, so clearing it to retype does not make it vanish. */
   const [showPlural] = useState(() => !!(rules.seniorTermPlural || "").trim());
@@ -339,6 +369,61 @@ export default function SmartRosterTab({
   };
 
   const num = { ...inputStyle, width: 70, padding: "7px 9px" };
+  /* ── One person's own rules ──
+     Saved as one list beside the ward's settings. An empty list is removed
+     rather than saved, so taking every rule away leaves nothing behind. */
+  const ownRules = rules.personRules || [];
+  const setPersonRules = (list) => update((d) => {
+    const next = { ...rules, personRules: list };
+    if (!list.length) delete next.personRules;
+    d.rosterRules = next;
+    return d;
+  });
+  const setOwnStrength = (id, strength) =>
+    setPersonRules(ownRules.map((r) => (r.id === id ? { ...r, strength } : r)));
+  const staffName = (id) => (data.staff || []).find((s) => String(s.id) === String(id))?.name;
+  // Grouped by person, in the order the ward lists them; anyone gone goes last.
+  const staffOrder = (id) => {
+    const i = allStaff.findIndex((s) => String(s.id) === String(id));
+    return i < 0 ? Infinity : i;
+  };
+  const shownRules = [...ownRules].sort((a, b) => staffOrder(a.staffId) - staffOrder(b.staffId));
+
+  // Only shifts the ward runs can carry a rule.
+  const runShifts = SHIFTS.filter((sh) => rules.coverage[sh]?.max !== 0);
+  const draftShift = runShifts.includes(draft.shift) ? draft.shift : runShifts[0];
+  const draftRule = { type: draft.type, shift: draftShift, count: draft.type === "together" ? 2 : draft.count };
+  const draftPerson = allStaff.find((s) => String(s.id) === draft.staffId);
+  /* Why the rule as written cannot be added, in the manager's words. Asked
+     before saving, so a list never holds two rules that fight each other. */
+  const draftProblem = (() => {
+    if (!draftPerson || !draftShift) return null;
+    const mine = ownRules.filter((r) => String(r.staffId) === String(draftPerson.id) && r.shift === draftShift);
+    const has = (type) => mine.find((r) => r.type === type);
+    const who = draftPerson.name;
+    if (has(draftRule.type)) {
+      return `${who} already has "${personRuleText(has(draftRule.type))}". Remove it first to change it.`;
+    }
+    const other = draftRule.type === "apart" ? has("together") : draftRule.type === "together" ? has("apart") : null;
+    if (other) {
+      return `${who} already has "${personRuleText(other)}". Days between and pairs cannot both apply to ${draftShift}s, so remove that one first.`;
+    }
+    const most = draftRule.type === "atLeast" ? has("atMost") : null;
+    const least = draftRule.type === "atMost" ? has("atLeast") : null;
+    if (most && draftRule.count > most.count) {
+      return `${who} has "${personRuleText(most)}", so at least ${draftRule.count} could never be met.`;
+    }
+    if (least && draftRule.count < least.count) {
+      return `${who} has "${personRuleText(least)}", so at most ${draftRule.count} could never be met.`;
+    }
+    return null;
+  })();
+  const addOwnRule = () => {
+    if (!draftPerson || !draftShift || draftProblem) return;
+    // Every rule starts as Try: it is kept whenever the week allows.
+    setPersonRules([...ownRules, { id: uid(), staffId: draftPerson.id, ...draftRule, strength: "soft" }]);
+  };
+
   const sel = { ...inputStyle, width: "auto", minWidth: 118, cursor: "pointer", padding: "7px 9px" };
   const title = { fontFamily: "Sora, sans-serif", fontSize: 15, margin: "0 0 3px" };
   const hint = { fontSize: 12.5, color: T.inkSoft, lineHeight: 1.6, margin: "0 0 14px" };
@@ -680,6 +765,98 @@ export default function SmartRosterTab({
         </div>
       </Card>
 
+      {/* ── Personal rules ── */}
+      <Card>
+        <h3 style={title}>Personal rules</h3>
+        <p style={hint}>
+          Rules for one person, on top of the ward's settings above. Anyone without a rule follows
+          the ward. <strong>Try</strong> is kept whenever the week allows, and gives way before a
+          shift is left uncovered. <strong>Must</strong> is kept even then: the week is still made,
+          and a shift left uncovered because of it is named first when you generate.
+        </p>
+
+        {shownRules.length > 0 && (
+          <div style={{ display: "grid", gap: 9, marginBottom: 14 }}>
+            {shownRules.map((r) => (
+              <div key={r.id}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 104 }}>
+                    {staffName(r.staffId) || "Someone no longer on this ward"}
+                  </span>
+                  <span style={{ fontSize: 13, flex: "1 1 200px", minWidth: 0 }}>{upperFirst(personRuleText(r))}</span>
+                  <MustTry value={r.strength} disabled={!staffEditable} T={T}
+                    onChange={(v) => setOwnStrength(r.id, v)} />
+                  <Btn kind="danger" small disabled={!staffEditable}
+                    onClick={() => setPersonRules(ownRules.filter((x) => x.id !== r.id))}>
+                    <Trash2 size={13} />
+                  </Btn>
+                </div>
+                {r.type === "atLeast" && r.strength === "hard" && (
+                  <p style={{ fontSize: 12, color: "#8A5A0F", margin: "5px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <span>
+                      A Must here can leave another shift uncovered so that {staffName(r.staffId) || "they"} gets{" "}
+                      {r.count} {r.shift}{r.count === 1 ? "" : "s"}. Try is usually enough: it is met whenever the week allows.
+                    </span>
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
+          <Field label="Who">
+            <select style={sel} disabled={!staffEditable} value={draft.staffId}
+              onChange={(e) => setDraft({ ...draft, staffId: e.target.value })}>
+              <option value="">Choose…</option>
+              {allStaff.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Rule">
+            <select style={sel} disabled={!staffEditable} value={draft.type}
+              onChange={(e) => setDraft({ ...draft, type: e.target.value, count: RULE_COUNTS[e.target.value].start })}>
+              <option value="atMost">At most … a week</option>
+              <option value="atLeast">At least … a week</option>
+              <option value="apart">At least … days between</option>
+              <option value="together">Kept in pairs</option>
+            </select>
+          </Field>
+          {draft.type !== "together" && (
+            <Field label={draft.type === "apart" ? "Days" : "How many"}>
+              <input type="number" style={{ ...inputStyle, width: 70 }} disabled={!staffEditable}
+                min={RULE_COUNTS[draft.type].min} max={RULE_COUNTS[draft.type].max} value={draft.count}
+                onChange={(e) => {
+                  const { min, max } = RULE_COUNTS[draft.type];
+                  const n = Math.round(Number(e.target.value));
+                  setDraft({ ...draft, count: Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : min });
+                }} />
+            </Field>
+          )}
+          <Field label="Shift">
+            <select style={sel} disabled={!staffEditable} value={draftShift}
+              onChange={(e) => setDraft({ ...draft, shift: e.target.value })}>
+              {runShifts.map((sh) => <option key={sh} value={sh}>{SHIFT_LABELS[sh]}</option>)}
+            </select>
+          </Field>
+          <Btn kind="ghost" small disabled={!staffEditable || !draftPerson || !draftShift || !!draftProblem}
+            onClick={addOwnRule}>
+            <Plus size={14} /> Add
+          </Btn>
+        </div>
+        {draftShift && (
+          <p style={{ ...hint, margin: "8px 0 0" }}>
+            {draftPerson ? `${draftPerson.name}: ` : ""}{personRuleText(draftRule)} — starts as Try.
+          </p>
+        )}
+        {draftProblem && (
+          <p style={{ fontSize: 12.5, color: "#8A5A0F", margin: "6px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
+            <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 3 }} />
+            <span>{draftProblem}</span>
+          </p>
+        )}
+      </Card>
+
       {/* ── More rules ── */}
       <Card style={{ padding: showMore ? 18 : "12px 18px" }}>
         <button onClick={() => setShowMore(!showMore)}
@@ -964,6 +1141,20 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
   const dayOf = (d) => new Date(d).getDate();
   const note = { background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 10,
                  padding: "10px 12px", marginTop: 12, fontSize: 12.5, color: "#8A5A0F", lineHeight: 1.6 };
+  const urgent = { ...note, background: "#FBEAE7", border: "1px solid #F1B8AE", color: "#8A2E1E" };
+
+  /* People's own rules, kept apart from the ward's settings so each can be
+     said with the person's name. One line per person and rule; Days between
+     is missed on a day, so it lists the days. A Must comes first. */
+  const nameOf = (id) => (data.staff || []).find((s) => String(s.id) === String(id))?.name || "Someone";
+  const wardBent = (report.relaxations || []).filter((r) => !r.personal);
+  const ownBent = Object.values((report.relaxations || []).filter((r) => r.personal).reduce((m, r) => {
+    const key = `${r.staffId}|${r.rule}`;
+    const g = m[key] || (m[key] = { name: nameOf(r.staffId), rule: r.rule, must: r.strength === "hard", days: [] });
+    if (r.ruleType === "apart") g.days.push(prettyWeekday(r.date));
+    return m;
+  }, {})).sort((a, b) => (b.must ? 1 : 0) - (a.must ? 1 : 0));
+  const mustGaps = report.shortfalls.filter((s) => s.because);
 
   return (
     <>
@@ -978,6 +1169,21 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
             <Btn onClick={onApply}><Check size={15} /> Apply to rota</Btn>
           </div>
         </div>
+
+        {/* A gap one person's own Must caused is said first, with the rule,
+            so it is the first thing read before Apply. */}
+        {mustGaps.length > 0 && (
+          <div style={urgent}>
+            <strong>Left uncovered by a personal Must rule:</strong>
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {mustGaps.map((s) => (
+                <li key={`${s.date}|${s.shift}`}>
+                  {SHIFT_LABELS[s.shift]} on {prettyWeekday(s.date)} uncovered: {mustCauseText(s.because)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {report.shortfalls.length > 0 && (
           <div style={note}>
@@ -1002,14 +1208,28 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
           </div>
         )}
 
-        {report.relaxations?.length > 0 && (
+        {ownBent.length > 0 && (
+          <div style={ownBent.some((g) => g.must) ? urgent : note}>
+            <strong>Personal rules not met:</strong>
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {ownBent.map((g) => (
+                <li key={`${g.name}|${g.rule}`}>
+                  {g.name}: {g.rule}{g.days.length ? ` (${g.days.join(", ")})` : ""} —{" "}
+                  {g.must ? <strong>Must, could not be met</strong> : "Try"}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {wardBent.length > 0 && (
           <div style={note}>
             {/* This lists what the FINISHED week does, not what the generator
                 bent along the way — those are different things, and only the
                 first is worth your attention. */}
-            <strong>The week works, but {report.relaxations.length} of your
-              setting{report.relaxations.length === 1 ? " is" : "s are"} not fully met:</strong>{" "}
-            {Object.entries(report.relaxations.reduce((m, r) => { m[r.rule] = (m[r.rule] || 0) + 1; return m; }, {}))
+            <strong>The week works, but {wardBent.length} of your
+              setting{wardBent.length === 1 ? " is" : "s are"} not fully met:</strong>{" "}
+            {Object.entries(wardBent.reduce((m, r) => { m[r.rule] = (m[r.rule] || 0) + 1; return m; }, {}))
               .sort((a, b) => b[1] - a[1])
               .map(([r, n]) => `${r} (${n})`).join(", ")}.
           </div>

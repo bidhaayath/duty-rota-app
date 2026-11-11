@@ -76,6 +76,16 @@ describe("set_offs_per_week", () => {
     expect(d.rosterRules.staffShifts).toEqual({ a: ["night"] });
   });
 
+  test("a ward's personal rules are kept when Ini changes another setting", () => {
+    const data = makeData();
+    const own = [{ id: "p1", staffId: "h", type: "atMost", shift: "night", count: 1, strength: "soft" }];
+    data.rosterRules.personRules = own;
+    const [l] = check([{ type: "set_offs_per_week", min: 2, max: null }], data);
+    const d = save(data, [l]);
+    expect(d.rosterRules.personRules).toEqual(own);
+    expect(mergeRules(d.rosterRules).personRules).toEqual(own);
+  });
+
   test("fewest more than most is blocked; no change is blocked", () => {
     const [bad] = check([{ type: "set_offs_per_week", min: 3, max: null }]);
     expect(bad.blocked).toMatch(/The fewest off days \(3\) would be more than the most \(2\)/);
