@@ -170,6 +170,25 @@ describe("end to end with the engine", () => {
     fin.writes.forEach((w) => expect(data.cells[w.date]?.[w.sid]).not.toBe(w.id));
   }, 60000);
 
+  test("a person's own rule is named with them: a Must first, days between by the day", () => {
+    const data = makeData();
+    const prep = prepareMonth({ data, month: "2026-10", keepExisting: true });
+    const report = {
+      shortfalls: [], seniorGaps: [], budget: [],
+      relaxations: [
+        { date: "2026-10-04", shift: "night", staffId: "s1", rule: "at most 1 night a week", personal: true, ruleType: "atMost", strength: "soft" },
+        { date: "2026-10-14", shift: "night", staffId: "s2", rule: "at least 2 days between nights", personal: true, ruleType: "apart", strength: "hard" },
+        { date: "2026-10-04", shift: "night", staffId: "s3", rule: "weekly night limit" },
+      ],
+    };
+    const fin = finishMonth(prep, { rotaCells: {}, cells: {}, report }, data);
+    expect(fin.bent).toEqual([
+      { rule: "at least 2 days between nights (Must)", places: ["Staff 2 (Wed 14 Oct)"] },
+      { rule: "at most 1 night a week (Try)", places: ["Staff 1 (week of 4 Oct)"] },
+      { rule: "weekly night limit", places: ["Staff 3 (week of 4 Oct)"] },
+    ]);
+  });
+
   test("the fingerprint notices a change to the month, and ignores one outside it", () => {
     const data = makeData();
     const before = monthFingerprint(data, "2026-09-27", "2026-10-31");

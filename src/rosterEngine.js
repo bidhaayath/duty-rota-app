@@ -1370,6 +1370,7 @@ function issuesToRelaxations(issues) {
     staffId: i.staffId,
     rule: personRuleText(i.rule),
     personal: true,
+    ruleType: i.rule.type,     // 'apart' is missed on a day, the others in a week
     strength: i.rule.strength === 'hard' ? 'hard' : 'soft',
   } : {
     date: i.date,
@@ -1425,6 +1426,24 @@ function mustReasons(cfg, ctx, cells, shortfalls) {
     }
     if (because.length) gap.because = because;
   }
+}
+
+/* Those reasons as one line for a screen. One person: "Shau: at most 1
+   night a week (Must)". Several on the same rule are shortened, so a long
+   list cannot bury the gap: "S1, S2 and 5 others: no nights (Must)".    */
+export function mustCauseText(because) {
+  const byRule = {};
+  (because || []).forEach((b) => {
+    const text = personRuleText(b.rule);
+    (byRule[text] = byRule[text] || []).push(b.name || 'someone');
+  });
+  return Object.entries(byRule).map(([text, names]) => {
+    const who = names.length === 1 ? names[0]
+      : names.length === 2 ? `${names[0]} and ${names[1]}`
+      : names.length === 3 ? `${names[0]}, ${names[1]} and ${names[2]}`
+      : `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+    return `${who}: ${text} (Must)`;
+  }).join('; ');
 }
 
 /* ── Generate ──
