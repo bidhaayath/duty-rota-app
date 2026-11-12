@@ -153,9 +153,21 @@ Above the list: "This ward calls the person in charge [ ]" and a one-line key fo
 - Result: a one-line summary ("All Must rules met, every shift covered…"), then **What had to give**, each item with person/shift, rule, strength and plain reason. Red box for gaps caused by personal Musts at the top (wording from per-person-days). A gap explained in the red box is never repeated in the generic "could not be filled" box.
 - Buttons: **Use this roster** (today's Apply), **Show another option**, **Discard**. "Show another option" needs engine work (different seeds, keep the 3 best distinct results) — its own later stage.
 
+### As built in stage 5 (`src/RosterSteps.js`)
+- **Three step buttons** at the top — 1 Ward needs · 2 Your staff · 3 Make the roster — always clickable, each with a one-line status: "Done" / "Needs a fix", "N on the roster", "Week ready" / "Pick a week". The current one has a green border and `aria-current="step"`. "← Back" and "Next: …" under each step. On the narrowest phones (340px and below) the words drop under the number.
+- **Step 1** holds the live check banner and the Ward needs sections; **step 2** Your staff; **step 3** the week picker, Make the roster, and the proposed week.
+- **Ready checklist** on step 3 until a week is made: settings fit (or "go back to step 1"), enough in-charge on the roster, how many on the roster and skipped, approved requests and fixed duties this week (always kept), "what may follow what", the look-back.
+- **After making**: a one-line summary first ("All Must rules met, every shift covered." or "N shifts not covered · …"), then the week. Apply is now **Use this roster**, same behaviour. No "Show another option" yet (stage 7).
+- The last step is remembered per department in `localStorage` (`smartRoster:step:<deptId>`, try/catch, starts at step 1 when unreadable). `dutyrota:recovering` and `dutyrota:recovery-done` are untouched.
+
 ## Ini
 
 Animated Ini in the Ask Ini bar, built from Ini's measured proportions (rounded-square green body #9ED066, large round white eyes nearly touching, small brown pupils #945600, tiny smile). Eyes follow the pointer; body gently morphs; blinks. Moods: asleep on load → wakes; listening (input focused); thinking (generating; pupils up, half lids); celebrating (result ready, Fix it worked; bounce); surprised (tapped). Hover: lift and tilt, "Hi! Need a hand?" bubble once. Tap: jump/wiggle with rotating tips; five quick taps: spin + "Wheee! That tickles!". All motion off under prefers-reduced-motion. Bidhoo's own green-screen clips (wake, listening, thinking, celebrate) are available as transparent animated WebP if preferred for big moments.
+
+### As built in stage 6 (`src/IniBuddy.js`, `src/IniMascot.js`)
+- **Ask Ini bar** above the step buttons on every step, shown only where the Ini panel is (a department, not view-only, not locked). Send or Enter hands the note to the Ini panel, which opens and reads it at once, as if "Read my note" was pressed. Nothing new is saved: the panel shows its checklist and adds only on "Add N items" (one Undo step); a month Ini builds still opens as a preview first.
+- **Ini** is the same `IniMascot`, recoloured #9ED066 / #945600, with a new `thinking` mood. Bar moods: resting → waking → listening; thinking while a week is made or the panel is working; "all done" for three seconds after a week is made or Fix it for me worked; surprised ("spotted") on a tap. Eyes follow the pointer, also on the floating Ini button. Hover lifts and tilts and says "Hi! Need a hand?" once; taps say five tips in turn; five taps within 1.6s spin and say "Wheee! That tickles!". What Ini says is read out (`aria-live`).
+- Under prefers-reduced-motion: awake at once, eyes ahead, no morph, lift, hop or spin; the words still appear. Ini, the box and Send are each at least 44px and reachable by keyboard.
 
 ## Fit check against the engine (12 November 2026)
 
@@ -187,10 +199,10 @@ Things that change how an existing department's roster is built: only stage 0 (a
 | 1 | **Live check banner** in today's layout | Screen only | Merged (PR #72) |
 | 2 | **Step 1 controls**: shift cards with − / +, the per-person table with the In a row dropdown, strength boxes, Working days with a fixed Must label, look-back row, the "usually gives way first" columns. The in-charge strength and the two fairness rows stay hidden until 2b. Prove saved settings round-trip unchanged. | Screen only | Merged (PR #73) |
 | 2b | **New strength keys**: a separate key for working days in a row (falls back to `workPattern`), in-charge strength, night and non-official fairness (Protect most to Ignore), off days "Together is fine" passed through. All mean today's behaviour when absent. | **Engine (medium)** | Merged (PR #74) |
-| 3 | **Step 2 Your staff**: merge Staff exceptions, Personal rules and request labels into one list with the inline rule panel. | Screen only | In progress on `your-staff` |
-| 4 | **Manager-fixed duty** (engine + panel type 7). | **Engine (small)** + screen | In progress on `your-staff` |
-| 5 | **Three-step layout, ready checklist and result summary.** | Screen only | |
-| 6 | **Ini animations.** | Screen only | |
+| 3 | **Step 2 Your staff**: merge Staff exceptions, Personal rules and request labels into one list with the inline rule panel. | Screen only | Merged (PR #75) |
+| 4 | **Manager-fixed duty** (engine + panel type 7). | **Engine (small)** + screen | Merged (PR #75) |
+| 5 | **Three-step layout, ready checklist and result summary.** | Screen only | In progress on `three-steps` |
+| 6 | **Ini animations.** | Screen only | In progress on `three-steps` |
 | 7 | **Show another option**: different seeds, keep the 3 best distinct results. | **Engine (medium)** | |
 | 8 | **Off days "Always together".** | **Engine (medium)** | |
 
