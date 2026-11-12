@@ -208,8 +208,10 @@ test("somebody always off by a Must is said to be off that day by it", () => {
     onDiscard={jest.fn()} onApplied={jest.fn()} />);
   expect(screen.getByText("Night on Fri 9 Oct uncovered. Staff 1 is off that day by a personal rule: "
     + "always off on Friday and Saturday (Must).")).toBeInTheDocument();
-  // Its only gap is named, so there is no "could not be filled" box blaming the rest rules.
+  // Its only gap is named, so there is no "could not be filled" box blaming the rest rules,
+  // and the red box itself says the month is still usable.
   expect(screen.queryByText(/could not be filled/)).toBeNull();
+  expect(screen.getByText("You can apply this and fill them by hand.")).toBeInTheDocument();
   expect(screen.queryByText(/rest rules/)).toBeNull();
 });
 

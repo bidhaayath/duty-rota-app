@@ -401,6 +401,8 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
                   </li>
                 ))}
               </ul>
+              {/* Said here too: the box below may not appear at all. */}
+              <div style={{ marginTop: 4 }}>You can apply this and fill them by hand.</div>
             </div>
           )}
           {/* A gap already named with its Must above is not blamed on the

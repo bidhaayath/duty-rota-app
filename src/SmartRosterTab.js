@@ -1347,6 +1347,8 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
                 </li>
               ))}
             </ul>
+            {/* Said here too: the amber box below may not appear at all. */}
+            <div style={{ marginTop: 4 }}>You can apply this and fill them by hand.</div>
           </div>
         )}
 

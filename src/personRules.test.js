@@ -365,6 +365,7 @@ describe("the Personal rules card", () => {
       return `${day} ${shift.toLowerCase()}`;
     });
     expect(named.length).toBeGreaterThan(0);
+    expect(within(red).getByText("You can apply this and fill them by hand.")).toBeInTheDocument();
     // The amber box, if there is one, lists only gaps nobody's Must is named on.
     const amber = screen.queryByText(/shifts? could not be filled:/);
     if (amber) named.forEach((gap) => expect(amber.parentElement.textContent).not.toMatch(new RegExp(`\\b${gap}\\b`)));
