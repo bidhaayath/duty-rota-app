@@ -27,6 +27,7 @@ import {
 } from "./rosterConfig";
 import { checkSettings, settingsKey } from "./settingsCheck";
 import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
+import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 
@@ -514,8 +515,16 @@ export default function SmartRosterTab({
     background: on ? (colour === T.coral ? "#FBEAE7" : "#D8EEE9") : "#fff",
     color: on ? colour : T.inkSoft,
   });
-  // What every part of the ward's needs is handed: the settings, and the one way to write them.
-  const needs = { rules, setRules, editable: staffEditable, T };
+  /* Taking a setting away rather than writing it: what a choice that means
+     "as before" does, so nothing is left behind. One Undo step, as any write. */
+  const dropRule = (key) => update((d) => {
+    const next = { ...rules };
+    delete next[key];
+    d.rosterRules = next;
+    return d;
+  });
+  // What every part of the ward's needs is handed: the settings, and the ways to write them.
+  const needs = { rules, setRules, dropRule, editable: staffEditable, T };
 
   // The sum lives in rosterConfig.js so Ini warns with the same numbers.
   const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = seniorNeedOf(rules, activeStaff);
@@ -583,7 +592,7 @@ export default function SmartRosterTab({
       )}
 
       {/* ── Who's needed on each shift ── */}
-      <ShiftNeeds {...needs} Card={Card} codes={data.codes} termMany={termMany}>
+      <ShiftNeeds {...needs} Card={Card} codes={data.codes} termMany={termMany} lower={lower}>
         {seniorPerDay > 0 && (
           <p style={{ ...hint, margin: "12px 0 0" }}>
             That is <strong>{seniorPerDay} {seniorPerDay === 1 ? lower : termMany.toLowerCase()} on duty every day</strong>,
@@ -598,7 +607,7 @@ export default function SmartRosterTab({
       <PersonWeek {...needs} Card={Card} codes={data.codes} />
 
       {/* ── What usually gives way first ── */}
-      <GivesWay rules={rules} T={T} Card={Card} />
+      <GivesWay rules={rules} T={T} Card={Card} termMany={termMany} />
 
       {/* ── Exceptions ── */}
       <Card>
@@ -1044,6 +1053,13 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
   const mustGaps = report.shortfalls.filter((s) => s.because);
   // The rest: a gap already named with its Must is not blamed on the rest rules too.
   const otherGaps = report.shortfalls.filter((s) => !s.because);
+  /* In-charge held as a Must and still missing somewhere: said at the top,
+     each with why nobody who can take charge was free, and not again below. */
+  const inChargeMust = rules.ruleStates?.seniors?.state === "hard";
+  const noInCharge = inChargeMust ? (report.seniorGaps || []).map((g) => noInChargeText({
+    ...g, termOne, day: prettyWeekday(g.date),
+    reasons: whyNoInCharge({ ...g, cells: proposal.cells, data, rules, staff: activeStaff, from: proposal.from, to: proposal.to }),
+  })) : [];
 
   return (
     <>
@@ -1076,6 +1092,16 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
           </div>
         )}
 
+        {noInCharge.length > 0 && (
+          <div style={urgent}>
+            <strong>No {termOne} where one is a Must:</strong>
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {noInCharge.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+            <div style={{ marginTop: 4 }}>You can apply this and change it by hand.</div>
+          </div>
+        )}
+
         {otherGaps.length > 0 && (
           <div style={note}>
             <strong>{otherGaps.length} {mustGaps.length ? "other " : ""}shift{otherGaps.length === 1 ? "" : "s"} could not be filled:</strong>{" "}
@@ -1089,7 +1115,7 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
           </div>
         )}
 
-        {report.seniorGaps?.length > 0 && (
+        {!inChargeMust && report.seniorGaps?.length > 0 && (
           <div style={note}>
             <strong>{report.seniorGaps.length} shift{report.seniorGaps.length === 1 ? " has" : "s have"} no {lower} on duty:</strong>{" "}
             {report.seniorGaps.map((s) => `${dayOf(s.date)} ${s.shift}`).join(", ")}.{" "}

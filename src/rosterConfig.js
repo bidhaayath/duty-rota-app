@@ -88,7 +88,10 @@ export const seniorTermsOf = (rules) => {
 const SENIOR_SHIFTS = ["morning", "afternoon", "evening", "night"];
 export const seniorNeedOf = (rules, staff) => {
   const seniorCount = staff.filter((s) => rules.seniorStaff.includes(s.id) && !rules.skipStaff.includes(s.id)).length;
-  const seniorPerDay = SENIOR_SHIFTS.reduce((n, sh) => n + ((rules.coverage[sh]?.min || 0) > 0 ? (rules.seniorCover[sh] || 0) : 0), 0);
+  // Set to Ignore, no in-charge is asked for on any shift.
+  const ignored = rules.ruleStates?.seniors?.state === "disabled";
+  const seniorPerDay = ignored ? 0
+    : SENIOR_SHIFTS.reduce((n, sh) => n + ((rules.coverage[sh]?.min || 0) > 0 ? (rules.seniorCover[sh] || 0) : 0), 0);
   const perPerson = rules.weeklyDuties?.max || 5;
   return { seniorCount, seniorPerDay, perPerson, needed: Math.ceil((seniorPerDay * 7) / perPerson) };
 };
@@ -275,6 +278,8 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     maxBlock: rules.blockDays,
     // Runs of at least this many when someone gets more than one; absent = no ask.
     blockTogether: rules.blockTogether,
+    // Off days "Together is fine": only said when chosen, so a ward that never chose is given exactly what it was.
+    ...(rules.singleOffDays === false ? { singleOffDays: false } : {}),
     // One person's own limits, laid over the ward's; absent = everyone follows the ward.
     personRules: rules.personRules,
     maxConsecutiveDays: rules.maxDaysOn ?? 5,

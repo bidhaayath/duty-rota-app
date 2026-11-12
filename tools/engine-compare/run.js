@@ -3,10 +3,12 @@
      node tools/engine-compare/run.js              against main
      node tools/engine-compare/run.js --ref HEAD   against the last commit
      node tools/engine-compare/run.js --job rules  only the measured weeks
+     node tools/engine-compare/run.js --job keys   only the strength keys
      node tools/engine-compare/run.js --quick      a small sample, a few minutes
 
    Jobs: same-weeks, same-months (lists that must change nothing), rules
-   (weeks with rules set, counted old against new). Default is all three.
+   (weeks with rules set, counted old against new), keys (each strength key
+   at a level of its own, against the same week without it). Default is all four.
    The work is split into parts that run side by side; the full run takes
    around three quarters of an hour. Results are printed and left in out/. */
 
@@ -23,7 +25,7 @@ const arg = (name, fallback) => {
 };
 const ref = arg("ref", "main");
 const quick = args.includes("--quick");
-const jobs = arg("job", "same-weeks,same-months,rules").split(",");
+const jobs = arg("job", "same-weeks,same-months,rules,keys").split(",");
 const parts = Number(arg("parts", 4));
 
 // The older engine, exactly as that commit has it.
@@ -58,6 +60,7 @@ const merge = (job) => {
   const total = {};
   const add = (into, from) => Object.entries(from).forEach(([k, v]) => {
     if (typeof v === "number") into[k] = (into[k] || 0) + v;
+    else if (typeof v === "string") into[k] = v;            // a name, the same in every part
     else if (Array.isArray(v)) into[k] = [...(into[k] || []), ...v];
     else add(into[k] || (into[k] = {}), v);
   });
@@ -124,6 +127,26 @@ const row = (cells, widths) => cells.map((c, i) => String(c).padEnd(widths[i])).
       ? `\nThe report disagrees with the count in: ${disagree.map(([n, v]) => `${n} (${v.reportDisagrees.length})`).join(", ")} - see out/`
       : "\nThe engine's report matches the count in every week.");
     if (disagree.length) bad = true;
+  }
+  if (jobs.includes("keys")) {
+    const t = merge("keys");
+    const w = [26, 6, 9, 6, 13, 13, 18, 22, 11];
+    const typical = (ms) => { const s = [...ms].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] || 0; };
+    const pair = (a, b) => `${a} → ${b}`;
+    console.log("\nkeys: each strength key at a level of its own, against the same week without it");
+    console.log(row(["key and level", "weeks", "refused", "same", "uncovered", "above Most", "measure",
+      "", "s a week"], w));
+    Object.entries(t).forEach(([name, v]) => {
+      console.log(row([name, v.weeks, pair(v.refusedWithout, v.refusedWith), v.sameCells,
+        pair(v.without.uncovered, v.with.uncovered), pair(v.without.aboveMost, v.with.aboveMost),
+        v.measure, pair(v.without.measure, v.with.measure),
+        pair((typical(v.without.weekMs) / 1000).toFixed(1), (typical(v.with.weekMs) / 1000).toFixed(1))], w));
+    });
+    console.log("\n(each pair is without the key → with it, over the weeks both built; refused = weeks Generate");
+    console.log(" refused; same = weeks with identical cells; s a week = the middle week's seconds. Measures:");
+    console.log(" daysOver = days worked past working days in a row; noInCharge = shift-days short of the");
+    console.log(" in-charge asked for; nightSpread / nonOfficialSpread = most anyone had less the fewest, summed");
+    console.log(" over the weeks; offPairs = off days straight after an off day)");
   }
   console.log(`\n${Math.round((Date.now() - began) / 60000)} minutes.`);
   process.exit(bad ? 1 : 0);

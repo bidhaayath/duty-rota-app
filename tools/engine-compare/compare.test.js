@@ -235,3 +235,124 @@ only("rules")("weeks with rules set: old and new, counted from the finished rota
   }
   save("rules", tally);
 }, 7200000);
+
+/* ── The strength keys of stage 2b ──
+   Each key at a level of its own, against the same week built without it.
+   Both are built by the engine in src: a ward without the key is proven to
+   build exactly as main (the same-weeks job), and the old engine already
+   honours singleOffDays, so it could not stand in for "without" there.
+   The in-charge runs use the seeded ward with an in-charge asked for on
+   Mornings and Nights and every third person able to take charge; two of
+   the days-in-a-row runs use it with working days in a row set to 3. */
+const LEVEL = {
+  must: { state: "hard", priority: 1 }, protectMost: { state: "soft", priority: 1 },
+  protect: { state: "soft", priority: 2 }, bendFirst: { state: "soft", priority: 4 },
+  ignore: { state: "disabled", priority: 1 },
+};
+const withStates = (data, states) => ({
+  ...data, rosterRules: { ...data.rosterRules, ruleStates: { ...(data.rosterRules.ruleStates || {}), ...states } },
+});
+const withSeniors = (data) => ({
+  ...data,
+  rosterRules: {
+    ...data.rosterRules,
+    seniorStaff: data.staff.filter((_, i) => i % 3 === 0).map((s) => s.id),
+    seniorCover: { morning: 1, afternoon: 0, evening: 0, night: 1 },
+  },
+});
+const KEY_RUNS = [
+  // name, which ward, the change, the measure it controls
+  // At the seeded wards' 5 days a week rarely runs past; at 3, the key has something to hold.
+  ["days in a row Must", "plain", (d) => withStates(d, { daysInRow: LEVEL.must }), "daysOver"],
+  ["days in a row Ignore", "plain", (d) => withStates(d, { daysInRow: LEVEL.ignore }), "daysOver"],
+  ["days in a row Must (3)", "tight", (d) => withStates(d, { daysInRow: LEVEL.must }), "daysOver"],
+  ["days in a row Ignore (3)", "tight", (d) => withStates(d, { daysInRow: LEVEL.ignore }), "daysOver"],
+  ["in-charge Must", "seniors", (d) => withStates(d, { seniors: LEVEL.must }), "noInCharge"],
+  ["in-charge Protect", "seniors", (d) => withStates(d, { seniors: LEVEL.protect }), "noInCharge"],
+  ["in-charge Bend first", "seniors", (d) => withStates(d, { seniors: LEVEL.bendFirst }), "noInCharge"],
+  ["in-charge Ignore", "seniors", (d) => withStates(d, { seniors: LEVEL.ignore }), "noInCharge"],
+  ["nights Protect most", "plain", (d) => withStates(d, { fairNights: LEVEL.protectMost }), "nightSpread"],
+  ["nights Bend first", "plain", (d) => withStates(d, { fairNights: LEVEL.bendFirst }), "nightSpread"],
+  ["nights Ignore", "plain", (d) => withStates(d, { fairNights: LEVEL.ignore }), "nightSpread"],
+  ["non-official Protect most", "plain", (d) => withStates(d, { fairNonOfficial: LEVEL.protectMost }), "nonOfficialSpread"],
+  ["non-official Bend first", "plain", (d) => withStates(d, { fairNonOfficial: LEVEL.bendFirst }), "nonOfficialSpread"],
+  ["non-official Ignore", "plain", (d) => withStates(d, { fairNonOfficial: LEVEL.ignore }), "nonOfficialSpread"],
+  ["off days together", "plain", (d) => ({ ...d, rosterRules: { ...d.rosterRules, singleOffDays: false } }), "offPairs"],
+];
+
+/* What each key controls, counted from the finished week:
+     daysOver           days worked past "working days in a row"
+     noInCharge         shift-days with fewer in-charge than the ward's numbers ask
+     nightSpread        most Nights anyone had less the fewest
+     nonOfficialSpread  the same, for duty on non-official days
+     offPairs           off days straight after an off day                  */
+function keyMeasures(cfg, out) {
+  const dates = days(cfg.from, Math.round((new Date(cfg.to) - new Date(cfg.from)) / 86400000) + 1);
+  const staff = cfg.staff.filter((s) => !(cfg.skipStaff || []).includes(s.id));
+  const cell = (id, d) => out.cells[`${id}|${d}`];
+  const limit = cfg.maxConsecutiveDays ?? 4;
+  let daysOver = 0, offPairs = 0;
+  const nights = [], nonOff = [];
+  const nonOfficial = new Set(cfg.nonOfficialDates || []);
+  for (const s of staff) {
+    let run = 0, n = 0, no = 0;
+    dates.forEach((d, i) => {
+      const c = cell(s.id, d);
+      run = c && c !== "off" ? run + 1 : 0;
+      if (run > limit) daysOver += 1;
+      if (c === "off" && i > 0 && cell(s.id, dates[i - 1]) === "off") offPairs += 1;
+      if (c === "night") n += 1;
+      if (c && c !== "off" && nonOfficial.has(d)) no += 1;
+    });
+    nights.push(n); nonOff.push(no);
+  }
+  const seniors = new Set((cfg.seniorStaff || []).map(String));
+  let noInCharge = 0;
+  for (const d of dates) {
+    for (const sh of SHIFTS) {
+      if ((cfg.coverage?.[sh]?.min || 0) <= 0) continue;
+      const need = cfg.seniorCover?.[sh] || 0;
+      const led = staff.filter((s) => cell(s.id, d) === sh && seniors.has(String(s.id))).length;
+      if (led < need) noInCharge += need - led;
+    }
+  }
+  const spread = (xs) => (xs.length ? Math.max(...xs) - Math.min(...xs) : 0);
+  const { uncovered, aboveMost } = recount(cfg, out);
+  return { uncovered, aboveMost, daysOver, noInCharge, nightSpread: spread(nights), nonOfficialSpread: spread(nonOff), offPairs };
+}
+
+only("keys")("strength keys: each at a level of its own, against the same week without it", () => {
+  const tally = {};
+  const blank = () => ({ uncovered: 0, aboveMost: 0, measure: 0, weekMs: [] });
+  for (let seed = 1; seed <= RULE_WEEKS; seed++) {
+    if (seed % OF !== PART) continue;
+    const { data, start } = seededWard(seed);
+    const wards = {
+      plain: data, seniors: withSeniors(data),
+      tight: { ...data, rosterRules: { ...data.rosterRules, maxDaysOn: 3 } },
+    };
+    const without = {};
+    for (const [w, d] of Object.entries(wards)) {
+      const cfg = steady(weekConfig(d, start));
+      without[w] = { cfg, ...timed(newE, cfg) };
+    }
+    for (const [name, w, change, measure] of KEY_RUNS) {
+      const cfg = steady(weekConfig(change(wards[w]), start));
+      const run = timed(newE, cfg), base = without[w];
+      const t = tally[name] || (tally[name] = {
+        measure, weeks: 0, refusedWithout: 0, refusedWith: 0, sameCells: 0, without: blank(), with: blank(),
+      });
+      t.weeks += 1;
+      if (!base.out.ok) t.refusedWithout += 1;
+      if (!run.out.ok) t.refusedWith += 1;
+      if (!base.out.ok || !run.out.ok) continue;
+      if (JSON.stringify(run.out.cells) === JSON.stringify(base.out.cells)) t.sameCells += 1;
+      const a = keyMeasures(base.cfg, base.out), b = keyMeasures(cfg, run.out);
+      for (const [side, m, ms] of [["without", a, base.ms], ["with", b, run.ms]]) {
+        t[side].uncovered += m.uncovered; t[side].aboveMost += m.aboveMost; t[side].measure += m[measure];
+        t[side].weekMs.push(ms);
+      }
+    }
+  }
+  save("keys", tally);
+}, 7200000);

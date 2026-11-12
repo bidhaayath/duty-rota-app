@@ -22,6 +22,7 @@ about three quarters of an hour. The results are printed at the end.
 | `node tools/engine-compare/run.js --ref HEAD` | Against the last commit instead |
 | `node tools/engine-compare/run.js --quick` | A small sample, a few minutes |
 | `node tools/engine-compare/run.js --job rules` | Only the measured weeks |
+| `node tools/engine-compare/run.js --job keys` | Only the strength keys |
 | `node tools/engine-compare/run.js --parts 2` | Fewer parts at once, for a slower laptop |
 
 It exits with an error if a list that should change nothing changed
@@ -52,6 +53,19 @@ waits.
 
 All of it is counted from the finished rota, not read from the engine's
 report. The report is then checked against the count.
+
+**Strength keys** (`keys`): the same 63 weeks, each built once as it is and
+once with one of the stage 2b keys set to a level of its own: working days
+in a row (`daysInRow`) at Must and Ignore, also on the ward with the limit
+set to 3; in-charge on every shift (`seniors`) at Must, Protect, Bend first
+and Ignore, on the ward with an in-charge asked for on Mornings and Nights;
+sharing nights (`fairNights`) and non-official days (`fairNonOfficial`)
+fairly at Protect most, Bend first and Ignore; and off days "Together is
+fine" (`singleOffDays: false`). Both builds use the engine in `src`: without
+the key it is proven identical to `main` by `same-weeks`. For each it prints,
+without the key → with it: weeks refused, weeks with identical cells,
+uncovered shifts, shift-days above Most, the measure the key controls, and
+the middle week's seconds.
 
 ## The baseline
 

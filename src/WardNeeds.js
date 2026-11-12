@@ -8,7 +8,7 @@
    The pure helpers are exported for the tests.                          */
 
 import React, { useState } from "react";
-import { Plus, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, X, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 import { SHIFTS } from "./rosterEngine";
 import { DEFAULT_RULES, LOOK_BACK_ALL } from "./rosterConfig";
 
@@ -93,8 +93,19 @@ export const followText = (r) => {
    first. Only what is actually set: a shift with no most has nothing to
    bend. The Must column always holds what the engine never trades away. */
 export const COLUMNS = ["soft4", "soft3", "soft2", "soft1", "must"];
-export function givesWay(rules) {
+/* What a strength never saved behaves as, and so what its box shows. Any
+   of these, once saved, builds exactly as never saving it. */
+export const ABSENT = {
+  seniors: { state: "soft", priority: 1 },
+  fairNights: { state: "soft", priority: 2 },
+  fairNonOfficial: { state: "soft", priority: 2 },
+};
+// Strengths with no Must: a saved Must counts as Protect most.
+const NO_MUST = ["fairNights", "fairNonOfficial"];
+
+export function givesWay(rules, { termMany = "Seniors" } = {}) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
+  const asksSenior = run.some((sh) => (rules.coverage?.[sh]?.min || 0) > 0 && (rules.seniorCover?.[sh] || 0) > 0);
   const columns = Object.fromEntries(COLUMNS.map((c) => [c, []]));
   const off = [];
   const own = rules.personRules || [];
@@ -103,15 +114,22 @@ export function givesWay(rules) {
     ...run.filter((sh) => rules.weeklyMax?.[sh] != null).map((sh) => [`Most ${LABEL[sh]}s a week`, `weeklyCaps:${sh}`]),
     ...(rules.weeklyMin?.off != null ? [["Fewest off days", "offMin"]] : []),
     ...(rules.weeklyMax?.off != null ? [["Most off days", "offMax"]] : []),
-    ["In a row, and working days in a row", "workPattern"],
+    // Working days in a row is its own rule once it has a strength of its own.
+    ...(rules.ruleStates?.daysInRow
+      ? [["In a row, every shift", "workPattern"], ["Working days in a row", "daysInRow"]]
+      : [["In a row, and working days in a row", "workPattern"]]),
     ...((rules.sequenceRules || []).length ? [["What may follow what", "sequence"]] : []),
+    ...(asksSenior ? [[`${termMany} on every shift`, "seniors"]] : []),
+    ...(run.includes("night") ? [["Sharing nights fairly", "fairNights"]] : []),
+    ["Sharing non-official days fairly", "fairNonOfficial"],
   ];
   columns.must.push("Staff numbers");
   if (rules.weeklyDuties?.max != null) columns.must.push("Working days (most)");
   columns.must.push("Approved duty requests");
   if (own.some((r) => r && r.strength === "hard")) columns.must.push("People's own Must rules");
   entries.forEach(([text, key]) => {
-    const level = levelOf(rules.ruleStates?.[key]);
+    const raw = levelOf(rules.ruleStates?.[key] ?? ABSENT[key]);
+    const level = raw === "must" && NO_MUST.includes(key) ? "soft1" : raw;
     (level === "ignore" ? off : columns[level]).push(text);
   });
   return { columns, off };
@@ -126,9 +144,16 @@ const fieldStyle = (T, editable) => ({
 
 /* The strength box for one ruleStates key, tinted by its level. Only a real
    change is written; re-picking the same option saves nothing. */
-export function StrengthSelect({ value, onPick, label, editable, T }) {
-  const cur = scaleIdOf(value);
-  const known = STRENGTH_SCALE.some((o) => o.id === cur);
+/* `fallback` is what a key that has never been saved behaves as, and so
+   what the box shows for it: picking that same level saves nothing, and
+   saving it behaves exactly as not having saved it. */
+export function StrengthSelect({ value, fallback, onPick, label, editable, T, noMust = false }) {
+  // Fairness has no Must: one saved anyway is read, and shown, as Protect most.
+  const saved = value ?? fallback;
+  const shown = noMust && saved?.state === "hard" ? { state: "soft", priority: 1 } : saved;
+  const cur = scaleIdOf(shown);
+  const scale = noMust ? STRENGTH_SCALE.filter((o) => o.id !== "must") : STRENGTH_SCALE;
+  const known = scale.some((o) => o.id === cur);
   return (
     <select aria-label={label} value={cur} disabled={!editable}
       onChange={(e) => {
@@ -136,9 +161,9 @@ export function StrengthSelect({ value, onPick, label, editable, T }) {
         if (!pick || pick.id === cur) return;
         onPick({ state: pick.state, priority: pick.priority });
       }}
-      style={{ ...fieldStyle(T, editable), background: tintOf(value) }}>
-      {STRENGTH_SCALE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-      {!known && <option value={cur}>Bend (P{value?.priority})</option>}
+      style={{ ...fieldStyle(T, editable), background: tintOf(shown) }}>
+      {scale.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      {!known && <option value={cur}>Bend (P{shown?.priority})</option>}
     </select>
   );
 }
@@ -170,6 +195,17 @@ function Stepper({ label, value, onChange, min = 0, max = 99, none, editable, T 
       </output>
       <button type="button" aria-label={`${label}: one more`} disabled={!on(canUp)} style={btn(on(canUp))}
         onClick={() => onChange(up)}>+</button>
+    </span>
+  );
+}
+
+/* Said under a box set to Must where Must costs cover: the same amber note
+   as under a personal "at least" set to Must. */
+function MustCost({ children }) {
+  return (
+    <span style={{ fontSize: 12, color: "#8A5A0F", display: "flex", gap: 6, alignItems: "flex-start", lineHeight: 1.45 }}>
+      <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+      <span>{children}</span>
     </span>
   );
 }
@@ -234,8 +270,10 @@ const swatch = (colour) => ({
    with a number saved. A shift saved as 0 and 0 is not run: it is one
    quiet line, and "Turn on" only shows its card — nothing is written until
    a number changes. */
-export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany, children }) {
+export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany, lower = "senior", children }) {
   const [turnedOn, setTurnedOn] = useState([]);
+  // Set to Ignore: the numbers stay saved, but nothing asks for them.
+  const seniorsOff = rules.ruleStates?.seniors?.state === "disabled";
   const cov = (sh) => rules.coverage?.[sh] || {};
   const notRun = (sh) => (cov(sh).min || 0) === 0 && cov(sh).max === 0;
   const shown = SHIFTS.filter((sh) => (codes || []).some((c) => c.counts === sh) || !notRun(sh));
@@ -278,7 +316,7 @@ export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany
             ))}
             {row(`${termMany}, at least`, (
               <Stepper label={`${LABEL[sh]}: ${termMany.toLowerCase()}, at least`} value={rules.seniorCover?.[sh] ?? 0}
-                max={9} editable={editable && (cov(sh).min || 0) > 0} T={T}
+                max={9} editable={editable && !seniorsOff && (cov(sh).min || 0) > 0} T={T}
                 onChange={(n) => setSeniorCover(sh, n)} />
             ))}
           </div>
@@ -301,7 +339,25 @@ export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany
         <span style={{ fontSize: 14, flex: "1 1 240px" }}>Staff numbers (at least / at most)</span>
         <span style={mustChip}>Must — always</span>
       </div>
-      {children}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", marginTop: 10 }}>
+        <span style={{ fontSize: 14, flex: "1 1 240px", minWidth: 0 }}>{termMany} on every shift</span>
+        <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
+          <StrengthSelect label={`${termMany} on every shift: if it can't all fit`} value={rules.ruleStates?.seniors}
+            fallback={ABSENT.seniors} editable={editable} T={T}
+            onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, seniors: v } })} />
+          {rules.ruleStates?.seniors?.state === "hard" && (
+            <MustCost>
+              Must can leave a shift short rather than go without {/^[aeiou]/i.test(lower) ? "an" : "a"} {lower}.
+            </MustCost>
+          )}
+        </span>
+      </div>
+      {seniorsOff && (
+        <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "6px 0 0" }}>
+          Switched off: no {termMany.toLowerCase()} asked for on any shift.
+        </p>
+      )}
+      {!seniorsOff && children}
     </Card>
   );
 }
@@ -317,12 +373,19 @@ const lookBackHint = (days) => {
   return `Fair shares count duties from the last ${days} days, so someone who did a lot of nights recently gets fewer. Rest after last week's duties is always checked.`;
 };
 
-export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
+export function PersonWeek({ rules, setRules, dropRule, editable, T, Card, codes }) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
+  // The shift the "at least" hint is said with: Night where the ward runs it.
+  const example = run.includes("night") ? "night" : (run[0] || "night");
   const field = fieldStyle(T, editable);
   const setIn = (group, key, n) => setRules({ [group]: { ...rules[group], [key]: n } });
-  const strength = (key, label) => (
-    <StrengthSelect label={label} value={rules.ruleStates?.[key]} editable={editable} T={T}
+  // Fairness the ward can set the strength of: nights only where it runs them.
+  const fairRows = [
+    ...(run.includes("night") ? [["fairNights", "Share nights fairly"]] : []),
+    ["fairNonOfficial", "Share non-official days (Fridays and holidays) fairly"],
+  ];
+  const strength = (key, label, fallback) => (
+    <StrengthSelect label={label} value={rules.ruleStates?.[key]} fallback={fallback} editable={editable} T={T}
       onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, [key]: v } })} />
   );
   const most = { text: "No limit", down: 7, reachable: true };
@@ -340,7 +403,7 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
   const inRow = (sh) => {
     const fewest = rules.blockTogether?.[sh], longest = rules.blockDays?.[sh];
     const match = inRowOf(fewest, longest);
-    return (
+    const box = (
       <select aria-label={`${LABEL[sh]}: in a row`} value={match ? match.id : "custom"} disabled={!editable} style={field}
         onChange={(e) => {
           const opt = IN_ROW.find((o) => o.id === e.target.value);
@@ -352,6 +415,16 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
         {!match && <option value="custom">{customInRow(fewest, longest)}</option>}
       </select>
     );
+    // Only where a choice keeps a shift together does it need saying what that means.
+    const together = match && (match.id === "pairs" || match.id === "two3");
+    return together ? (
+      <>
+        {box}
+        <span style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.45 }}>
+          Two side by side; a single one is still fine, so everyone gets one.
+        </span>
+      </>
+    ) : box;
   };
   /* Each row in its duty code's colour: the name on a tag of that colour,
      and a light wash of it behind the row. */
@@ -373,9 +446,11 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
     <Card>
       <h3 style={sectionTitle}>Each person, each week</h3>
       <p style={{ fontSize: 13, color: T.inkSoft, margin: "4px 0 6px", lineHeight: 1.6 }}>
-        The same for everyone, unless you give someone their own rule below. "At least 1 Night" means
-        everyone gets a Night every week. "In pairs" puts two side by side, but a single one is still
-        fine so everyone gets one.
+        What each person gets in a week. Everyone follows this unless they have their own rule.
+      </p>
+      {/* Said once for the whole table, with a shift the ward runs. */}
+      <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "0 0 2px", lineHeight: 1.5 }}>
+        At least 1 {LABEL[example]} = everyone gets {/^[AEIOU]/.test(LABEL[example]) ? "an" : "a"} {LABEL[example]} every week.
       </p>
       {run.map((sh) => personRow(sh, LABEL[sh], colourFor(rules, codes, sh), <>
         {cell("At least", <Stepper label={`Each person: ${LABEL[sh]}, at least`} value={rules.weeklyMin?.[sh]}
@@ -390,8 +465,23 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
           max={7} editable={editable} T={T} onChange={(n) => setIn("weeklyMin", "off", n)} />)}
         {cell("At most", <Stepper label="Each person: off days, at most" value={rules.weeklyMax?.off}
           max={7} none={most} editable={editable} T={T} onChange={(n) => setIn("weeklyMax", "off", n)} />)}
-        {cell("In a row", <span style={{ ...field, display: "flex", alignItems: "center", cursor: "default",
-                                         background: "#fff", color: T.inkSoft }}>Spread apart</span>, "180px")}
+        {cell("In a row", <>
+          {/* Spread apart is how it always was: choosing it again takes the setting away. */}
+          <select aria-label="Off days: in a row" value={rules.singleOffDays === false ? "together" : "apart"}
+            disabled={!editable} style={field}
+            onChange={(e) => {
+              if (e.target.value === "together") setRules({ singleOffDays: false });
+              else if ("singleOffDays" in rules) dropRule("singleOffDays");
+            }}>
+            <option value="apart">Spread apart</option>
+            <option value="together">Together is fine</option>
+          </select>
+          {rules.singleOffDays !== false && rules.ruleStates?.workPattern?.state === "disabled" && (
+            <span style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.45 }}>
+              In a row, every shift is set to Ignore, so off days are not kept apart.
+            </span>
+          )}
+        </>, "180px")}
         {cell("If it can't all fit", strength("offMin", "Off days: if it can't all fit"), "170px")}
       </>)}
       <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "4px 0 0", lineHeight: 1.6 }}>
@@ -399,6 +489,20 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
       </p>
 
       <div style={{ marginTop: 14, borderTop: `1px solid ${T.line}` }}>
+        {/* One strength for In a row on every shift: the working pattern. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
+                      borderBottom: `1px solid ${T.line}` }}>
+          <span style={{ display: "grid", gap: 2, flex: "1 1 200px", minWidth: 0 }}>
+            <span style={{ fontSize: 15 }}>In a row, every shift</span>
+            <span style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
+              How strictly the "In a row" choices above are kept, such as Nights in pairs or "Up to 4 in a row".
+            </span>
+          </span>
+          <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
+            {strength("workPattern", "In a row, every shift: if it can't all fit")}
+            <span style={{ fontSize: 12, color: T.inkSoft }}>Ignore also stops keeping off days apart.</span>
+          </span>
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
                       borderBottom: `1px solid ${T.line}` }}>
           <span style={{ fontSize: 15, flex: "1 1 200px", minWidth: 0 }}>
@@ -430,10 +534,27 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
           <Stepper label="Working days in a row, at most" value={rules.maxDaysOn ?? 5} min={1} max={6}
             editable={editable} T={T} onChange={(n) => setRules({ maxDaysOn: n })} />
           <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
-            {strength("workPattern", "Working days in a row: if it can't all fit")}
-            <span style={{ fontSize: 12, color: T.inkSoft }}>Shared with In a row on every shift.</span>
+            {/* Never saved: it is the working pattern's, and says so. */}
+            {strength("daysInRow", "Working days in a row: if it can't all fit", rules.ruleStates?.workPattern)}
+            {!rules.ruleStates?.daysInRow && (
+              <span style={{ fontSize: 12, color: T.inkSoft }}>Follows In a row until you change it.</span>
+            )}
+            {(rules.ruleStates?.daysInRow ?? rules.ruleStates?.workPattern)?.state === "hard" && (
+              <MustCost>Must can leave shifts uncovered rather than allow a longer run.</MustCost>
+            )}
           </span>
         </div>
+        {fairRows.map(([key, text]) => (
+          <div key={key} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
+                                  borderBottom: `1px solid ${T.line}` }}>
+            <span style={{ fontSize: 15, flex: "1 1 260px", minWidth: 0 }}>{text}</span>
+            <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
+              <StrengthSelect label={`${text}: if it can't all fit`} value={rules.ruleStates?.[key]} fallback={ABSENT[key]}
+                noMust editable={editable} T={T}
+                onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, [key]: v } })} />
+            </span>
+          </div>
+        ))}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0" }}>
           <label htmlFor="sr-lookback" style={{ display: "grid", gap: 2, flex: "1 1 260px", minWidth: 0 }}>
             <span style={{ fontSize: 15 }}>Look back at past duties</span>
@@ -459,8 +580,8 @@ const COLUMN_HINT = {
   soft4: "Bent before anything else", soft3: "Bent when needed", soft2: "Kept unless it would leave a gap",
   soft1: "Bent only as a last resort", must: "Always kept, even if a shift goes short",
 };
-export function GivesWay({ rules, T, Card }) {
-  const { columns, off } = givesWay(rules);
+export function GivesWay({ rules, T, Card, termMany }) {
+  const { columns, off } = givesWay(rules, { termMany });
   return (
     <Card>
       <h3 style={sectionTitle}>When it can't all fit, what usually gives way first</h3>

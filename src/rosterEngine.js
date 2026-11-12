@@ -140,7 +140,22 @@ export function seniorTerms(cfg) {
   return { one, many, a, One: cap(one), Many: cap(many) };
 }
 
+/* How firmly the ward holds its in-charge numbers: ruleStates.seniors.
+   Never saved, Must and Protect most are held as they always have been —
+   the slot is searched for by bending any Try rule, and too few in-charge
+   staff stops the week before it is made. Protect, Bend if needed and Bend
+   first search only by bending Try rules weaker than themselves (`below`
+   is their priority), and too few is said but the week is still made.
+   Ignore asks for no in-charge at all: see seniorsNeededOn.             */
+function seniorHold(cfg) {
+  const s = cfg.ruleStates?.seniors;
+  if (!s?.state || s.state === 'hard') return { refuse: true, below: null };
+  const p = s.priority ?? 2;
+  return p <= 1 ? { refuse: true, below: null } : { refuse: false, below: p };
+}
+
 export function seniorsNeededOn(cfg, shift) {
+  if (cfg.ruleStates?.seniors?.state === 'disabled') return 0;
   const c = cfg.seniorCover;
   if (c == null) return 0;
   if ((cfg.coverage?.[shift]?.min || 0) <= 0) return 0;
@@ -291,14 +306,19 @@ export function checkFeasible(cfg) {
   const T = seniorTerms(cfg);
   const seniors = usable.filter((s) => isSenior(cfg, s));
   const seniorPerDay = SHIFTS.reduce((n, sh) => n + seniorsNeededOn(cfg, sh), 0);
+  /* Too few in-charge staff stops the week where the ward holds its
+     in-charge numbers firmly: never saved, Must or Protect most. At a
+     weaker level it is said, and the week is still made. */
+  const seniorIssue = (msg) => (seniorHold(cfg).refuse ? problems : warnings).push(msg);
+
   if (seniorPerDay > 0) {
     if (!seniors.length) {
-      problems.push(
+      seniorIssue(
         `You have asked for ${T.a} ${T.one} on duty, but nobody is marked as ${T.a} ${T.one}. ` +
         `Tick "${T.One}" for the staff who can take charge of a shift.`
       );
     } else if (seniorPerDay > seniors.length) {
-      problems.push(
+      seniorIssue(
         `Every day needs ${seniorPerDay} ${T.many} on duty at once, but only ` +
         `${seniors.length} ${seniors.length === 1 ? 'person is' : 'people are'} marked as ` +
         `${seniors.length === 1 ? `${T.a} ${T.one}` : T.many}. Mark ${seniorPerDay - seniors.length} ` +
@@ -316,7 +336,7 @@ export function checkFeasible(cfg) {
         return !only || !only.length || only.includes(sh);
       });
       if (eligible.length < need) {
-        problems.push(
+        seniorIssue(
           `${sh}: needs ${need} ${need === 1 ? T.one : T.many}, but only ${eligible.length} ` +
           `${eligible.length === 1 ? `${T.one} is` : `${T.many} are`} allowed to do ${sh} duties. ` +
           `Check the "Only these shifts" settings, or mark another ${T.one}.`
@@ -324,7 +344,7 @@ export function checkFeasible(cfg) {
       }
       const cover = cfg.coverage?.[sh]?.max;
       if (cover != null && need > cover) {
-        problems.push(
+        seniorIssue(
           `${sh}: needs ${need} ${need === 1 ? T.one : T.many} but never runs more than ` +
           `${cover} ${cover === 1 ? 'person' : 'people'}. Raise the ${sh} maximum, or lower ` +
           `the ${T.one} requirement.`
@@ -646,13 +666,26 @@ function costWeights(cfg) {
   w.restriction = HARD;
   w.absMax = HARD;
 
+  // Sharing nights, and non-official days, fairly: priced as always at every level but Ignore.
+  w.fairNight = R.fairNights?.state === 'disabled' ? 0 : w.fair;
+  w.fairNonOfficial = R.fairNonOfficial?.state === 'disabled' ? 0 : w.fair;
+
+  // A shift with nobody in charge: 400 at every Try level, as always; a Must's price as a Must.
+  const seniors = R.seniors?.state;
+  if (seniors === 'hard') w.senior = HARD;
+  else if (seniors === 'disabled') w.senior = 0;
+
   const seq = stateOf('sequence');
   if (seq === 'hard') { w.sequence = HARD; w.mustRule = 400; }
   else if (seq === 'disabled') { w.sequence = 0; w.mustRule = 0; }
 
   const pattern = stateOf('workPattern');
-  if (pattern === 'hard') { w.block = HARD; w.consecutive = HARD; }
-  else if (pattern === 'disabled') { w.block = 0; w.consecutive = 0; w.doubleOff = 0; }
+  if (pattern === 'hard') w.block = HARD;
+  else if (pattern === 'disabled') { w.block = 0; w.doubleOff = 0; }
+  // Working days in a row: its own strength where one is saved, else the working pattern's.
+  const days = R.daysInRow?.state || pattern;
+  if (days === 'hard') w.consecutive = HARD;
+  else if (days === 'disabled') w.consecutive = 0;
 
   const offMin = stateOf('offMin');
   if (offMin === 'hard') w.offMin = HARD;
@@ -1245,7 +1278,9 @@ export function auditRoster(cfg, ctx, cells) {
         if (v < lo) lo = v;
         if (v > hi) hi = v;
       }
-      if (hi > lo) cost += W.fair * (hi - lo);
+      // A measure the ward has set to Ignore costs nothing; any other is priced as always.
+      const weight = key === 'night' ? W.fairNight : key === 'nonOfficial' ? W.fairNonOfficial : W.fair;
+      if (hi > lo) cost += weight * (hi - lo);
     }
   }
 
@@ -2078,17 +2113,33 @@ function buildOnce(cfg, seed, ctx) {
         // priority: a ward may guard its night limit fiercely while letting
         // the morning limit stretch.
         const capKey = `weeklyCaps:${shift}`;
-        const relaxable = [capKey, 'workPattern', 'offMin', 'sequence']
+        /* Working days in a row has a strength of its own once one is saved
+           that differs from the working pattern's. Saved the same, or not
+           at all, the two are one rule, held and bent together as always. */
+        const daysOwn = !!R.daysInRow?.state && (R.daysInRow.state !== stateOf('workPattern')
+          || (R.daysInRow.state === 'soft' && prioOf('daysInRow') !== prioOf('workPattern')));
+        const daysKey = daysOwn ? 'daysInRow' : 'workPattern';
+        const relaxable = [capKey, 'workPattern', ...(daysOwn ? ['daysInRow'] : []), 'offMin', 'sequence']
           .filter((k) => stateOf(k) === 'soft')
           .sort((a, b) => prioOf(b) - prioOf(a));      // P4 yields first
         // People's own Try rules give way before any of the ward's.
         if (ownTry) relaxable.unshift('personal');
+        /* An in-charge held at Protect or weaker is only searched for by
+           bending what gives way before it — people's own Try rules, and
+           the ward's Try rules at a weaker level. Past that the search
+           stops, the gap is recorded, and the place goes to whoever is free. */
+        const { below } = seniorHold(cfg);
+        const seniorSteps = below == null ? Infinity : (() => {
+          const i = relaxable.findIndex((k) => k !== 'personal' && prioOf(k) <= below);
+          return i < 0 ? relaxable.length : i;
+        })();
 
         let candidates = [];
         let usedLevel = 0;
         let yielded = [];
         // Each step drops one more soft rule; the last step drops everything.
         for (let step = 0; step <= relaxable.length + 1; step++) {
+          if (needSenior && step > seniorSteps) { candidates = []; break; }
           const dropped = new Set(relaxable.slice(0, step));
           const lastResort = step > relaxable.length;
           candidates = available.filter((s) => {
@@ -2127,6 +2178,9 @@ function buildOnce(cfg, seed, ctx) {
             if (stateOf('workPattern') !== 'disabled' && !dropped.has('workPattern')
                 && (!lastResort || stateOf('workPattern') === 'hard')) {
               if (runOf(s.id, shift, date) >= maxBlock(s.id, shift)) return false;
+            }
+            if (stateOf(daysKey) !== 'disabled' && !dropped.has(daysKey)
+                && (!lastResort || stateOf(daysKey) === 'hard')) {
               if (workedRun(s.id, date) >= maxDaysOn) return false;
             }
             if (!singleShift && stateOf('offMin') !== 'disabled' && !dropped.has('offMin')
@@ -2147,7 +2201,7 @@ function buildOnce(cfg, seed, ctx) {
         }
         if (usedLevel > 0 && candidates.length) {
           const NICE = {
-            workPattern: 'working pattern', offMin: 'off days', sequence: 'duty rule',
+            workPattern: 'working pattern', daysInRow: 'days in a row', offMin: 'off days', sequence: 'duty rule',
             personal: 'personal rules',
           };
           const label = (k) => k.startsWith('weeklyCaps:')
@@ -2205,8 +2259,23 @@ function buildOnce(cfg, seed, ctx) {
            does the next measure get a say. That is the staged behaviour the
            specification asks for, applied to who gets picked. */
         const F = cfg.fairnessStates || {};
-        const fState = (k) => F[k]?.state ?? (cfg.fairness?.[k] === false ? 'disabled' : 'soft');
-        const fPrio = (k) => F[k]?.priority ?? 2;
+        /* Sharing nights, and non-official days, fairly have the ward's own
+           strength where one is saved: Ignore leaves the measure out, and
+           Protect most to Bend first set its place among the others, 1 to 4
+           (there is no Must for fairness: one saved is read as Protect most).
+           Never saved, each is as it always was. */
+        const ownFair = (k) => (k === 'shift' && shift === 'night' ? R.fairNights
+          : k === 'nonOfficial' ? R.fairNonOfficial : null);
+        const fState = (k) => {
+          const o = ownFair(k);
+          if (o?.state) return o.state === 'disabled' ? 'disabled' : 'soft';
+          return F[k]?.state ?? (cfg.fairness?.[k] === false ? 'disabled' : 'soft');
+        };
+        const fPrio = (k) => {
+          const o = ownFair(k);
+          if (o?.state) return o.state === 'hard' ? 1 : (o.priority ?? 2);
+          return F[k]?.priority ?? 2;
+        };
         const fri = isFriday(date);
         const nonOff = (cfg.nonOfficialDates || []).includes(date);
 

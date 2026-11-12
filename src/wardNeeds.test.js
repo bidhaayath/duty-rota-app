@@ -151,7 +151,7 @@ describe("what usually gives way first", () => {
       columns: {
         soft4: ["People's own Try rules", "Most Nights a week", "In a row, and working days in a row"],
         soft3: ["What may follow what"],
-        soft2: [],
+        soft2: ["Sharing nights fairly", "Sharing non-official days fairly"],
         soft1: [],
         must: ["Staff numbers", "Working days (most)", "Approved duty requests", "People's own Must rules", "Most off days"],
       },
@@ -293,8 +293,18 @@ const CONTROLS = [
     (r) => ({ weeklyDuties: { ...r.weeklyDuties, min: 4, max: 4 } })],
   ["working days in a row +", () => press("Working days in a row, at most", "more"),
     () => ({ maxDaysOn: 6 })],
-  ["working pattern, protect most", () => choose("Working days in a row: if it can't all fit", "soft1"),
+  ["off days together is fine", () => choose("Off days: in a row", "together"),
+    () => ({ singleOffDays: false })],
+  ["share non-official days fairly, protect most", () => choose("Share non-official days (Fridays and holidays) fairly: if it can't all fit", "soft1"),
+    (r) => ({ ruleStates: { ...r.ruleStates, fairNonOfficial: { state: "soft", priority: 1 } } })],
+  ["share nights fairly, bend first", () => choose("Share nights fairly: if it can't all fit", "soft4"),
+    (r) => ({ ruleStates: { ...r.ruleStates, fairNights: { state: "soft", priority: 4 } } })],
+  ["in-charge on every shift, bend if needed", () => choose("Seniors on every shift: if it can't all fit", "soft3"),
+    (r) => ({ ruleStates: { ...r.ruleStates, seniors: { state: "soft", priority: 3 } } })],
+  ["In a row on every shift, protect most", () => choose("In a row, every shift: if it can't all fit", "soft1"),
     (r) => ({ ruleStates: { ...r.ruleStates, workPattern: { state: "soft", priority: 1 } } })],
+  ["working days in a row, its own Must", () => choose("Working days in a row: if it can't all fit", "must"),
+    (r) => ({ ruleStates: { ...r.ruleStates, daysInRow: { state: "hard", priority: 1 } } })],
   ["look back 90 days", () => choose(/^Look back at past duties/, "90"),
     () => ({ lookbackDays: 90 })],
   ["remove a rule for what may follow what", () => { openFollow(); fireEvent.click(screen.getByLabelText("Remove: Never give Morning after Night")); },
@@ -367,6 +377,32 @@ describe("the shift cards", () => {
     expect(screen.getByLabelText("Morning: seniors, at least: one more")).not.toBeDisabled();
   });
 
+  test("in-charge on every shift: Protect most until changed, and picking Protect most saves nothing", async () => {
+    const start = await openWard(rota({ seniorCover: { morning: 1 }, seniorStaff: ["r0", "r1", "r2"] }));
+    expect(picked("Seniors on every shift: if it can't all fit")).toBe("Protect most");
+    expect(h.writes).toBe(0);
+    expect(h.data).toBe(start);
+    const column = (name) => within(screen.getByRole("region", { name })).queryAllByText(/./).map((n) => n.textContent);
+    expect(column("Protect most")).toContain("Seniors on every shift");
+    choose("Seniors on every shift: if it can't all fit", "soft4");
+    expect(column("Bend first")).toContain("Seniors on every shift");
+  });
+
+  test("in-charge at Ignore: the numbers stay saved but cannot be changed, and the sum is not said", async () => {
+    await openWard(rota({ seniorCover: { morning: 1, night: 1 }, seniorStaff: ["r0", "r1", "r2"] }));
+    expect(screen.getByText(/on duty every day/)).toBeInTheDocument();
+    choose("Seniors on every shift: if it can't all fit", "ignore");
+    expect(h.data.rosterRules.ruleStates.seniors).toEqual({ state: "disabled", priority: 1 });
+    expect(h.data.rosterRules.seniorCover.morning).toBe(1);
+    expect(shown("Morning: seniors, at least")).toBe("1");
+    expect(screen.getByLabelText("Morning: seniors, at least: one more")).toBeDisabled();
+    expect(screen.getByText("Switched off: no seniors asked for on any shift.")).toBeInTheDocument();
+    expect(screen.queryByText(/on duty every day/)).toBeNull();
+    expect(screen.getByText(/^Switched off: .*Seniors on every shift/)).toBeInTheDocument();
+    act(() => { h.history.undo(); });
+    expect(screen.getByLabelText("Morning: seniors, at least: one more")).not.toBeDisabled();
+  });
+
   test("the ward's own word, everywhere it is said", async () => {
     await openWard(rota({ seniorTerm: "Shift Manager" }));
     expect(shown("Morning: shift managers, at least")).toBe("0");
@@ -410,7 +446,153 @@ describe("each person's week", () => {
   test("working days carries a fixed Must, and working days in a row says what it shares", async () => {
     await openWard(rota(undefined));
     expect(within(screen.getByText("Working days").parentElement).getByText("Must")).toBeInTheDocument();
-    expect(screen.getByText("Shared with In a row on every shift.")).toBeInTheDocument();
+    expect(screen.getByText("Follows In a row until you change it.")).toBeInTheDocument();
+  });
+
+  test("working days in a row shows In a row's level until it has its own, and picking that level saves nothing", async () => {
+    const start = await openWard(rota(undefined));
+    expect(picked("In a row, every shift: if it can't all fit")).toBe("Bend first");
+    expect(picked("Working days in a row: if it can't all fit")).toBe("Bend first");
+    // Following In a row: change In a row, and working days in a row shows the same.
+    choose("In a row, every shift: if it can't all fit", "soft2");
+    expect(picked("Working days in a row: if it can't all fit")).toBe("Protect");
+    expect(h.data.rosterRules.ruleStates.daysInRow).toBeUndefined();
+    act(() => { h.history.undo(); });
+    expect(h.data).toEqual(start);
+    // Its own level, once picked: the hint goes and In a row no longer moves it.
+    choose("Working days in a row: if it can't all fit", "ignore");
+    expect(h.data.rosterRules.ruleStates.daysInRow).toEqual({ state: "disabled", priority: 1 });
+    expect(screen.queryByText("Follows In a row until you change it.")).toBeNull();
+    choose("In a row, every shift: if it can't all fit", "must");
+    expect(picked("Working days in a row: if it can't all fit")).toBe("Ignore (off)");
+  });
+
+  test("share nights fairly: Protect until changed, no Must on offer, and Ignore switches it off", async () => {
+    const start = await openWard(rota(undefined));
+    const box = screen.getByLabelText("Share nights fairly: if it can't all fit");
+    expect(picked("Share nights fairly: if it can't all fit")).toBe("Protect");
+    expect([...box.options].map((o) => o.text)).toEqual(["Protect most", "Protect", "Bend if needed", "Bend first", "Ignore (off)"]);
+    expect(h.data).toBe(start);
+    choose("Share nights fairly: if it can't all fit", "ignore");
+    expect(h.data.rosterRules.ruleStates.fairNights).toEqual({ state: "disabled", priority: 1 });
+    expect(screen.getByText(/^Switched off: .*Sharing nights fairly/)).toBeInTheDocument();
+  });
+
+  test("a Must saved for night fairness anyway is shown, and counted, as Protect most", async () => {
+    await openWard(rota({ ruleStates: { fairNights: { state: "hard", priority: 1 } } }));
+    expect(picked("Share nights fairly: if it can't all fit")).toBe("Protect most");
+    const column = (name) => within(screen.getByRole("region", { name })).queryAllByText(/./).map((n) => n.textContent);
+    expect(column("Protect most")).toContain("Sharing nights fairly");
+  });
+
+  test("no Night shift, no night fairness box; non-official days always have one", async () => {
+    await openWard(rota({ coverage: { night: { min: 0, max: 0 } } }));
+    expect(screen.queryByLabelText("Share nights fairly: if it can't all fit")).toBeNull();
+    expect(picked("Share non-official days (Fridays and holidays) fairly: if it can't all fit")).toBe("Protect");
+  });
+
+  test("share non-official days fairly: Protect until changed, no Must, Ignore switches it off", async () => {
+    const start = await openWard(rota(undefined));
+    const label = "Share non-official days (Fridays and holidays) fairly: if it can't all fit";
+    expect([...screen.getByLabelText(label).options].map((o) => o.text))
+      .toEqual(["Protect most", "Protect", "Bend if needed", "Bend first", "Ignore (off)"]);
+    expect(h.data).toBe(start);
+    choose(label, "ignore");
+    expect(h.data.rosterRules.ruleStates.fairNonOfficial).toEqual({ state: "disabled", priority: 1 });
+    expect(screen.getByText(/^Switched off: .*Sharing non-official days fairly/)).toBeInTheDocument();
+  });
+
+  test("In a row, every shift says what it is the strength of, and still what Ignore does", async () => {
+    await openWard(rota(undefined));
+    expect(screen.getByText(`How strictly the "In a row" choices above are kept, such as Nights in pairs or "Up to 4 in a row".`)).toBeInTheDocument();
+    expect(screen.getByText("Ignore also stops keeping off days apart.")).toBeInTheDocument();
+  });
+
+  test("working days in a row at Must says what it costs, and only at Must", async () => {
+    const note = "Must can leave shifts uncovered rather than allow a longer run.";
+    await openWard(rota(undefined));
+    expect(screen.queryByText(note)).toBeNull();
+    choose("Working days in a row: if it can't all fit", "must");
+    expect(screen.getByText(note)).toBeInTheDocument();
+    choose("Working days in a row: if it can't all fit", "soft1");
+    expect(screen.queryByText(note)).toBeNull();
+    // Never saved and following In a row set to Must: it shows Must, so it says so too.
+    cleanup();
+    await openWard(rota({ ruleStates: { workPattern: { state: "hard", priority: 1 } } }));
+    expect(screen.getByText(note)).toBeInTheDocument();
+  });
+
+  test("in-charge at Must says what it costs, in the ward's own word, and only at Must", async () => {
+    await openWard(rota({ seniorTerm: "In-charge", seniorCover: { morning: 1 }, seniorStaff: ["r0", "r1"] }));
+    expect(screen.queryByText(/Must can leave a shift short/)).toBeNull();
+    choose("In-charges on every shift: if it can't all fit", "must");
+    expect(screen.getByText("Must can leave a shift short rather than go without an in-charge.")).toBeInTheDocument();
+    choose("In-charges on every shift: if it can't all fit", "soft1");
+    expect(screen.queryByText(/Must can leave a shift short/)).toBeNull();
+    cleanup();
+    await openWard(rota({ seniorTerm: "Shift Manager", ruleStates: { seniors: { state: "hard", priority: 1 } } }));
+    expect(screen.getByText("Must can leave a shift short rather than go without a shift manager.")).toBeInTheDocument();
+  });
+
+  test("the columns list working days in a row on its own once it has its own level", async () => {
+    await openWard(rota(undefined));
+    const column = (name) => within(screen.getByRole("region", { name })).queryAllByText(/./).map((n) => n.textContent);
+    expect(column("Bend first")).toContain("In a row, and working days in a row");
+    choose("Working days in a row: if it can't all fit", "must");
+    expect(column("Must")).toContain("Working days in a row");
+    expect(column("Bend first")).toContain("In a row, every shift");
+    expect(column("Bend first")).not.toContain("In a row, and working days in a row");
+  });
+
+  test("one short line to open, and the at least hint said once for the table", async () => {
+    await openWard(rota(undefined));
+    expect(screen.getByText("What each person gets in a week. Everyone follows this unless they have their own rule.")).toBeInTheDocument();
+    expect(screen.getAllByText("At least 1 Night = everyone gets a Night every week.")).toHaveLength(1);
+    expect(screen.queryByText(/The same for everyone/)).toBeNull();
+  });
+
+  test("the at least hint uses a shift the ward runs", async () => {
+    await openWard(rota({ coverage: { night: { min: 0, max: 0 }, evening: { min: 1, max: 1 } } }));
+    expect(screen.getByText("At least 1 Morning = everyone gets a Morning every week.")).toBeInTheDocument();
+  });
+
+  test("what a pair means is said under In a row only while it keeps a shift together", async () => {
+    const pairText = "Two side by side; a single one is still fine, so everyone gets one.";
+    await openWard(rota(undefined));
+    expect(screen.queryByText(pairText)).toBeNull();
+    choose("Night: in a row", "pairs");
+    expect(screen.getAllByText(pairText)).toHaveLength(1);
+    // Under the Night box, not anywhere else.
+    expect(screen.getByLabelText("Night: in a row").parentElement).toHaveTextContent(pairText);
+    choose("Morning: in a row", "two3");
+    expect(screen.getAllByText(pairText)).toHaveLength(2);
+    choose("Night: in a row", "upto2");
+    expect(screen.getAllByText(pairText)).toHaveLength(1);
+    // Custom says nothing, even when the saved pair keeps a shift together.
+    cleanup();
+    await openWard(rota({ blockTogether: { night: 3 }, blockDays: { night: 2 } }));
+    expect(screen.queryByText(pairText)).toBeNull();
+  });
+
+  test("off days: Together is fine saves the choice, and Spread apart takes it away again", async () => {
+    await openWard(rota({ coverage: { morning: { min: 3, max: 4 } } }));
+    expect(picked("Off days: in a row")).toBe("Spread apart");
+    choose("Off days: in a row", "together");
+    expect(h.data.rosterRules.singleOffDays).toBe(false);
+    expect(picked("Off days: in a row")).toBe("Together is fine");
+    const beforeBack = JSON.stringify(h.data);
+    choose("Off days: in a row", "apart");
+    expect("singleOffDays" in h.data.rosterRules).toBe(false);
+    expect(h.history.depth).toBe(2);
+    act(() => { h.history.undo(); });
+    expect(JSON.stringify(h.data)).toBe(beforeBack);
+  });
+
+  test("off days: with In a row set to Ignore, Spread apart says it is not being applied", async () => {
+    await openWard(rota({ ruleStates: { workPattern: { state: "disabled", priority: 1 } } }));
+    expect(screen.getByText("In a row, every shift is set to Ignore, so off days are not kept apart.")).toBeInTheDocument();
+    choose("Off days: in a row", "together");
+    expect(screen.queryByText(/so off days are not kept apart/)).toBeNull();
   });
 
   test("off days are spread apart, and their box covers at least", async () => {
