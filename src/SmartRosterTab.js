@@ -378,7 +378,9 @@ export default function SmartRosterTab({
   });
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
+    // One column no wider than the screen: a wide table scrolls in its own box
+    // instead of stretching the page.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 14 }}>
       <Card>
         <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: "0 0 4px",
                      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -1117,7 +1119,8 @@ function YearToDate({ proposal, activeStaff, rules, T, Card, Btn, Field, inputSt
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 460 }}>
             <thead>
               <tr>
-                <th style={th}>Staff</th>
+                {/* The names stay put while the numbers scroll, as in the week above. */}
+                <th style={{ ...th, position: "sticky", left: 0, background: "#fff", zIndex: 2 }}>Staff</th>
                 {used.map((sh) => <th key={sh} style={{ ...th, textAlign: "center" }}>{LABEL[sh]}</th>)}
                 <th style={{ ...th, textAlign: "center" }}>Off</th>
                 <th style={{ ...th, textAlign: "center", background: "#FBF1DC" }}>Non-official</th>
@@ -1126,7 +1129,7 @@ function YearToDate({ proposal, activeStaff, rules, T, Card, Btn, Field, inputSt
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ ...td, fontWeight: 600 }}>
+                  <td style={{ ...td, fontWeight: 600, position: "sticky", left: 0, background: "#fff", zIndex: 1 }}>
                     {s.name}
                     {!activeStaff.some((a) => a.id === s.id) && (
                       <span style={{ marginLeft: 7, fontSize: 11, color: T.inkSoft, fontWeight: 500 }}>
