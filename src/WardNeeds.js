@@ -319,6 +319,8 @@ const lookBackHint = (days) => {
 
 export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
+  // The shift the "at least" hint is said with: Night where the ward runs it.
+  const example = run.includes("night") ? "night" : (run[0] || "night");
   const field = fieldStyle(T, editable);
   const setIn = (group, key, n) => setRules({ [group]: { ...rules[group], [key]: n } });
   const strength = (key, label) => (
@@ -340,7 +342,7 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
   const inRow = (sh) => {
     const fewest = rules.blockTogether?.[sh], longest = rules.blockDays?.[sh];
     const match = inRowOf(fewest, longest);
-    return (
+    const box = (
       <select aria-label={`${LABEL[sh]}: in a row`} value={match ? match.id : "custom"} disabled={!editable} style={field}
         onChange={(e) => {
           const opt = IN_ROW.find((o) => o.id === e.target.value);
@@ -352,6 +354,16 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
         {!match && <option value="custom">{customInRow(fewest, longest)}</option>}
       </select>
     );
+    // Only where a choice keeps a shift together does it need saying what that means.
+    const together = match && (match.id === "pairs" || match.id === "two3");
+    return together ? (
+      <>
+        {box}
+        <span style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.45 }}>
+          Two side by side; a single one is still fine, so everyone gets one.
+        </span>
+      </>
+    ) : box;
   };
   /* Each row in its duty code's colour: the name on a tag of that colour,
      and a light wash of it behind the row. */
@@ -373,9 +385,11 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
     <Card>
       <h3 style={sectionTitle}>Each person, each week</h3>
       <p style={{ fontSize: 13, color: T.inkSoft, margin: "4px 0 6px", lineHeight: 1.6 }}>
-        The same for everyone, unless you give someone their own rule below. "At least 1 Night" means
-        everyone gets a Night every week. "In pairs" puts two side by side, but a single one is still
-        fine so everyone gets one.
+        What each person gets in a week. Everyone follows this unless they have their own rule.
+      </p>
+      {/* Said once for the whole table, with a shift the ward runs. */}
+      <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "0 0 2px", lineHeight: 1.5 }}>
+        At least 1 {LABEL[example]} = everyone gets {/^[AEIOU]/.test(LABEL[example]) ? "an" : "a"} {LABEL[example]} every week.
       </p>
       {run.map((sh) => personRow(sh, LABEL[sh], colourFor(rules, codes, sh), <>
         {cell("At least", <Stepper label={`Each person: ${LABEL[sh]}, at least`} value={rules.weeklyMin?.[sh]}

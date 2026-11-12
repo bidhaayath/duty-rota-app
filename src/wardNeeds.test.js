@@ -413,6 +413,36 @@ describe("each person's week", () => {
     expect(screen.getByText("Shared with In a row on every shift.")).toBeInTheDocument();
   });
 
+  test("one short line to open, and the at least hint said once for the table", async () => {
+    await openWard(rota(undefined));
+    expect(screen.getByText("What each person gets in a week. Everyone follows this unless they have their own rule.")).toBeInTheDocument();
+    expect(screen.getAllByText("At least 1 Night = everyone gets a Night every week.")).toHaveLength(1);
+    expect(screen.queryByText(/The same for everyone/)).toBeNull();
+  });
+
+  test("the at least hint uses a shift the ward runs", async () => {
+    await openWard(rota({ coverage: { night: { min: 0, max: 0 }, evening: { min: 1, max: 1 } } }));
+    expect(screen.getByText("At least 1 Morning = everyone gets a Morning every week.")).toBeInTheDocument();
+  });
+
+  test("what a pair means is said under In a row only while it keeps a shift together", async () => {
+    const pairText = "Two side by side; a single one is still fine, so everyone gets one.";
+    await openWard(rota(undefined));
+    expect(screen.queryByText(pairText)).toBeNull();
+    choose("Night: in a row", "pairs");
+    expect(screen.getAllByText(pairText)).toHaveLength(1);
+    // Under the Night box, not anywhere else.
+    expect(screen.getByLabelText("Night: in a row").parentElement).toHaveTextContent(pairText);
+    choose("Morning: in a row", "two3");
+    expect(screen.getAllByText(pairText)).toHaveLength(2);
+    choose("Night: in a row", "upto2");
+    expect(screen.getAllByText(pairText)).toHaveLength(1);
+    // Custom says nothing, even when the saved pair keeps a shift together.
+    cleanup();
+    await openWard(rota({ blockTogether: { night: 3 }, blockDays: { night: 2 } }));
+    expect(screen.queryByText(pairText)).toBeNull();
+  });
+
   test("off days are spread apart, and their box covers at least", async () => {
     await openWard(rota(undefined));
     expect(screen.getByText("Spread apart")).toBeInTheDocument();
