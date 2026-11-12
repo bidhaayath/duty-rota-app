@@ -666,6 +666,9 @@ function costWeights(cfg) {
   w.restriction = HARD;
   w.absMax = HARD;
 
+  // Sharing nights fairly: priced as always at every level but Ignore.
+  w.fairNight = R.fairNights?.state === 'disabled' ? 0 : w.fair;
+
   // A shift with nobody in charge: 400 at every Try level, as always; a Must's price as a Must.
   const seniors = R.seniors?.state;
   if (seniors === 'hard') w.senior = HARD;
@@ -1274,7 +1277,9 @@ export function auditRoster(cfg, ctx, cells) {
         if (v < lo) lo = v;
         if (v > hi) hi = v;
       }
-      if (hi > lo) cost += W.fair * (hi - lo);
+      // A measure the ward has set to Ignore costs nothing; any other is priced as always.
+      const weight = key === 'night' ? W.fairNight : W.fair;
+      if (hi > lo) cost += weight * (hi - lo);
     }
   }
 
@@ -2253,8 +2258,22 @@ function buildOnce(cfg, seed, ctx) {
            does the next measure get a say. That is the staged behaviour the
            specification asks for, applied to who gets picked. */
         const F = cfg.fairnessStates || {};
-        const fState = (k) => F[k]?.state ?? (cfg.fairness?.[k] === false ? 'disabled' : 'soft');
-        const fPrio = (k) => F[k]?.priority ?? 2;
+        /* Sharing nights fairly has the ward's own strength where one is
+           saved: Ignore leaves it out, and Protect most to Bend first set its
+           place among the other measures, 1 to 4 (there is no Must for
+           fairness: one saved is read as Protect most). Never saved, it is
+           as it always was. */
+        const ownFair = (k) => (k === 'shift' && shift === 'night' ? R.fairNights : null);
+        const fState = (k) => {
+          const o = ownFair(k);
+          if (o?.state) return o.state === 'disabled' ? 'disabled' : 'soft';
+          return F[k]?.state ?? (cfg.fairness?.[k] === false ? 'disabled' : 'soft');
+        };
+        const fPrio = (k) => {
+          const o = ownFair(k);
+          if (o?.state) return o.state === 'hard' ? 1 : (o.priority ?? 2);
+          return F[k]?.priority ?? 2;
+        };
         const fri = isFriday(date);
         const nonOff = (cfg.nonOfficialDates || []).includes(date);
 

@@ -112,6 +112,60 @@ describe("in-charge on every shift: ruleStates.seniors", () => {
   });
 });
 
+/* How unevenly something is shared in one week: most anyone had, less the
+   fewest anyone had, among the staff on the roster that week. */
+const spreadOf = (data, start, out, isIt) => {
+  const cfg = weekConfig(data, start);
+  const counts = cfg.staff.filter((s) => !(cfg.skipStaff || []).includes(s.id)).map((s) =>
+    datesBetween(cfg.from, cfg.to).filter((d) => isIt(out.cells[`${s.id}|${d}`], d)).length);
+  return Math.max(...counts) - Math.min(...counts);
+};
+
+describe("sharing nights fairly: ruleStates.fairNights", () => {
+  const at = (state, priority = 1) => ({ fairNights: { state, priority } });
+
+  test.each(SEEDS)("ward %i: saved at Protect, the level its box shows, it builds exactly as never saved", (seed) => {
+    const { start, data } = seededWard(seed);
+    expect(build(withStates(data, at("soft", 2)), start)).toBe(build(data, start));
+  });
+
+  test.each(SEEDS.slice(0, 4))("ward %i: Protect most builds the same too — nights are already the first fairness question", (seed) => {
+    const { start, data } = seededWard(seed);
+    expect(build(withStates(data, at("soft", 1)), start)).toBe(build(data, start));
+    // A Must saved anyway is read as Protect most.
+    expect(build(withStates(data, at("hard", 1)), start)).toBe(build(data, start));
+  });
+
+  test("the price of an uneven share of nights: as always at every level but Ignore", () => {
+    const { start, data } = seededWard(1);
+    expect(weightsOf(data, start).fairNight).toBe(3);
+    expect(weightsOf(withStates(data, at("soft", 4)), start).fairNight).toBe(3);
+    expect(weightsOf(withStates(data, at("disabled")), start).fairNight).toBe(0);
+    // Nothing else moves.
+    expect(weightsOf(withStates(data, at("disabled")), start).fair).toBe(3);
+  });
+
+  test("Bend first and Ignore change the week, and Ignore shares nights less evenly over the seeded weeks", () => {
+    let spreadAbsent = 0, spreadIgnored = 0, bendDiffers = false;
+    for (const seed of SEEDS) {
+      const { start, data } = seededWard(seed);
+      const night = (c) => c === "night";
+      spreadAbsent += spreadOf(data, start, generateRoster(steady(weekConfig(data, start))), night);
+      const ignored = withStates(data, at("disabled"));
+      spreadIgnored += spreadOf(ignored, start, generateRoster(steady(weekConfig(ignored, start))), night);
+      if (build(withStates(data, at("soft", 4)), start) !== build(data, start)) bendDiffers = true;
+    }
+    expect(bendDiffers).toBe(true);
+    expect(spreadIgnored).toBeGreaterThanOrEqual(spreadAbsent);
+  }, 180000);
+
+  test("Ini's month build hands the engine the same key", () => {
+    const { data } = seededWard(3);
+    expect(prepareMonth({ data: withStates(data, at("soft", 4)), month: "2026-11", lookFrom: null }).config.ruleStates.fairNights)
+      .toEqual({ state: "soft", priority: 4 });
+  });
+});
+
 describe("working days in a row: ruleStates.daysInRow", () => {
   test.each(SEEDS)("ward %i: saved at In a row's own level, it builds exactly as never saved", (seed) => {
     const { start, data } = seededWard(seed);

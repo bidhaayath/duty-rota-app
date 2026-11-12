@@ -97,7 +97,10 @@ export const COLUMNS = ["soft4", "soft3", "soft2", "soft1", "must"];
    of these, once saved, builds exactly as never saving it. */
 export const ABSENT = {
   seniors: { state: "soft", priority: 1 },
+  fairNights: { state: "soft", priority: 2 },
 };
+// Strengths with no Must: a saved Must counts as Protect most.
+const NO_MUST = ["fairNights"];
 
 export function givesWay(rules, { termMany = "Seniors" } = {}) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
@@ -116,13 +119,15 @@ export function givesWay(rules, { termMany = "Seniors" } = {}) {
       : [["In a row, and working days in a row", "workPattern"]]),
     ...((rules.sequenceRules || []).length ? [["What may follow what", "sequence"]] : []),
     ...(asksSenior ? [[`${termMany} on every shift`, "seniors"]] : []),
+    ...(run.includes("night") ? [["Sharing nights fairly", "fairNights"]] : []),
   ];
   columns.must.push("Staff numbers");
   if (rules.weeklyDuties?.max != null) columns.must.push("Working days (most)");
   columns.must.push("Approved duty requests");
   if (own.some((r) => r && r.strength === "hard")) columns.must.push("People's own Must rules");
   entries.forEach(([text, key]) => {
-    const level = levelOf(rules.ruleStates?.[key] ?? ABSENT[key]);
+    const raw = levelOf(rules.ruleStates?.[key] ?? ABSENT[key]);
+    const level = raw === "must" && NO_MUST.includes(key) ? "soft1" : raw;
     (level === "ignore" ? off : columns[level]).push(text);
   });
   return { columns, off };
@@ -140,10 +145,13 @@ const fieldStyle = (T, editable) => ({
 /* `fallback` is what a key that has never been saved behaves as, and so
    what the box shows for it: picking that same level saves nothing, and
    saving it behaves exactly as not having saved it. */
-export function StrengthSelect({ value, fallback, onPick, label, editable, T }) {
-  const shown = value ?? fallback;
+export function StrengthSelect({ value, fallback, onPick, label, editable, T, noMust = false }) {
+  // Fairness has no Must: one saved anyway is read, and shown, as Protect most.
+  const saved = value ?? fallback;
+  const shown = noMust && saved?.state === "hard" ? { state: "soft", priority: 1 } : saved;
   const cur = scaleIdOf(shown);
-  const known = STRENGTH_SCALE.some((o) => o.id === cur);
+  const scale = noMust ? STRENGTH_SCALE.filter((o) => o.id !== "must") : STRENGTH_SCALE;
+  const known = scale.some((o) => o.id === cur);
   return (
     <select aria-label={label} value={cur} disabled={!editable}
       onChange={(e) => {
@@ -152,7 +160,7 @@ export function StrengthSelect({ value, fallback, onPick, label, editable, T }) 
         onPick({ state: pick.state, priority: pick.priority });
       }}
       style={{ ...fieldStyle(T, editable), background: tintOf(shown) }}>
-      {STRENGTH_SCALE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      {scale.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
       {!known && <option value={cur}>Bend (P{shown?.priority})</option>}
     </select>
   );
@@ -353,6 +361,10 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
   const example = run.includes("night") ? "night" : (run[0] || "night");
   const field = fieldStyle(T, editable);
   const setIn = (group, key, n) => setRules({ [group]: { ...rules[group], [key]: n } });
+  // Fairness the ward can set the strength of: nights only where it runs them.
+  const fairRows = [
+    ...(run.includes("night") ? [["fairNights", "Share nights fairly"]] : []),
+  ];
   const strength = (key, label, fallback) => (
     <StrengthSelect label={label} value={rules.ruleStates?.[key]} fallback={fallback} editable={editable} T={T}
       onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, [key]: v } })} />
@@ -490,6 +502,17 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
             )}
           </span>
         </div>
+        {fairRows.map(([key, text]) => (
+          <div key={key} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
+                                  borderBottom: `1px solid ${T.line}` }}>
+            <span style={{ fontSize: 15, flex: "1 1 260px", minWidth: 0 }}>{text}</span>
+            <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
+              <StrengthSelect label={`${text}: if it can't all fit`} value={rules.ruleStates?.[key]} fallback={ABSENT[key]}
+                noMust editable={editable} T={T}
+                onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, [key]: v } })} />
+            </span>
+          </div>
+        ))}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0" }}>
           <label htmlFor="sr-lookback" style={{ display: "grid", gap: 2, flex: "1 1 260px", minWidth: 0 }}>
             <span style={{ fontSize: 15 }}>Look back at past duties</span>
