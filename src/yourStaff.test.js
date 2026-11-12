@@ -48,6 +48,8 @@ const openWard = async (start) => {
   h = { writes: 0 };
   render(<Ward start={start} />);
   act(() => { h.open(); });
+  // Your staff is step 2.
+  fireEvent.click(await screen.findByRole("button", { name: /^Step 2,/ }));
   await screen.findByRole("heading", { name: "Your staff" });
   return start;
 };

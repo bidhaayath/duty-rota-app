@@ -239,6 +239,8 @@ describe("on the proposed week", () => {
   }
   const openWeek = async (start) => {
     render(<App start={start} />);
+    // The week is made in step 3.
+    fireEvent.click(screen.getByRole("button", { name: /^Step 3,/ }));
     fireEvent.change(screen.getByLabelText(/^Week beginning/), { target: { value: "2026-11-01" } });
     fireEvent.click(screen.getByText("Generate this week"));
     await screen.findByText("Proposed week", {}, { timeout: 30000 });

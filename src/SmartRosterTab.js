@@ -29,6 +29,7 @@ import { checkSettings, settingsKey } from "./settingsCheck";
 import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
 import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
 import YourStaff from "./YourStaff";
+import { StepNav, StepFoot, ReadyList, readyLines, loadStep, saveStep, weekSummary } from "./RosterSteps";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 
@@ -77,6 +78,16 @@ export default function SmartRosterTab({
   const proposalElsewhere = !!proposal && proposal.deptId !== deptId;
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
+
+  /* ── Which of the three steps is showing ──
+     The one this department was last on, as remembered in this browser. */
+  const [step, setStep] = useState(() => loadStep(deptId));
+  useEffect(() => { setStep(loadStep(deptId)); }, [deptId]);
+  const goStep = (n) => {
+    setStep(n);
+    saveStep(deptId, n);
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { /* not in every browser */ }
+  };
 
   const setRules = (patch) => update((d) => { d.rosterRules = { ...rules, ...patch }; return d; });
 
@@ -333,7 +344,20 @@ export default function SmartRosterTab({
   const needs = { rules, setRules, dropRule, editable: staffEditable, T };
 
   // The sum lives in rosterConfig.js so Ini warns with the same numbers.
-  const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = seniorNeedOf(rules, activeStaff);
+  const senior = seniorNeedOf(rules, activeStaff);
+  const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = senior;
+
+  // What each step's button says about it.
+  const weekReady = !!proposal && !proposal.failed && !proposalElsewhere;
+  const stepStatus = {
+    1: fit.ok ? "Done" : "Needs a fix",
+    2: `${fit.count} on the roster`,
+    3: weekReady ? "Week ready" : "Pick a week",
+  };
+  // Before a week is made: what it will be made from.
+  const ready = readyLines({
+    fit, rules, staff: activeStaff, from: weekStart, to: weekEnd, data, senior, terms: { termOne, termMany, lower },
+  });
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -355,7 +379,7 @@ export default function SmartRosterTab({
         <p style={{ ...hint, marginBottom: 0 }}>
           Generates one week at a time. It covers every shift first, then shares the shift types out
           evenly so nobody ends up with a whole week of afternoons. Nothing is written to your rota
-          until you press Apply.{" "}
+          until you press Use this roster.{" "}
           <strong>This feature is in beta</strong> — it works well for most wards, but check the
           result before applying, and use the Undo button if anything looks wrong.
         </p>
@@ -366,6 +390,11 @@ export default function SmartRosterTab({
         )}
       </Card>
 
+      {/* ── The three steps ── */}
+      <StepNav step={step} onStep={goStep} status={stepStatus} T={T} />
+
+      {/* ── Step 1: what the ward needs ── */}
+      {step === 1 && (<>
       {/* ── Do the settings fit ──
           A slim line while they do, so the amber card stands out when they
           do not. */}
@@ -414,12 +443,6 @@ export default function SmartRosterTab({
 
       {/* ── What usually gives way first ── */}
       <GivesWay rules={rules} T={T} Card={Card} termMany={termMany} />
-
-      {/* ── Your staff ── */}
-      <YourStaff rules={rules} setRules={setRules} setPersonRules={setPersonRules} setFixedDuties={setFixedDuties}
-        editable={staffEditable}
-        T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle} uid={uid} data={data}
-        allStaff={allStaff} firstDay={firstDay} termOne={termOne} termMany={termMany} today={today} />
 
       {/* ── What may follow what ── */}
       <FollowRules {...needs} Card={Card} Btn={Btn} uid={uid} />
@@ -499,8 +522,30 @@ export default function SmartRosterTab({
         )}
       </Card>
 
+      <StepFoot step={1} onStep={goStep} T={T} />
+      </>)}
+
+      {/* ── Step 2: your staff ── */}
+      {step === 2 && (<>
+      {/* ── Your staff ── */}
+      <YourStaff rules={rules} setRules={setRules} setPersonRules={setPersonRules} setFixedDuties={setFixedDuties}
+        editable={staffEditable}
+        T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle} uid={uid} data={data}
+        allStaff={allStaff} firstDay={firstDay} termOne={termOne} termMany={termMany} today={today} />
+
+      <StepFoot step={2} onStep={goStep} T={T} />
+      </>)}
+
+      {/* ── Step 3: make the roster ── */}
+      {step === 3 && (<>
       {/* ── Generate ── */}
       <Card>
+        {/* Before a week is made, and again after Discard. */}
+        {!weekReady && (
+          <div style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px solid ${T.line}` }}>
+            <ReadyList lines={ready} onStep={goStep} T={T} />
+          </div>
+        )}
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "end" }}>
           <Field label={`Week beginning (${DAY_LABEL[firstDay]})`}>
             <input type="date" value={weekStart} disabled={!staffEditable}
@@ -604,6 +649,8 @@ export default function SmartRosterTab({
         duties in it, and a replaced duty does not keep its post — set those
         again afterwards on the days that need them.
       </p>
+      <StepFoot step={3} onStep={goStep} T={T} />
+      </>)}
     </div>
   );
 }
@@ -663,6 +710,7 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
     ...g, termOne, day: prettyWeekday(g.date),
     reasons: whyNoInCharge({ ...g, cells: proposal.cells, data, rules, staff: activeStaff, from: proposal.from, to: proposal.to }),
   })) : [];
+  const summary = weekSummary({ report, mustMissed: ownBent.filter((g) => g.must).length, termOne });
 
   return (
     <>
@@ -673,9 +721,16 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
             <span style={{ fontSize: 12.5, color: T.inkSoft }}>{weekLabel} · {report.rosteredCount} staff</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn kind="ghost" onClick={onDiscard}><X size={15} /> Discard</Btn>
-            <Btn onClick={onApply}><Check size={15} /> Apply to rota</Btn>
+            <Btn kind="ghost" onClick={onDiscard} style={{ minHeight: 44 }}><X size={15} /> Discard</Btn>
+            <Btn onClick={onApply} style={{ minHeight: 44 }}><Check size={15} /> Use this roster</Btn>
           </div>
+        </div>
+
+        {/* The week in one line, before anything else. */}
+        <div role="status" style={{ display: "flex", gap: 7, alignItems: "flex-start", marginTop: 10, fontSize: 14, fontWeight: 700,
+                                    color: summary.ok ? "#0B6B61" : "#8A5A0F", lineHeight: 1.5 }}>
+          {summary.ok ? <Check size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 3 }} />}
+          <span>{summary.text}</span>
         </div>
 
         {/* A gap one person's own Must caused is said first, with the rule,

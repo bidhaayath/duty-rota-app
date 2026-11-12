@@ -29,6 +29,9 @@ const loaded = () => ({
   cellMeta: {}, nonOfficial: [], dutyRequests: [], fridayRule: false,
 });
 
+// Smart Roster is in three steps; this moves to one. It writes nothing to the rota.
+const goStep = (n) => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Step ${n},`) }));
+
 // Plain stand-ins for the app's own small building blocks.
 const Card = ({ children }) => <div>{children}</div>;
 const Btn = ({ children, kind, small, ...rest }) => <button {...rest}>{children}</button>;
@@ -127,9 +130,12 @@ test("standing settings and weekly days off save with everything else, one Undo 
   const before = JSON.stringify(api.data);
 
   // What Smart Roster's screen shows: Mariyam's shift chips and the off days.
-  const mariyamChips = () => screen.getByRole("group", { name: "Mariyam" }).textContent;
-  const offDays = (row) =>
-    screen.getByLabelText(`Each person: off days, ${row === "Fewest" ? "at least" : "at most"}`).textContent;
+  // Each read from the step it is on: Your staff is step 2, the off days step 1.
+  const mariyamChips = () => { goStep(2); return screen.getByRole("group", { name: "Mariyam" }).textContent; };
+  const offDays = (row) => {
+    goStep(1);
+    return screen.getByLabelText(`Each person: off days, ${row === "Fewest" ? "at least" : "at most"}`).textContent;
+  };
   expect(mariyamChips()).not.toMatch(/✓/);
   expect([offDays("Fewest"), offDays("Most")]).toEqual(["1", "2"]);
 
@@ -256,8 +262,8 @@ test("senior lines send the ward's word, save in one step with everything else, 
   await screen.findByLabelText("Ask Ini");
   const before = JSON.stringify(api.data);
 
-  const chipsOf = (name) => screen.getByRole("group", { name }).textContent;
-  const seniorsOn = (shift) => screen.getByLabelText(`${shift}: in-charges, at least`).textContent;
+  const chipsOf = (name) => { goStep(2); return screen.getByRole("group", { name }).textContent; };
+  const seniorsOn = (shift) => { goStep(1); return screen.getByLabelText(`${shift}: in-charges, at least`).textContent; };
   expect(chipsOf("Ali")).not.toMatch(/✓ In-charge/);
   expect(chipsOf("Mariyam")).toMatch(/✓ In-charge/);
   expect([seniorsOn("Morning"), seniorsOn("Night")]).toEqual(["0", "0"]);
