@@ -281,6 +281,8 @@ describe("the banner on the screen", () => {
   };
   const banner = () => screen.getAllByRole("status")[0];
   const generate = () => screen.getByRole("button", { name: /Generate this week/ });
+  // The banner is on step 1; Generate and the engine's own boxes on step 3.
+  const goStep = (n) => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Step ${n},`) }));
 
   test("green while the settings fit, amber the moment a box stops them fitting, green again when put back", () => {
     render(<App />);
@@ -288,10 +290,12 @@ describe("the banner on the screen", () => {
     press("Morning: at least", "more", 2);
     expect(banner()).toHaveTextContent("These settings do not add up yet. Morning: at least 6 on duty, but at most 5. "
       + "Generate cannot make a week until this is changed.");
-    // Said once: the engine's own line for it is left out below.
+    goStep(3);
+    // Said once: the engine's own line for it is left out where Generate is.
     expect(screen.queryByText(/the maximum \(5\) is below the minimum \(6\)/)).toBeNull();
     // Generate is never held back by the banner.
     expect(generate()).not.toBeDisabled();
+    goStep(1);
     press("Morning: at least", "fewer", 2);
     expect(banner()).toHaveTextContent("These settings fit your 15 staff.");
   });
@@ -300,7 +304,9 @@ describe("the banner on the screen", () => {
     render(<App rosterRules={FULL} />);
     expect(banner()).toHaveTextContent("15 staff working 5 days is 75 duties a week, but your shifts have room for only 70");
     expect(banner()).toHaveTextContent("Changes Morning: at most 4 → 5, and saves it.");
+    goStep(3);
     expect(generate()).not.toBeDisabled();
+    goStep(1);
     fireEvent.click(screen.getByRole("button", { name: /Fix it for me/ }));
     expect(saved.rosterRules.coverage.morning).toEqual({ min: 4, max: 5 });
     expect(saved.rosterRules.coverage.afternoon).toEqual({ min: 4, max: 4 });
@@ -316,16 +322,19 @@ describe("the banner on the screen", () => {
 
   test("the engine's lines for the same sum are left out; its other lines, and its lines for other sums, stay", () => {
     render(<App rosterRules={FULL} />);
+    goStep(3);
     expect(screen.queryByText(/^Duties per week: /)).toBeNull();
     expect(screen.queryByText(/even with every shift at its fullest/)).toBeNull();
     expect(screen.getByText(/will get no night duty this week/)).toBeInTheDocument();
     // With the banner on an earlier problem, the engine's sum is not the same thing, and is shown.
+    goStep(1);
     fireEvent.change(screen.getByLabelText("Night: in a row"), { target: { value: "pairs" } });
     expect(saved.rosterRules.blockTogether).toEqual({ night: 2 });
     // Night at most: from No limit, − gives 7, and six more give 1.
     press("Each person: Night, at most", "fewer", 7);
     expect(saved.rosterRules.weeklyMax.night).toBe(1);
     expect(banner()).toHaveTextContent("Night is set to come 2 together, but each person gets at most 1 Night a week.");
+    goStep(3);
     expect(screen.getByText(/^Duties per week: /)).toBeInTheDocument();
   });
 

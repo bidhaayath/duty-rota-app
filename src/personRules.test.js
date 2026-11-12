@@ -251,6 +251,7 @@ describe("the Personal rules card", () => {
 
   test("adds a rule as Try, warns on a Must at least, refuses a gap between with pairs, and removes cleanly", () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /^Step 2,/ }));
     // Shau: at most 1 Night a week, the rule as it starts.
     openRules("Shau");
     expect(screen.getByText("Shau: at most 1 night a week — starts as Try.")).toBeInTheDocument();
@@ -299,6 +300,7 @@ describe("the Personal rules card", () => {
 
   test("rules about days: seven day chips, always off starts as Must, only shifts as Try, and refusals", () => {
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /^Step 2,/ }));
     openRules("Ana");
     ruleType("Ana", "offOn");
     // The seven days and no shortcut for a weekend.
@@ -372,6 +374,7 @@ describe("the Personal rules card", () => {
       );
     }
     render(<Ward />);
+    fireEvent.click(screen.getByRole("button", { name: /^Step 3,/ }));
     fireEvent.click(screen.getByText("Generate this week"));
     const red = (await screen.findByText("Left uncovered by a personal Must rule:", {}, { timeout: 30000 })).parentElement;
     const named = within(red).getAllByRole("listitem").map((li) => {
@@ -387,6 +390,7 @@ describe("the Personal rules card", () => {
 
   test("a day too many people are always off by a Must is warned about", () => {
     render(<App count={6} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Step 2,/ }));
     // Six on the rota and five places a day: two off every Friday leaves four.
     const offFriday = (name) => { openRules(name); ruleType(name, "offOn"); tick("Friday"); };
     offFriday("Shau");

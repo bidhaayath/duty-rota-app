@@ -13,7 +13,7 @@
 
    Nothing is written to the rota until Apply is pressed.                */
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Wand2, AlertTriangle, Check, X, ChevronDown, ChevronRight } from "lucide-react";
 import { generateRoster, checkFeasible, toRotaCells, SHIFTS, mustCauseText } from "./rosterEngine";
 import { prettyWeekday } from "./monthBuild";
@@ -29,6 +29,8 @@ import { checkSettings, settingsKey } from "./settingsCheck";
 import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
 import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
 import YourStaff from "./YourStaff";
+import { StepNav, StepFoot, ReadyList, readyLines, loadStep, saveStep, weekSummary } from "./RosterSteps";
+import { AskIniBar, reducedMotion } from "./IniBuddy";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 
@@ -48,6 +50,8 @@ const DAY_TYPES = ["offOn", "onlyOn"];
 export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
   onApplied, deptId,
+  // The "Ask Ini" bar: where its note goes, and whether the Ini panel is busy with one.
+  onAskIni, iniWorking = false,
 }) {
   const rules = mergeRules(data.rosterRules || {});
 
@@ -77,6 +81,29 @@ export default function SmartRosterTab({
   const proposalElsewhere = !!proposal && proposal.deptId !== deptId;
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
+
+  /* ── Which of the three steps is showing ──
+     The one this department was last on, as remembered in this browser. */
+  const [step, setStep] = useState(() => loadStep(deptId));
+  const stepsRef = useRef(null);
+  useEffect(() => { setStep(loadStep(deptId)); }, [deptId]);
+  // Ini on the bar is pleased for a few seconds after a week is made or "Fix it for me" works.
+  const [celebrate, setCelebrate] = useState(0);
+  useEffect(() => {
+    if (!celebrate) return undefined;
+    const t = setTimeout(() => setCelebrate(0), 3000);
+    return () => clearTimeout(t);
+  }, [celebrate]);
+  const goStep = (n) => {
+    setStep(n);
+    saveStep(deptId, n);
+    /* The new step starts at the step buttons, not wherever the last one was
+       scrolled to. Without smooth scrolling where motion is reduced. */
+    const nav = stepsRef.current;
+    if (nav && nav.scrollIntoView) {
+      nav.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+    }
+  };
 
   const setRules = (patch) => update((d) => { d.rosterRules = { ...rules, ...patch }; return d; });
 
@@ -162,6 +189,7 @@ export default function SmartRosterTab({
     const coverage = { ...rules.coverage, [shift]: { ...rules.coverage[shift], max: to } };
     setFixNote({ text, key: settingsKey({ ...rules, coverage }) });
     setRules({ coverage });
+    setCelebrate(Date.now());
   };
   const fixed = fixNote && fixNote.key === rulesKey && (
     <span><strong>Changed — {fixNote.text}.</strong> Undo puts it back.</span>
@@ -192,6 +220,7 @@ export default function SmartRosterTab({
           rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes),
           from: weekStart, to: weekEnd,
         });
+        setCelebrate(Date.now());
       } catch (e) {
         console.error("Roster generation failed:", e);
         setProposal({ failed: true, problems: ["Something went wrong. Nothing has been changed."], deptId });
@@ -333,10 +362,25 @@ export default function SmartRosterTab({
   const needs = { rules, setRules, dropRule, editable: staffEditable, T };
 
   // The sum lives in rosterConfig.js so Ini warns with the same numbers.
-  const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = seniorNeedOf(rules, activeStaff);
+  const senior = seniorNeedOf(rules, activeStaff);
+  const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = senior;
+
+  // What each step's button says about it.
+  const weekReady = !!proposal && !proposal.failed && !proposalElsewhere;
+  const stepStatus = {
+    1: fit.ok ? "Done" : "Needs a fix",
+    2: `${fit.count} on the roster`,
+    3: weekReady ? "Week ready" : "Pick a week",
+  };
+  // Before a week is made: what it will be made from.
+  const ready = readyLines({
+    fit, rules, staff: activeStaff, from: weekStart, to: weekEnd, data, senior, terms: { termOne, termMany, lower },
+  });
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
+    // One column no wider than the screen: a wide table scrolls in its own box
+    // instead of stretching the page.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 14 }}>
       <Card>
         <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: "0 0 4px",
                      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -355,7 +399,7 @@ export default function SmartRosterTab({
         <p style={{ ...hint, marginBottom: 0 }}>
           Generates one week at a time. It covers every shift first, then shares the shift types out
           evenly so nobody ends up with a whole week of afternoons. Nothing is written to your rota
-          until you press Apply.{" "}
+          until you press Use this roster.{" "}
           <strong>This feature is in beta</strong> — it works well for most wards, but check the
           result before applying, and use the Undo button if anything looks wrong.
         </p>
@@ -366,6 +410,19 @@ export default function SmartRosterTab({
         )}
       </Card>
 
+      {/* ── The three steps ── */}
+      {/* ── Ask Ini, on every step ── */}
+      {onAskIni && (
+        <AskIniBar onAsk={onAskIni} thinking={busy || iniWorking} celebrating={!!celebrate}
+          editable={staffEditable} T={T} />
+      )}
+
+      <div ref={stepsRef} style={{ scrollMarginTop: 12 }}>
+        <StepNav step={step} onStep={goStep} status={stepStatus} T={T} />
+      </div>
+
+      {/* ── Step 1: what the ward needs ── */}
+      {step === 1 && (<>
       {/* ── Do the settings fit ──
           A slim line while they do, so the amber card stands out when they
           do not. */}
@@ -414,12 +471,6 @@ export default function SmartRosterTab({
 
       {/* ── What usually gives way first ── */}
       <GivesWay rules={rules} T={T} Card={Card} termMany={termMany} />
-
-      {/* ── Your staff ── */}
-      <YourStaff rules={rules} setRules={setRules} setPersonRules={setPersonRules} setFixedDuties={setFixedDuties}
-        editable={staffEditable}
-        T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle} uid={uid} data={data}
-        allStaff={allStaff} firstDay={firstDay} termOne={termOne} termMany={termMany} today={today} />
 
       {/* ── What may follow what ── */}
       <FollowRules {...needs} Card={Card} Btn={Btn} uid={uid} />
@@ -499,8 +550,30 @@ export default function SmartRosterTab({
         )}
       </Card>
 
+      <StepFoot step={1} onStep={goStep} T={T} />
+      </>)}
+
+      {/* ── Step 2: your staff ── */}
+      {step === 2 && (<>
+      {/* ── Your staff ── */}
+      <YourStaff rules={rules} setRules={setRules} setPersonRules={setPersonRules} setFixedDuties={setFixedDuties}
+        editable={staffEditable}
+        T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle} uid={uid} data={data}
+        allStaff={allStaff} firstDay={firstDay} termOne={termOne} termMany={termMany} today={today} />
+
+      <StepFoot step={2} onStep={goStep} T={T} />
+      </>)}
+
+      {/* ── Step 3: make the roster ── */}
+      {step === 3 && (<>
       {/* ── Generate ── */}
       <Card>
+        {/* Before a week is made, and again after Discard. */}
+        {!weekReady && (
+          <div style={{ marginBottom: 16, paddingBottom: 14, borderBottom: `1px solid ${T.line}` }}>
+            <ReadyList lines={ready} onStep={goStep} T={T} />
+          </div>
+        )}
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "end" }}>
           <Field label={`Week beginning (${DAY_LABEL[firstDay]})`}>
             <input type="date" value={weekStart} disabled={!staffEditable}
@@ -604,6 +677,8 @@ export default function SmartRosterTab({
         duties in it, and a replaced duty does not keep its post — set those
         again afterwards on the days that need them.
       </p>
+      <StepFoot step={3} onStep={goStep} T={T} />
+      </>)}
     </div>
   );
 }
@@ -663,6 +738,7 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
     ...g, termOne, day: prettyWeekday(g.date),
     reasons: whyNoInCharge({ ...g, cells: proposal.cells, data, rules, staff: activeStaff, from: proposal.from, to: proposal.to }),
   })) : [];
+  const summary = weekSummary({ report, mustMissed: ownBent.filter((g) => g.must).length, termOne });
 
   return (
     <>
@@ -673,9 +749,16 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
             <span style={{ fontSize: 12.5, color: T.inkSoft }}>{weekLabel} · {report.rosteredCount} staff</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn kind="ghost" onClick={onDiscard}><X size={15} /> Discard</Btn>
-            <Btn onClick={onApply}><Check size={15} /> Apply to rota</Btn>
+            <Btn kind="ghost" onClick={onDiscard} style={{ minHeight: 44 }}><X size={15} /> Discard</Btn>
+            <Btn onClick={onApply} style={{ minHeight: 44 }}><Check size={15} /> Use this roster</Btn>
           </div>
+        </div>
+
+        {/* The week in one line, before anything else. */}
+        <div role="status" style={{ display: "flex", gap: 7, alignItems: "flex-start", marginTop: 10, fontSize: 14, fontWeight: 700,
+                                    color: summary.ok ? "#0B6B61" : "#8A5A0F", lineHeight: 1.5 }}>
+          {summary.ok ? <Check size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 3 }} />}
+          <span>{summary.text}</span>
         </div>
 
         {/* A gap one person's own Must caused is said first, with the rule,
@@ -1036,7 +1119,8 @@ function YearToDate({ proposal, activeStaff, rules, T, Card, Btn, Field, inputSt
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 460 }}>
             <thead>
               <tr>
-                <th style={th}>Staff</th>
+                {/* The names stay put while the numbers scroll, as in the week above. */}
+                <th style={{ ...th, position: "sticky", left: 0, background: "#fff", zIndex: 2 }}>Staff</th>
                 {used.map((sh) => <th key={sh} style={{ ...th, textAlign: "center" }}>{LABEL[sh]}</th>)}
                 <th style={{ ...th, textAlign: "center" }}>Off</th>
                 <th style={{ ...th, textAlign: "center", background: "#FBF1DC" }}>Non-official</th>
@@ -1045,7 +1129,7 @@ function YearToDate({ proposal, activeStaff, rules, T, Card, Btn, Field, inputSt
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td style={{ ...td, fontWeight: 600 }}>
+                  <td style={{ ...td, fontWeight: 600, position: "sticky", left: 0, background: "#fff", zIndex: 1 }}>
                     {s.name}
                     {!activeStaff.some((a) => a.id === s.id) && (
                       <span style={{ marginLeft: 7, fontSize: 11, color: T.inkSoft, fontWeight: 500 }}>

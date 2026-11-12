@@ -76,8 +76,10 @@ jest.setTimeout(30000);
 
 const generateForWardA = async () => {
   act(() => { api.open(wardA()); });
+  // The week is made in step 3.
+  fireEvent.click(await screen.findByRole("button", { name: /^Step 3,/ }));
   fireEvent.click(await screen.findByText("Generate this week"));
-  await screen.findByText(/Apply to rota/, {}, { timeout: 20000 });
+  await screen.findByRole("button", { name: /Use this roster/ }, { timeout: 20000 });
 };
 const settle = () => act(() => new Promise((r) => setTimeout(r, 50)));
 
@@ -88,7 +90,7 @@ test("a week generated for one department cannot be applied after adding another
   act(() => { api.addDepartment(); });
   expect(api.deptId).toBe("d2");
 
-  const apply = screen.queryByText(/Apply to rota/);
+  const apply = screen.queryByRole("button", { name: /Use this roster/ });
   if (apply) fireEvent.click(apply);
   await settle();
 
@@ -97,7 +99,8 @@ test("a week generated for one department cannot be applied after adding another
   expect({ cellsWritten, successClaimed: alerts.filter((m) => /Week applied/.test(m)) })
     .toEqual({ cellsWritten: 0, successClaimed: [] });
   expect(window.confirm).not.toHaveBeenCalled();
-  // And it says what happened, rather than going quiet.
+  // And it says what happened, rather than going quiet, on step 3 where the week is.
+  fireEvent.click(screen.getByRole("button", { name: /^Step 3,/ }));
   expect(screen.getByText(/generated for a different department/)).toBeInTheDocument();
 });
 
@@ -108,7 +111,7 @@ test("with the tab keyed on the department, adding one starts the tab afresh", a
   act(() => { api.addDepartment(); });
   await settle();
 
-  expect(screen.queryByText(/Apply to rota/)).toBeNull();
+  expect(screen.queryByRole("button", { name: /Use this roster/ })).toBeNull();
   expect(screen.queryByText(/generated for a different department/)).toBeNull();
   expect(api.data.cells).toEqual({});
 });
