@@ -13,6 +13,7 @@ import React, { useState } from "react";
 import { Plus, X, AlertTriangle } from "lucide-react";
 import { SHIFTS, personRuleText } from "./rosterEngine";
 import { prettyWeekday } from "./monthBuild";
+import { employedOn } from "./rosterConfig";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 const CATEGORY_LABELS = { ...SHIFT_LABELS, off: "Off" };
@@ -35,7 +36,12 @@ const RULE_TYPES = [
   ["together", "A shift in pairs (2 together)"],
   ["offOn", "Always off on … (days)"],
   ["onlyOn", "On … (days), only … (shifts)"],
+  ["fixed", "Fixed duty on a date (set by you)"],
 ];
+const isISO = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+const weekdayOf = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).getDay(); };
+// A duty the manager fixed, as the row and the panel say it.
+const fixedText = (f) => `Fixed: ${CATEGORY_LABELS[f.duty] || f.duty} on ${isISO(f.date) ? prettyWeekday(f.date) : f.date}`;
 const upperFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const andList = (words) => (words.length < 2 ? words.join("")
   : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
@@ -76,14 +82,14 @@ const Tag = ({ tone, children }) => (
 );
 
 export default function YourStaff({
-  rules, setRules, setPersonRules, editable, T, Card, Btn, Field, inputStyle, uid,
+  rules, setRules, setPersonRules, setFixedDuties, editable, T, Card, Btn, Field, inputStyle, uid,
   data, allStaff, firstDay, termOne, termMany, today,
 }) {
   /* Decided once, when the page opens: a ward with its own plural keeps the
      box for the whole visit, so clearing it to retype does not make it vanish. */
   const [showPlural] = useState(() => !!(rules.seniorTermPlural || "").trim());
   // One person's panel open at a time, and the rule being written in it, before Add.
-  const blankDraft = (staffId) => ({ staffId, type: "atMost", count: 1, shift: "night", days: [], shifts: [] });
+  const blankDraft = (staffId) => ({ staffId, type: "atMost", count: 1, shift: "night", days: [], shifts: [], date: "", duty: "morning" });
   const [draft, setDraft] = useState(blankDraft(""));
   const open = draft.staffId;
   const [allRequests, setAllRequests] = useState([]);   // rows showing every request
@@ -111,19 +117,31 @@ export default function YourStaff({
   const onWard = new Set(allStaff.map((s) => String(s.id)));
   const leftRules = ownRules.filter((r) => r && !onWard.has(String(r.staffId)));
 
+  /* ── Duties the manager fixed ──
+     Saved as one list beside the ward's settings (setFixedDuties removes it
+     when empty). Always kept, as an approved request is; one that has gone
+     by does nothing and is shown greyed until it is cleared. */
+  const fixedDuties = (rules.fixedDuties || []).filter(Boolean);
+  const fixedOf = (id) => fixedDuties.filter((f) => String(f.staffId) === String(id))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const pastFixed = fixedDuties.filter((f) => isISO(f.date) && f.date < today);
+
   // Only shifts the ward runs can carry a rule.
   const runShifts = SHIFTS.filter((sh) => rules.coverage[sh]?.max !== 0);
   const draftShift = runShifts.includes(draft.shift) ? draft.shift : runShifts[0];
   const onDays = DAY_TYPES.includes(draft.type);
+  const isFixed = draft.type === "fixed";
   // The week in the ward's own order, so a Monday ward reads Saturday and Sunday.
   const weekOrder = [...Array(7)].map((_, i) => (firstDay + i) % 7);
   const draftRule = onDays
     ? { type: draft.type, days: weekOrder.filter((d) => draft.days.includes(d)),
         ...(draft.type === "onlyOn" ? { shifts: runShifts.filter((sh) => draft.shifts.includes(sh)) } : {}) }
     : { type: draft.type, shift: draftShift, count: draft.type === "together" ? 2 : draft.count };
-  const draftComplete = onDays
-    ? draftRule.days.length > 0 && (draft.type === "offOn" || draftRule.shifts.length > 0)
-    : !!draftShift;
+  const fixedChoices = [...runShifts, "off"];
+  const draftComplete = isFixed ? isISO(draft.date) && fixedChoices.includes(draft.duty)
+    : onDays
+      ? draftRule.days.length > 0 && (draft.type === "offOn" || draftRule.shifts.length > 0)
+      : !!draftShift;
   const draftPerson = allStaff.find((s) => String(s.id) === draft.staffId);
 
   // Somebody's rules about days, as saved and readable.
@@ -168,8 +186,33 @@ export default function YourStaff({
 
   /* Why the rule as written cannot be added, in the manager's words. Asked
      before saving, so a list never holds two rules that fight each other. */
+  /* A fixed duty that could never be kept, said before it is saved: the
+     day is someone else's to decide, or the person cannot work it. */
+  const fixedProblem = () => {
+    const who = draftPerson.name, id = draftPerson.id, date = draft.date, duty = draft.duty;
+    const day = prettyWeekday(date);
+    const asked = (data.dutyRequests || []).find((r) => r.approved && String(r.staffId) === String(id) && r.date === date);
+    if (fixedOf(id).some((f) => f.date === date)) return `${who} already has a fixed duty on ${day}. Remove it first to change it.`;
+    if (asked) {
+      return `${who} has an approved duty request on ${day} (${CATEGORY_LABELS[asked.category] || asked.category}). `
+        + `Change it in the Duty requests tab instead.`;
+    }
+    if (!employedOn(draftPerson, date)) return `${who} is not on the rota on ${day}.`;
+    if ((draftPerson.leavePeriods || []).some((lp) => date >= lp.start && date <= lp.end)) return `${who} is on leave on ${day}.`;
+    if (rules.skipStaff.includes(draftPerson.id)) return `${who} is skipped, so Smart Roster does not roster them. Untick Skip first.`;
+    if (duty !== "off") {
+      const ticks = rules.staffShifts?.[id] || [];
+      if (ticks.length && !ticks.includes(duty)) {
+        return `${who} is set up for ${ampList(SHIFTS.filter((sh) => ticks.includes(sh)).map((sh) => SHIFT_LABELS[sh]))} only.`;
+      }
+      const offRule = dayRulesOf(id).find((r) => r.type === "offOn" && r.strength === "hard" && r.days.includes(weekdayOf(date)));
+      if (offRule) return `${who} has "${personRuleText(offRule)}" as a Must, which covers ${day}.`;
+    }
+    return null;
+  };
   const draftProblem = (() => {
     if (!draftPerson || !draftComplete) return null;
+    if (isFixed) return fixedProblem();
     const who = draftPerson.name;
     const dayRules = dayRulesOf(draftPerson.id);
     if (onDays) {
@@ -226,6 +269,10 @@ export default function YourStaff({
   })();
   const addOwnRule = () => {
     if (!draftPerson || !draftComplete || draftProblem) return;
+    if (isFixed) {
+      setFixedDuties([...fixedDuties, { id: uid(), staffId: draftPerson.id, date: draft.date, duty: draft.duty }]);
+      return;
+    }
     /* A fixed day off starts as Must: it is usually a promise made to the
        person. Every other rule starts as Try: kept whenever the week allows. */
     setPersonRules([...ownRules, {
@@ -233,6 +280,10 @@ export default function YourStaff({
     }]);
   };
   const startsAs = draft.type === "offOn" ? "Must" : "Try";
+  // What the rule being written says, before Add.
+  const preview = (name) => (isFixed
+    ? `${name}: ${CATEGORY_LABELS[draft.duty]} on ${prettyWeekday(draft.date)}, fixed by you — always kept.`
+    : `${name}: ${personRuleText(draftRule)} — starts as ${startsAs}.`);
   // Said before Add, for a fixed day off as it would be saved.
   const draftAfter = draftPerson && draftComplete && !draftProblem && draft.type === "offOn"
     ? [...ownRules, { ...draftRule, staffId: draftPerson.id, strength: "hard" }] : null;
@@ -297,23 +348,58 @@ export default function YourStaff({
     );
   };
 
-  const panel = (s, mine, requests) => (
-    <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: "#F6FAFA", border: `1px solid ${T.line}`, display: "grid", gap: 6 }}>
-      {mine.length > 0 ? mine.map(ruleLine)
-        : <span style={{ ...hint }}>No rules of {s.name}'s own yet: the ward's settings apply.</span>}
+  /* A fixed duty as a line: always kept, so no Must or Try; one gone by is greyed. */
+  const fixedLine = (f) => {
+    const past = isISO(f.date) && f.date < today;
+    const text = fixedText(f);
+    return (
+      <div key={f.id} style={{ borderTop: `1px solid ${T.line}`, padding: "4px 0", display: "flex", gap: 8, alignItems: "center",
+                               flexWrap: "wrap", opacity: past ? 0.55 : 1 }}>
+        <span style={{ fontSize: 14, flex: "1 1 180px", minWidth: 0 }}>{text}{past ? " (gone by)" : ""}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, borderRadius: 9, padding: "0 12px", minHeight: 44, display: "inline-flex",
+                       alignItems: "center", ...TAG.purple }}>Always kept</span>
+        {removeButton(`Remove: ${text}`, () => setFixedDuties(fixedDuties.filter((x) => x.id !== f.id)))}
+      </div>
+    );
+  };
+
+  const panel = (s, mine, requests, fixed) => (
+    <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: "#F6FAFA", border: `1px solid ${T.line}`,
+                  display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 6 }}>
+      {mine.length > 0 && mine.map(ruleLine)}
+      {fixed.length > 0 && fixed.map(fixedLine)}
+      {!mine.length && !fixed.length && (
+        <span style={{ ...hint }}>No rules of {s.name}'s own yet: the ward's settings apply.</span>
+      )}
       {requests.length > 0 && (
         <span style={{ ...hint, fontSize: 12 }}>
           Blue labels are approved duty requests. Change them in the Duty requests tab.
         </span>
       )}
       <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap", paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
-        <Field label="Add a rule">
-          <select aria-label={`Add a rule for ${s.name}`} style={{ ...field, width: "auto" }} disabled={!editable} value={draft.type}
+        {/* Its own label, not Field, so the longest kind of rule can narrow to a small phone. */}
+        <label style={{ display: "grid", gap: 5, flex: "1 1 240px", minWidth: 0, fontSize: 12.5, fontWeight: 600, color: T.inkSoft }}>
+          Add a rule
+          <select aria-label={`Add a rule for ${s.name}`} style={{ ...field, width: "100%", minWidth: 0 }} disabled={!editable} value={draft.type}
             onChange={(e) => setDraft({ ...draft, type: e.target.value, count: RULE_COUNTS[e.target.value]?.start ?? draft.count })}>
             {RULE_TYPES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
           </select>
-        </Field>
-        {!onDays && draft.type !== "together" && (
+        </label>
+        {isFixed && (
+          <>
+            <Field label="Date">
+              <input type="date" style={{ ...field, width: "auto" }} disabled={!editable} value={draft.date}
+                onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+            </Field>
+            <Field label="Duty">
+              <select style={{ ...field, width: "auto" }} disabled={!editable} value={draft.duty}
+                onChange={(e) => setDraft({ ...draft, duty: e.target.value })}>
+                {fixedChoices.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+              </select>
+            </Field>
+          </>
+        )}
+        {!isFixed && !onDays && draft.type !== "together" && (
           <Field label={draft.type === "apart" ? "Days" : "How many"}>
             <input type="number" style={{ ...field, width: 80 }} disabled={!editable}
               min={RULE_COUNTS[draft.type].min} max={RULE_COUNTS[draft.type].max} value={draft.count}
@@ -324,7 +410,7 @@ export default function YourStaff({
               }} />
           </Field>
         )}
-        {!onDays && (
+        {!isFixed && !onDays && (
           <Field label="Shift">
             <select style={{ ...field, width: "auto" }} disabled={!editable} value={draftShift}
               onChange={(e) => setDraft({ ...draft, shift: e.target.value })}>
@@ -363,9 +449,7 @@ export default function YourStaff({
           )}
         </div>
       )}
-      {draftComplete && (
-        <p style={{ ...hint, margin: "4px 0 0" }}>{s.name}: {personRuleText(draftRule)} — starts as {startsAs}.</p>
-      )}
+      {draftComplete && <p style={{ ...hint, margin: "4px 0 0" }}>{preview(s.name)}</p>}
       {draftFixedNote && <p style={{ ...hint, margin: 0 }}>{draftFixedNote}</p>}
       {draftShortNotes.map((text) => warn(text))}
       {draftProblem && warn(draftProblem)}
@@ -408,19 +492,32 @@ export default function YourStaff({
       <p style={{ ...hint, margin: "0 0 4px" }}>
         <strong>Ticked shifts</strong>: they only ever do those (no ticks = any shift).{" "}
         <strong>{termOne}</strong>: can take charge. <strong>Skip</strong>: left out; enter their duties by hand.{" "}
-        <span style={{ ...TAG.blue, borderRadius: 6, padding: "0 5px" }}>Blue</span>: approved duty requests.
+        <span style={{ ...TAG.blue, borderRadius: 6, padding: "0 5px" }}>Blue</span>: approved duty requests.{" "}
+        <span style={{ ...TAG.purple, borderRadius: 6, padding: "0 5px" }}>Purple</span>: duties you fixed, always kept.
       </p>
       <p style={{ ...hint, margin: "0 0 8px" }}>Staff on recorded leave are skipped automatically for those days.</p>
+      {/* Fixed duties that have gone by do nothing; one press clears them all, as one Undo step. */}
+      {pastFixed.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <button type="button" disabled={!editable}
+            onClick={() => setFixedDuties(fixedDuties.filter((f) => !(isISO(f.date) && f.date < today)))}
+            style={{ fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, minHeight: 44, padding: "0 14px", borderRadius: 10,
+                     border: `1px solid ${T.line}`, background: "#fff", color: T.lagoon, cursor: editable ? "pointer" : "not-allowed" }}>
+            Clear past fixed duties ({pastFixed.length})
+          </button>
+        </div>
+      )}
 
       {/* Days a Must leaves too few people for: said once each, for the whole list. */}
       {shortNow.map((d) => warn(shortDayText(d, ownRules), `short-${d}`))}
 
-      <div style={{ display: "grid" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
         {allStaff.map((s) => {
           const only = rules.staffShifts?.[s.id] || [];
           const skipped = rules.skipStaff.includes(s.id);
           const isSenior = rules.seniorStaff.includes(s.id);
           const mine = rulesOf(s.id);
+          const fixed = fixedOf(s.id);
           const requests = requestsOf(s.id);
           const showAll = allRequests.includes(String(s.id));
           const shownRequests = showAll ? requests : requests.slice(0, REQUESTS_SHOWN);
@@ -438,6 +535,11 @@ export default function YourStaff({
                       <Tag key={r.id || `${r.date}|${r.category}`} tone="blue">
                         {CATEGORY_LABELS[r.category] || r.category} on {prettyWeekday(r.date)}
                       </Tag>
+                    ))}
+                    {fixed.map((f) => (
+                      <span key={f.id} style={{ opacity: isISO(f.date) && f.date < today ? 0.55 : 1 }}>
+                        <Tag tone="purple">{fixedText(f)}</Tag>
+                      </span>
                     ))}
                     {requests.length > REQUESTS_SHOWN && (
                       <button type="button" aria-expanded={showAll}
@@ -473,10 +575,10 @@ export default function YourStaff({
                   onClick={() => setDraft(blankDraft(isOpen ? "" : String(s.id)))}
                   style={{ fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, minHeight: 44, padding: "0 14px",
                            borderRadius: 10, border: `1px solid ${T.line}`, background: "#fff", color: T.lagoon, cursor: "pointer" }}>
-                  {isOpen ? "Close" : mine.length ? `Rules (${mine.length})` : "+ Rule"}
+                  {isOpen ? "Close" : mine.length + fixed.length ? `Rules (${mine.length + fixed.length})` : "+ Rule"}
                 </button>
               </div>
-              {isOpen && panel(s, mine, requests)}
+              {isOpen && panel(s, mine, requests, fixed)}
             </div>
           );
         })}

@@ -153,7 +153,7 @@ describe("what usually gives way first", () => {
         soft3: ["What may follow what"],
         soft2: ["Sharing nights fairly", "Sharing non-official days fairly"],
         soft1: [],
-        must: ["Staff numbers", "Working days (most)", "Approved duty requests", "People's own Must rules", "Most off days"],
+        must: ["Staff numbers", "Working days (most)", "Approved duty requests", "Duties you fixed", "People's own Must rules", "Most off days"],
       },
       off: ["Fewest off days"],
     });
@@ -606,7 +606,7 @@ describe("the columns on the screen", () => {
   test("built from the saved strengths, and change as soon as one does", async () => {
     await openWard(rota({ weeklyMax: { night: 2 } }));
     const column = (name) => within(screen.getByRole("region", { name })).queryAllByText(/./).map((n) => n.textContent);
-    expect(column("Must")).toEqual(expect.arrayContaining(["Staff numbers", "Working days (most)", "Approved duty requests", "Most Nights a week", "Most off days", "What may follow what"]));
+    expect(column("Must")).toEqual(expect.arrayContaining(["Staff numbers", "Working days (most)", "Approved duty requests", "Duties you fixed", "Most Nights a week", "Most off days", "What may follow what"]));
     expect(column("Bend first")).toEqual(expect.arrayContaining(["In a row, and working days in a row"]));
     choose("Night: if it can't all fit", "soft3");
     expect(column("Bend if needed")).toContain("Most Nights a week");

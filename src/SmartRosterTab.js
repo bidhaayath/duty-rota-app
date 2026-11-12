@@ -311,6 +311,13 @@ export default function SmartRosterTab({
     d.rosterRules = next;
     return d;
   });
+  // Duties the manager fixed: the same, so clearing the last one leaves nothing behind.
+  const setFixedDuties = (list) => update((d) => {
+    const next = { ...rules, fixedDuties: list };
+    if (!list.length) delete next.fixedDuties;
+    d.rosterRules = next;
+    return d;
+  });
 
   const sel = { ...inputStyle, width: "auto", minWidth: 118, cursor: "pointer", padding: "7px 9px" };
   const hint = { fontSize: 12.5, color: T.inkSoft, lineHeight: 1.6, margin: "0 0 14px" };
@@ -409,7 +416,8 @@ export default function SmartRosterTab({
       <GivesWay rules={rules} T={T} Card={Card} termMany={termMany} />
 
       {/* ── Your staff ── */}
-      <YourStaff rules={rules} setRules={setRules} setPersonRules={setPersonRules} editable={staffEditable}
+      <YourStaff rules={rules} setRules={setRules} setPersonRules={setPersonRules} setFixedDuties={setFixedDuties}
+        editable={staffEditable}
         T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle} uid={uid} data={data}
         allStaff={allStaff} firstDay={firstDay} termOne={termOne} termMany={termMany} today={today} />
 

@@ -195,6 +195,7 @@ describe("the rows", () => {
     expect([...box.options].map((o) => o.text)).toEqual([
       "At most … of a shift a week", "At least … of a shift a week", "Gap between shifts: at least … days",
       "A shift in pairs (2 together)", "Always off on … (days)", "On … (days), only … (shifts)",
+      "Fixed duty on a date (set by you)",
     ]);
     expect(screen.getByLabelText("How many")).toBeInTheDocument();
     fireEvent.change(box, { target: { value: "apart" } });

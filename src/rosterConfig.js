@@ -211,6 +211,18 @@ export const REST_LOOK_DAYS = 14;
    very long time — which is what it means. */
 export const LOOK_BACK_ALL = 36500;
 
+/* ── Duties the manager fixed ──
+   rosterRules.fixedDuties: [{ id, staffId, date, duty }], duty one of the
+   shifts or "off". Kept exactly as an approved request is kept — the engine
+   puts them in first and nothing moves them — and marked as the manager's,
+   so what is said about them says so. Only those in the period, and only a
+   readable one: a ward that fixes none is handed exactly what it was.   */
+export const FIXED_DUTIES = ["morning", "afternoon", "evening", "night", "off"];
+export const fixedDutiesIn = (rules, from, to) => (rules.fixedDuties || [])
+  .filter((f) => f && f.staffId != null && FIXED_DUTIES.includes(f.duty)
+    && typeof f.date === "string" && f.date >= from && f.date <= to)
+  .map((f) => ({ staffId: f.staffId, date: f.date, category: f.duty, source: "manager" }));
+
 /* ── The configuration the engine is given ──
    `staff` is everyone employed somewhere in from..to; `lookFrom`..`lookTo`
    is the history read for fairness. Everything else comes from the ward's
@@ -288,9 +300,12 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     // gives way, and only to keep a shift covered.
     ruleStates: rules.ruleStates,
     nonOfficialDates: nonOfficialFor(data, from, to),
-    requests: (data.dutyRequests || [])
-      .filter((r) => r.approved && r.date >= from && r.date <= to)
-      .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category })),
+    requests: [
+      ...(data.dutyRequests || [])
+        .filter((r) => r.approved && r.date >= from && r.date <= to)
+        .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category })),
+      ...fixedDutiesIn(rules, from, to),
+    ],
     history: {
       cells: history, nonOfficialDates: nonOfficialFor(data, lookFrom, lookTo),
       // Fairness counts nothing before this; absent = everything given.
