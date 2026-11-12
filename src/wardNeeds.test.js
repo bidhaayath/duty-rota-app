@@ -151,7 +151,7 @@ describe("what usually gives way first", () => {
       columns: {
         soft4: ["People's own Try rules", "Most Nights a week", "In a row, and working days in a row"],
         soft3: ["What may follow what"],
-        soft2: ["Sharing nights fairly"],
+        soft2: ["Sharing nights fairly", "Sharing non-official days fairly"],
         soft1: [],
         must: ["Staff numbers", "Working days (most)", "Approved duty requests", "People's own Must rules", "Most off days"],
       },
@@ -293,6 +293,8 @@ const CONTROLS = [
     (r) => ({ weeklyDuties: { ...r.weeklyDuties, min: 4, max: 4 } })],
   ["working days in a row +", () => press("Working days in a row, at most", "more"),
     () => ({ maxDaysOn: 6 })],
+  ["share non-official days fairly, protect most", () => choose("Share non-official days (Fridays and holidays) fairly: if it can't all fit", "soft1"),
+    (r) => ({ ruleStates: { ...r.ruleStates, fairNonOfficial: { state: "soft", priority: 1 } } })],
   ["share nights fairly, bend first", () => choose("Share nights fairly: if it can't all fit", "soft4"),
     (r) => ({ ruleStates: { ...r.ruleStates, fairNights: { state: "soft", priority: 4 } } })],
   ["in-charge on every shift, bend if needed", () => choose("Seniors on every shift: if it can't all fit", "soft3"),
@@ -481,9 +483,21 @@ describe("each person's week", () => {
     expect(column("Protect most")).toContain("Sharing nights fairly");
   });
 
-  test("no Night shift, no night fairness box", async () => {
+  test("no Night shift, no night fairness box; non-official days always have one", async () => {
     await openWard(rota({ coverage: { night: { min: 0, max: 0 } } }));
     expect(screen.queryByLabelText("Share nights fairly: if it can't all fit")).toBeNull();
+    expect(picked("Share non-official days (Fridays and holidays) fairly: if it can't all fit")).toBe("Protect");
+  });
+
+  test("share non-official days fairly: Protect until changed, no Must, Ignore switches it off", async () => {
+    const start = await openWard(rota(undefined));
+    const label = "Share non-official days (Fridays and holidays) fairly: if it can't all fit";
+    expect([...screen.getByLabelText(label).options].map((o) => o.text))
+      .toEqual(["Protect most", "Protect", "Bend if needed", "Bend first", "Ignore (off)"]);
+    expect(h.data).toBe(start);
+    choose(label, "ignore");
+    expect(h.data.rosterRules.ruleStates.fairNonOfficial).toEqual({ state: "disabled", priority: 1 });
+    expect(screen.getByText(/^Switched off: .*Sharing non-official days fairly/)).toBeInTheDocument();
   });
 
   test("the columns list working days in a row on its own once it has its own level", async () => {

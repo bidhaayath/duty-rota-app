@@ -166,6 +166,47 @@ describe("sharing nights fairly: ruleStates.fairNights", () => {
   });
 });
 
+describe("sharing non-official days fairly: ruleStates.fairNonOfficial", () => {
+  const at = (state, priority = 1) => ({ fairNonOfficial: { state, priority } });
+  /* The seeded wards keep the Friday rule, so every Friday is non-official;
+     with two weeks' look-back the history weighs on who works them. */
+  test.each(SEEDS)("ward %i: saved at Protect, the level its box shows, it builds exactly as never saved", (seed) => {
+    const { start, data } = seededWard(seed);
+    expect(build(withStates(data, at("soft", 2)), start)).toBe(build(data, start));
+  });
+
+  test("a Must saved anyway builds as Protect most", () => {
+    const { start, data } = seededWard(2);
+    expect(build(withStates(data, at("hard", 1)), start)).toBe(build(withStates(data, at("soft", 1)), start));
+  });
+
+  test("the price of an uneven share of non-official duty: as always at every level but Ignore", () => {
+    const { start, data } = seededWard(1);
+    expect(weightsOf(data, start).fairNonOfficial).toBe(3);
+    expect(weightsOf(withStates(data, at("soft", 1)), start).fairNonOfficial).toBe(3);
+    expect(weightsOf(withStates(data, at("disabled")), start).fairNonOfficial).toBe(0);
+    expect(weightsOf(withStates(data, at("disabled")), start).fairNight).toBe(3);
+  });
+
+  test("Protect most, Bend first and Ignore each change some week", () => {
+    const changes = { soft1: false, soft4: false, ignore: false };
+    for (const seed of SEEDS) {
+      const { start, data } = seededWard(seed);
+      const base = build(data, start);
+      if (build(withStates(data, at("soft", 1)), start) !== base) changes.soft1 = true;
+      if (build(withStates(data, at("soft", 4)), start) !== base) changes.soft4 = true;
+      if (build(withStates(data, at("disabled")), start) !== base) changes.ignore = true;
+    }
+    expect(changes).toEqual({ soft1: true, soft4: true, ignore: true });
+  }, 240000);
+
+  test("Ini's month build hands the engine the same key", () => {
+    const { data } = seededWard(3);
+    expect(prepareMonth({ data: withStates(data, at("disabled")), month: "2026-11", lookFrom: null }).config.ruleStates.fairNonOfficial)
+      .toEqual({ state: "disabled", priority: 1 });
+  });
+});
+
 describe("working days in a row: ruleStates.daysInRow", () => {
   test.each(SEEDS)("ward %i: saved at In a row's own level, it builds exactly as never saved", (seed) => {
     const { start, data } = seededWard(seed);

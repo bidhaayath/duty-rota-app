@@ -666,8 +666,9 @@ function costWeights(cfg) {
   w.restriction = HARD;
   w.absMax = HARD;
 
-  // Sharing nights fairly: priced as always at every level but Ignore.
+  // Sharing nights, and non-official days, fairly: priced as always at every level but Ignore.
   w.fairNight = R.fairNights?.state === 'disabled' ? 0 : w.fair;
+  w.fairNonOfficial = R.fairNonOfficial?.state === 'disabled' ? 0 : w.fair;
 
   // A shift with nobody in charge: 400 at every Try level, as always; a Must's price as a Must.
   const seniors = R.seniors?.state;
@@ -1278,7 +1279,7 @@ export function auditRoster(cfg, ctx, cells) {
         if (v > hi) hi = v;
       }
       // A measure the ward has set to Ignore costs nothing; any other is priced as always.
-      const weight = key === 'night' ? W.fairNight : W.fair;
+      const weight = key === 'night' ? W.fairNight : key === 'nonOfficial' ? W.fairNonOfficial : W.fair;
       if (hi > lo) cost += weight * (hi - lo);
     }
   }
@@ -2258,12 +2259,13 @@ function buildOnce(cfg, seed, ctx) {
            does the next measure get a say. That is the staged behaviour the
            specification asks for, applied to who gets picked. */
         const F = cfg.fairnessStates || {};
-        /* Sharing nights fairly has the ward's own strength where one is
-           saved: Ignore leaves it out, and Protect most to Bend first set its
-           place among the other measures, 1 to 4 (there is no Must for
-           fairness: one saved is read as Protect most). Never saved, it is
-           as it always was. */
-        const ownFair = (k) => (k === 'shift' && shift === 'night' ? R.fairNights : null);
+        /* Sharing nights, and non-official days, fairly have the ward's own
+           strength where one is saved: Ignore leaves the measure out, and
+           Protect most to Bend first set its place among the others, 1 to 4
+           (there is no Must for fairness: one saved is read as Protect most).
+           Never saved, each is as it always was. */
+        const ownFair = (k) => (k === 'shift' && shift === 'night' ? R.fairNights
+          : k === 'nonOfficial' ? R.fairNonOfficial : null);
         const fState = (k) => {
           const o = ownFair(k);
           if (o?.state) return o.state === 'disabled' ? 'disabled' : 'soft';

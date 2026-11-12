@@ -98,9 +98,10 @@ export const COLUMNS = ["soft4", "soft3", "soft2", "soft1", "must"];
 export const ABSENT = {
   seniors: { state: "soft", priority: 1 },
   fairNights: { state: "soft", priority: 2 },
+  fairNonOfficial: { state: "soft", priority: 2 },
 };
 // Strengths with no Must: a saved Must counts as Protect most.
-const NO_MUST = ["fairNights"];
+const NO_MUST = ["fairNights", "fairNonOfficial"];
 
 export function givesWay(rules, { termMany = "Seniors" } = {}) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
@@ -120,6 +121,7 @@ export function givesWay(rules, { termMany = "Seniors" } = {}) {
     ...((rules.sequenceRules || []).length ? [["What may follow what", "sequence"]] : []),
     ...(asksSenior ? [[`${termMany} on every shift`, "seniors"]] : []),
     ...(run.includes("night") ? [["Sharing nights fairly", "fairNights"]] : []),
+    ["Sharing non-official days fairly", "fairNonOfficial"],
   ];
   columns.must.push("Staff numbers");
   if (rules.weeklyDuties?.max != null) columns.must.push("Working days (most)");
@@ -364,6 +366,7 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
   // Fairness the ward can set the strength of: nights only where it runs them.
   const fairRows = [
     ...(run.includes("night") ? [["fairNights", "Share nights fairly"]] : []),
+    ["fairNonOfficial", "Share non-official days (Fridays and holidays) fairly"],
   ];
   const strength = (key, label, fallback) => (
     <StrengthSelect label={label} value={rules.ruleStates?.[key]} fallback={fallback} editable={editable} T={T}
