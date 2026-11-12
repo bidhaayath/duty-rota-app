@@ -338,16 +338,19 @@ export function finishMonth(prep, result, data) {
   const mustGroups = new Set();
   report.relaxations.forEach((r) => {
     /* One person's own rule, kept apart from the ward's of the same words
-       and marked Must or Try. Days between is missed on a day, so it names
-       the day; the others name the week. */
+       and marked Must or Try. Days between and the rules about days are
+       missed on a day, so they name the day — a rule about days with the
+       shift worked; the others name the week. */
     if (r.personal) {
-      const daily = r.ruleType === "apart";
+      const onDays = r.ruleType === "offOn" || r.ruleType === "onlyOn";
+      const daily = r.ruleType === "apart" || onDays;
       if (daily ? !inPeriod(r.date) : !weekTouches(r.date)) return;
       const must = r.strength === "hard";
       const key = `${r.rule} (${must ? "Must" : "Try"})`;
       if (must) mustGroups.add(key);
       const who = nameOf[r.staffId] || "someone";
-      (groups[key] = groups[key] || []).push(daily ? `${who} (${prettyWeekday(r.date)})` : `${who} (week of ${prettyDay(r.date)})`);
+      (groups[key] = groups[key] || []).push(onDays ? `${who} (${prettyWeekday(r.date)} ${r.shift})`
+        : daily ? `${who} (${prettyWeekday(r.date)})` : `${who} (week of ${prettyDay(r.date)})`);
       return;
     }
     const weekly = r.staffId != null;

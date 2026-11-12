@@ -508,10 +508,13 @@ export function capacityByWeek(cfg, dates, staff, keep = {}) {
   const seniorPerDay = SHIFTS.reduce((n, sh) => n + seniorsNeededOn(cfg, sh), 0);
   const seniors = staff.filter((s) => isSenior(cfg, s));
   const weeks = [...new Set(dates.map(weekOf))];
+  // A day somebody's own Must keeps them off is not a day they are here.
+  const byDay = dayRulesOf(cfg);
+  const fixedOff = (s, d) => isMust(byDay[s.id]?.[parseISO(d).getDay()].off);
   return weeks.map((week) => {
     const ds = dates.filter((d) => weekOf(d) === week);
     const room = (list) => list.reduce((n, s) => {
-      const daysHere = ds.filter((d) => !onLeave(s, d) && !keep[`${s.id}|${d}`]).length;
+      const daysHere = ds.filter((d) => !onLeave(s, d) && !keep[`${s.id}|${d}`] && !fixedOff(s, d)).length;
       return n + Math.min(daysHere, dutyCeiling(cfg, s));
     }, 0);
     const cap = room(staff);
@@ -681,6 +684,10 @@ function costWeights(cfg) {
      together  the shifts kept in runs, and how long: [{ sh, n, rule? }]
      apart     clear days wanted between two of a shift; none = no ask
      own       their own rules by "type:shift", or nothing for the ward's
+     days      their rules for each day of the week, 0 for Sunday to 6 for
+               Saturday: [{ off?, only?, allow? }], or nothing without one
+     offMax    the most off days a week, as it applies to them
+     dutyMin   the fewest duties a week, likewise
 
    Where somebody has their own most or fewest of a shift, the ward's is
    left out for them: their rule replaces it rather than adding to it, and
@@ -691,13 +698,27 @@ function costWeights(cfg) {
      atMost    at most `count` of the shift a week
      atLeast   at least `count` of the shift a week
      apart     at least `count` clear days between two of the shift
-     together  the shift kept in runs of `count`                         */
+     together  the shift kept in runs of `count`
+
+   A rule about days of the week has `days` in place of the shift and the
+   count — weekday numbers, as above — and somebody may hold several:
+     offOn     always off on `days`
+     onlyOn    on `days`, only the shifts listed in `shifts`             */
 const LEAST_COUNT = { atMost: 0, atLeast: 0, apart: 1, together: 2 };
+const DAY_RULES = ['offOn', 'onlyOn'];
+const isWeekday = (d) => Number.isInteger(d) && d >= 0 && d <= 6;
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const listWords = (words) => (words.length < 2 ? words.join('')
+  : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
 
 /* The rule as the manager would say it, for reports and the screen. */
 export function personRuleText(rule) {
   const { type, shift, count } = rule;
   const many = (n) => `${n} ${shift}${n === 1 ? '' : 's'}`;
+  const on = () => listWords((rule.days || []).map((d) => DAY_NAMES[d]));
+  if (type === 'offOn') return `always off on ${on()}`;
+  if (type === 'onlyOn') return `on ${on()} only ${listWords((rule.shifts || []).map((sh) => `${sh}s`))}`;
   if (type === 'atMost') return count === 0 ? `no ${shift}s` : `at most ${many(count)} a week`;
   if (type === 'atLeast') return `at least ${many(count)} a week`;
   if (type === 'apart') return `at least ${count} day${count === 1 ? '' : 's'} between ${shift}s`;
@@ -705,8 +726,34 @@ export function personRuleText(rule) {
   return type;
 }
 
+/* People's rules about days of the week, by person: seven slots each,
+   Sunday first, holding that day's "off" rule, or its "only" rule with the
+   shifts it allows. Nobody without one is in here. A rule that cannot be
+   read is left out rather than guessed at. */
+function dayRulesOf(cfg) {
+  const byDay = {};
+  (cfg.personRules || []).forEach((r) => {
+    if (!r || !DAY_RULES.includes(r.type)) return;
+    if (!Array.isArray(r.days) || !r.days.length || !r.days.every(isWeekday)) return;
+    const only = r.type === 'onlyOn';
+    if (only && !(Array.isArray(r.shifts) && r.shifts.length
+        && r.shifts.every((sh) => SHIFTS.includes(sh)))) return;
+    const id = String(r.staffId);
+    const week = byDay[id] || (byDay[id] = [...Array(7)].map(() => ({})));
+    r.days.forEach((d) => {
+      if (only) { week[d].only = r; week[d].allow = new Set(r.shifts); }
+      else week[d].off = r;
+    });
+  });
+  return byDay;
+}
+const isMust = (rule) => !!rule && rule.strength === 'hard';
+
 function personLimits(cfg, blockMax) {
-  const ward = { cap: {}, min: {}, block: blockMax, apart: {} };
+  const ward = {
+    cap: {}, min: {}, block: blockMax, apart: {},
+    offMax: cfg.weeklyPerStaff?.offMax, dutyMin: cfg.weeklyDuties?.min,
+  };
   SHIFTS.forEach((sh) => {
     ward.cap[sh] = cfg.weeklyPerStaff?.[sh];
     ward.min[sh] = cfg.weeklyMin?.[sh];
@@ -718,7 +765,7 @@ function personLimits(cfg, blockMax) {
 
   // A rule that cannot be read is left out rather than guessed at. Should a
   // list ever hold two of a kind, the later one wins.
-  const mine = {};
+  const mine = {}, byDay = dayRulesOf(cfg);
   (cfg.personRules || []).forEach((r) => {
     if (!r || !(r.type in LEAST_COUNT) || !SHIFTS.includes(r.shift)) return;
     if (!Number.isInteger(r.count) || r.count < LEAST_COUNT[r.type]) return;
@@ -727,8 +774,17 @@ function personLimits(cfg, blockMax) {
   });
 
   const own = {};
-  for (const [id, rs] of Object.entries(mine)) {
-    const L = { cap: { ...ward.cap }, min: { ...ward.min }, block: { ...blockMax }, apart: {}, own: rs };
+  for (const id of new Set([...Object.keys(mine), ...Object.keys(byDay)])) {
+    const rs = mine[id] || {};
+    const L = {
+      cap: { ...ward.cap }, min: { ...ward.min }, block: { ...blockMax }, apart: {}, own: rs,
+      days: byDay[id], offMax: ward.offMax, dutyMin: ward.dutyMin,
+    };
+    /* More days fixed off than the ward's most: theirs is the number for
+       them, and the fewest duties comes down to what is left of the week. */
+    const fixedOff = (byDay[id] || []).filter((d) => d.off).length;
+    if (L.offMax != null && fixedOff > L.offMax) L.offMax = fixedOff;
+    if (L.dutyMin != null && L.dutyMin > 7 - fixedOff) L.dutyMin = 7 - fixedOff;
     const runs = {};
     SHIFTS.forEach((sh) => {
       const most = rs[`atMost:${sh}`], least = rs[`atLeast:${sh}`];
@@ -782,11 +838,12 @@ export function rosterContext(cfg, dates, staff) {
   (cfg.requests || []).forEach((r) => { requested[`${r.staffId}|${r.date}`] = r.category; });
 
   // Date arithmetic, done once and looked up thereafter.
-  const prevOf = {}, weekOf = {}, fridayOf = {};
+  const prevOf = {}, weekOf = {}, fridayOf = {}, dowOf = {};
   dates.forEach((d, i) => {
     prevOf[d] = i > 0 ? dates[i - 1] : shiftDate(d, -1);
     weekOf[d] = startOfWeek(d, cfg.weekStartsOn ?? 0);
-    fridayOf[d] = isFriday(d);
+    dowOf[d] = parseISO(d).getDay();
+    fridayOf[d] = dowOf[d] === 5;
   });
   const weekDays = {}, datesOfWeek = {}, nextOf = {};
   dates.forEach((d, i) => {
@@ -850,10 +907,18 @@ export function rosterContext(cfg, dates, staff) {
     }
   });
 
+  /* Anyone whose own rule keeps them off on Fridays. Sharing Friday offs and
+     non-official duty evenly is about the people who can be given either. */
+  const fridayOffIds = new Set(staff.map((s) => String(s.id))
+    .filter((id) => limitFor(id, 'days')?.[5].off));
+  // Whether anybody has a Try rule about days: those are held while rearranging.
+  const dayTry = staff.some((s) => (limitFor(s.id, 'days') || [])
+    .some((d) => (d.off && !isMust(d.off)) || (d.only && !isMust(d.only))));
+
   return {
     W: costWeights(cfg),
     staff, dates, keep, histCats, requested, prevOf, nextOf, weekOf, weekDays, datesOfWeek, fridayOf,
-    nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed, limitFor, lastSeen,
+    dowOf, fridayOffIds, dayTry, nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed, limitFor, lastSeen,
     seniorIds: new Set(staff.filter((s) => isSenior(cfg, s)).map((s) => String(s.id))),
     maxDaysOn: cfg.maxConsecutiveDays ?? 4,
     absMax: cfg.absoluteMaxDaysOn ?? 6,
@@ -882,7 +947,7 @@ export function auditRoster(cfg, ctx, cells) {
   const {
     staff, dates, weekOf, weekDays, fridayOf, nonOff, requested,
     banned, allowed, forced, cov, seniorNeed, seed, seniorIds,
-    maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek, limitFor, lastSeen,
+    maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek, limitFor, lastSeen, dowOf, fridayOffIds,
   } = ctx;
 
   const shortfalls = [], seniorGaps = [], issues = [];
@@ -928,6 +993,8 @@ export function auditRoster(cfg, ctx, cells) {
     const blockMax = limitFor(id, 'block');
     const caps = limitFor(id, 'cap');
     const mins = limitFor(id, 'min');
+    const offMax = limitFor(id, 'offMax');
+    const dMin = limitFor(id, 'dutyMin');
     /* Shifts kept together, and how many to a run. None set: nothing below
        looks at runs at all. */
     const together = limitFor(id, 'together');
@@ -938,6 +1005,8 @@ export function auditRoster(cfg, ctx, cells) {
     const apart = limitFor(id, 'apart');
     const lastAt = {};
     if (lastSeen[id]) Object.entries(lastSeen[id]).forEach(([sh, back]) => { lastAt[sh] = -back; });
+    // Their rules for each day of the week; nothing for most people.
+    const days = limitFor(id, 'days');
     const t = totals[id] = {
       morning: 0, afternoon: 0, evening: 0, night: 0, off: 0, duties: 0,
       fridayOff: 0, fridayAfternoon: 0, nonOfficial: 0, daysAvailable: 0,
@@ -952,6 +1021,18 @@ export function auditRoster(cfg, ctx, cells) {
       // Leave and preserved cells belong to the manager, not the engine.
       // They also break the chain: nobody is "on a run" through sick leave.
       if (cat == null) { runCat = null; runLen = 0; workRun = 0; continue; }
+
+      /* Their own rule for this day of the week: off, or only certain
+         shifts. An off day always fits "only"; a day worked on a day they
+         are always off is one miss, whichever shift it was. */
+      const today = days && days[dowOf[date]];
+      if (today && cat !== OFF_CAT) {
+        if (today.off) {
+          flag(priceOf(today.off, COST.mustRule), { date, staffId: id, shift: cat, kind: 'personal', rule: today.off });
+        } else if (today.only && !today.allow.has(cat)) {
+          flag(priceOf(today.only, COST.block), { date, staffId: id, shift: cat, kind: 'personal', rule: today.only });
+        }
+      }
 
       if (apart[cat]) {
         if (lastAt[cat] != null && day - lastAt[cat] - 1 < apart[cat]) {
@@ -984,7 +1065,9 @@ export function auditRoster(cfg, ctx, cells) {
       if (cat === OFF_CAT) {
         workRun = 0;
         if (runLen > 1 && cfg.singleOffDays !== false) {
-          flag(W.doubleOff, { date, shift: OFF_CAT, kind: 'doubleOff' });
+          // Two days their own rule fixes side by side are not ours to split.
+          const fixedPair = today && today.off && days[(dowOf[date] + 6) % 7].off;
+          if (!fixedPair) flag(W.doubleOff, { date, shift: OFF_CAT, kind: 'doubleOff' });
         }
       } else {
         workRun += 1;
@@ -995,11 +1078,12 @@ export function auditRoster(cfg, ctx, cells) {
 
       const wk = weekOf[date];
       const w = weeks[wk] || (weeks[wk] = {
-        days: 0, duties: 0, off: 0, rest: 0, fixed: 0,
+        days: 0, duties: 0, off: 0, rest: 0, fixed: 0, ownOff: 0,
         morning: 0, afternoon: 0, evening: 0, night: 0,
       });
       w.days += 1;
       if (requested[`${id}|${date}`]) w.fixed += 1;
+      if (today && today.off) w.ownOff += 1;
       if (cat === OFF_CAT) {
         w.off += 1;
         // A rest day after a night is recognisable, and the ward decides
@@ -1065,10 +1149,14 @@ export function auditRoster(cfg, ctx, cells) {
            Priced as a preference whatever the ward has set: a scaled target
            must lose to an uncovered shift and to a shift over its most, or
            the ward is left short — or overstaffed — for the sake of somebody
-           who was away. Ignore still switches it off.                     */
+           who was away. Ignore still switches it off.
+
+           Days their own rule fixes off, falling while they are here, are
+           theirs whatever the scaling says: the most is never below them. */
         if (weekDays[wk] === 7 && w.days > w.fixed) {
           const free = w.off - w.rest;
-          const hi = partWeekOffs(cfg.weeklyPerStaff?.offMax, w.days);
+          const scaled = partWeekOffs(offMax, w.days);
+          const hi = scaled == null ? null : Math.max(scaled, w.ownOff);
           if (W.offMax && hi != null && free > hi) {
             flag(COST.offMax * (free - hi), { date: wk, staffId: id, shift: OFF_CAT, kind: 'partOffMax' });
           }
@@ -1080,11 +1168,9 @@ export function auditRoster(cfg, ctx, cells) {
         }
         continue;
       }
-      const dMin = cfg.weeklyDuties?.min;
       if (dMin != null && w.duties < dMin) {
         flag(W.dutyMin * (dMin - w.duties), { date: wk, staffId: id, shift: OFF_CAT, kind: 'dutyMin' });
       }
-      const offMax = cfg.weeklyPerStaff?.offMax;
       if (offMax != null && offs > offMax) {
         flag(W.offMax * (offs - offMax), { date: wk, staffId: id, shift: OFF_CAT, kind: 'offMax' });
       }
@@ -1150,13 +1236,16 @@ export function auditRoster(cfg, ctx, cells) {
   const present = staff.filter((s) => totals[String(s.id)].daysAvailable > 0);
   if (present.length > 1) {
     for (const key of ['duties', 'night', 'off', 'fridayOff', 'nonOfficial']) {
+      // Anyone always off on Fridays is left out of the two Friday measures.
+      const leaveOut = fridayOffIds.size > 0 && (key === 'fridayOff' || key === 'nonOfficial');
       let lo = Infinity, hi = -Infinity;
       for (const s of present) {
+        if (leaveOut && fridayOffIds.has(String(s.id))) continue;
         const v = totals[String(s.id)][key];
         if (v < lo) lo = v;
         if (v > hi) hi = v;
       }
-      cost += W.fair * (hi - lo);
+      if (hi > lo) cost += W.fair * (hi - lo);
     }
   }
 
@@ -1177,8 +1266,14 @@ export function auditRoster(cfg, ctx, cells) {
    Three kinds of change, which between them can reach any rota from any
    other: give somebody a different duty; swap two people's duties on a day;
    swap one person's duties between two days. Approved requests, leave and
-   preserved cells are never touched.                                     */
-function polish(cfg, ctx, startCells, seedNumber) {
+   preserved cells are never touched.
+
+   `bendTry` lets people's Try rules about days give way. Left off, a day
+   such a rule speaks for can only move towards the rule, as a Must's can:
+   a rearrangement that costs somebody their day off is easy to stumble
+   into and takes two people and two days to undo, so it is not offered
+   until a shift has been left short without it.                          */
+function polish(cfg, ctx, startCells, seedNumber, bendTry = false) {
   const { staff, dates, keep, requested } = ctx;
   /* Counted in steps, not seconds. A budget in seconds means a fast laptop
      and a slow phone produce different rotas from the same settings, and a
@@ -1203,6 +1298,11 @@ function polish(cfg, ctx, startCells, seedNumber) {
   // Which cells are ours to change, and what may go in them.
   const movable = [];
   const choices = {};
+  /* A day somebody's own rule speaks for: off and nothing else, or only the
+     shifts it lists. Held here rather than priced, so a Must is never
+     traded away and no step is spent finding that out. */
+  const narrowed = {};
+  const held = (rule) => !!rule && (isMust(rule) || !bendTry);
   for (const s of staff) {
     const id = String(s.id);
     const only = cfg.staffShifts?.[id];
@@ -1211,13 +1311,22 @@ function polish(cfg, ctx, startCells, seedNumber) {
       : SHIFTS.slice();
     // A shift the ward never runs is not an option, however free somebody is.
     choices[id] = [...shifts.filter((sh) => ctx.cov[sh].max !== 0), OFF_CAT];
+    const days = ctx.limitFor(id, 'days');
     for (const date of dates) {
       const key = `${id}|${date}`;
       if (startCells[key] == null) continue;   // on leave: not a cell we own
       if (keep[key] || requested[key]) continue;
+      const today = days && days[ctx.dowOf[date]];
+      if (today && held(today.off)) {
+        if (startCells[key] === OFF_CAT) continue;   // off already, and staying off
+        narrowed[key] = [OFF_CAT];
+      } else if (today && held(today.only)) {
+        narrowed[key] = choices[id].filter((c) => c === OFF_CAT || today.allow.has(c));
+      }
       movable.push({ id, date, key });
     }
   }
+  const may = (m, cat) => (narrowed[m.key] || choices[m.id]).includes(cat);
   if (movable.length < 2) return startCells;
   const keys = movable.map((m) => m.key);
 
@@ -1270,7 +1379,7 @@ function polish(cfg, ctx, startCells, seedNumber) {
     if (roll < 0.45 || !dateKeys.length || !staffKeys.length) {
       // One person, one day, a different duty.
       const m = pick(movable);
-      const want = pick(choices[m.id]);
+      const want = pick(narrowed[m.key] || choices[m.id]);
       if (want === current[m.key]) continue;
       set(m.key, want);
     } else if (roll < 0.75) {
@@ -1282,7 +1391,7 @@ function polish(cfg, ctx, startCells, seedNumber) {
       const a = pick(pool), b = pick(pool);
       if (a.id === b.id || current[a.key] === current[b.key]) continue;
       const ca = current[a.key], cb = current[b.key];
-      if (!choices[a.id].includes(cb) || !choices[b.id].includes(ca)) continue;
+      if (!may(a, cb) || !may(b, ca)) continue;
       set(a.key, cb); set(b.key, ca);
     } else {
       // One person trades their own duties between two days — how a rest
@@ -1292,6 +1401,7 @@ function polish(cfg, ctx, startCells, seedNumber) {
       const a = pick(pool), b = pick(pool);
       if (a.date === b.date || current[a.key] === current[b.key]) continue;
       const ca = current[a.key], cb = current[b.key];
+      if ((narrowed[a.key] || narrowed[b.key]) && (!may(a, cb) || !may(b, ca))) continue;
       set(a.key, cb); set(b.key, ca);
     }
 
@@ -1388,9 +1498,15 @@ function issuesToRelaxations(issues) {
    could have taken it but for a rule of their own marked Must. Named on
    the shortfall itself, so the cause is read next to the gap rather than
    worked out. Only Must rules are named: a Try gives way before a shift
-   is left short, so it is never the reason. */
+   is left short, so it is never the reason.
+
+   Somebody off because their own Must fixes the day is named whatever the
+   rest of their week holds — the week was built around that day — unless
+   yesterday's duty would have kept them from this shift anyway. */
 function mustReasons(cfg, ctx, cells, shortfalls) {
-  const { staff, limitFor, keep, requested, cov, histCats, weekOf, datesOfWeek } = ctx;
+  const {
+    staff, limitFor, keep, requested, cov, histCats, weekOf, datesOfWeek, dowOf, banned, allowed, W,
+  } = ctx;
   const at = (id, d) => cells[`${id}|${d}`] ?? histCats[`${id}|${d}`];
   for (const gap of shortfalls) {
     const { date, shift } = gap;
@@ -1406,11 +1522,20 @@ function mustReasons(cfg, ctx, cells, shortfalls) {
       const only = cfg.staffShifts?.[id];
       if (only && only.length && !only.includes(shift)) continue;
       const count = (pick) => week.filter((d) => pick(cells[`${id}|${d}`])).length;
-      if (now === OFF_CAT) {
+      const today = limitFor(id, 'days')?.[dowOf[date]];
+      if (now === OFF_CAT && isMust(today?.off)) {
+        const before = at(id, shiftDate(date, -1));
+        if (W.sequence && banned[before]?.has(shift) && !allowed[before]?.has(shift)) continue;
+        because.push({ staffId: id, name: s.name, rule: today.off });
+      } else if (now === OFF_CAT) {
         // Already at the week's duty maximum: they could not have worked it anyway.
         const dMax = cfg.weeklyDuties?.max;
         if (dMax != null && count((c) => c && c !== OFF_CAT) >= dMax) continue;
       } else if (onShift(now) <= cov[now].min) continue;   // their own shift needed them
+
+      if (!today?.off && isMust(today?.only) && !today.allow.has(shift)) {
+        because.push({ staffId: id, name: s.name, rule: today.only });
+      }
 
       const most = own[`atMost:${shift}`], apart = own[`apart:${shift}`];
       if (most?.strength === 'hard' && count((c) => c === shift) >= most.count) {
@@ -1430,18 +1555,26 @@ function mustReasons(cfg, ctx, cells, shortfalls) {
 
 /* Those reasons as one line for a screen. One person: "Shau: at most 1
    night a week (Must)". Several on the same rule are shortened, so a long
-   list cannot bury the gap: "S1, S2 and 5 others: no nights (Must)".    */
+   list cannot bury the gap: "S1, S2 and 5 others: no nights (Must)".
+
+   A rule about days says what it did to that day, because the name means
+   "off that day by this rule", not "this rule made the week short":
+   "Ana is off that day by a personal rule: always off on Friday (Must)". */
 export function mustCauseText(because) {
   const byRule = {};
   (because || []).forEach((b) => {
     const text = personRuleText(b.rule);
-    (byRule[text] = byRule[text] || []).push(b.name || 'someone');
+    const g = byRule[text] || (byRule[text] = { type: b.rule.type, names: [] });
+    g.names.push(b.name || 'someone');
   });
-  return Object.entries(byRule).map(([text, names]) => {
+  return Object.entries(byRule).map(([text, { type, names }]) => {
     const who = names.length === 1 ? names[0]
       : names.length === 2 ? `${names[0]} and ${names[1]}`
       : names.length === 3 ? `${names[0]}, ${names[1]} and ${names[2]}`
       : `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+    const are = names.length === 1 ? 'is' : 'are';
+    if (type === 'offOn') return `${who} ${are} off that day by a personal rule: ${text} (Must)`;
+    if (type === 'onlyOn') return `${who} ${are} limited that day by a personal rule: ${text} (Must)`;
     return `${who}: ${text} (Must)`;
   }).join('; ');
 }
@@ -1482,7 +1615,19 @@ export function generateRoster(cfg) {
      uncovered shifts and the last hand-fixes come from. */
   const before = auditRoster(cfg, ctx, cells);
   cells = polish(cfg, ctx, cells, tried);
-  const audit = auditRoster(cfg, ctx, cells);
+  let audit = auditRoster(cfg, ctx, cells);
+  /* People's Try rules about days were held all through that, as a Must is.
+     If a shift is still short, or has nobody in charge, it is done once
+     more with those rules free to give way — and that week is kept only if
+     it covers something the first could not. A Try is never spent on
+     anything less than a shift. */
+  const gaps = (a) => a.shortfalls.reduce((n, x) => n + x.needed, 0)
+    + a.seniorGaps.reduce((n, x) => n + x.needed, 0);
+  if (ctx.dayTry && gaps(audit) > 0) {
+    const bent = polish(cfg, ctx, cells, tried, true);
+    const bentAudit = auditRoster(cfg, ctx, bent);
+    if (gaps(bentAudit) < gaps(audit)) { cells = bent; audit = bentAudit; }
+  }
   mustReasons(cfg, ctx, cells, audit.shortfalls);
 
   const budget = capacityByWeek(cfg, dates, staff, ctx.keep);
@@ -1645,7 +1790,7 @@ function buildOnce(cfg, seed, ctx) {
     let stillToGive = 0;
     for (const s of staff) {
       if (!senior(s.id)) continue;
-      const daysHere = later.filter((d) => !onLeave(s, d) && !keep[`${s.id}|${d}`]).length;
+      const daysHere = later.filter((d) => !onLeave(s, d) && !keep[`${s.id}|${d}`] && !fixedOff(s.id, d)).length;
       const today = assignedToday[s.id];
       const worksToday = String(s.id) === String(workerId) || (today != null && today !== OFF_CAT);
       const allowed = dutyCeiling(cfg, s) - weekDuties(s.id, date) - (worksToday ? 1 : 0);
@@ -1695,7 +1840,7 @@ function buildOnce(cfg, seed, ctx) {
   // How long a block of one shift may run before the person changes to
   // something else. Nights are shorter because two together is the norm.
   // A person's own rule where they have one, otherwise the ward's.
-  const { limitFor } = ctx;
+  const { limitFor, dowOf } = ctx;
   const maxBlock = (id, sh) =>
     limitFor(id, 'block')[sh] ?? cfg.maxBlock?.[sh] ?? (sh === 'night' ? 2 : 4);
   const ownRule = (id, type, sh) => limitFor(id, 'own')?.[`${type}:${sh}`];
@@ -1707,13 +1852,36 @@ function buildOnce(cfg, seed, ctx) {
     }
     return false;
   };
+  // Their own rule for this day of the week, if they have one.
+  const dayRule = (id, date) => limitFor(id, 'days')?.[dowOf[date]];
   /* Their own rules that say no to this shift today. A Must always says
-     no; a Try only while the rota can afford it (`bendTry` false). */
+     no; a Try only while the rota can afford it (`bendTry` false).
+
+     A rule about the day says no whichever it is: a day they are always
+     off bars every shift, and "only" bars the rest. The week is built
+     around those days, Try as much as Must — a Try gives way later, once
+     the finished week has shown a shift cannot be covered without it. */
   const ownBars = (id, sh, date, bendTry) => {
     const most = ownRule(id, 'atMost', sh), apart = ownRule(id, 'apart', sh);
     const holds = (r) => r && (r.strength === 'hard' || !bendTry);
     if (holds(most) && weekCount(id, date, sh) >= most.count) return true;
-    return holds(apart) && tooSoon(id, sh, date);
+    if (holds(apart) && tooSoon(id, sh, date)) return true;
+    const today = dayRule(id, date);
+    return !!today && (!!today.off || (!!today.only && !today.allow.has(sh)));
+  };
+  // A day their own rule keeps them off: not a day they are here to work.
+  const fixedOff = (id, date) => !!dayRule(id, date)?.off;
+  /* Off days still to come this week that their own rule fixes. Counted as
+     had already, so the days before are worked rather than rested and the
+     week ends with the fixed days and no more. A day they are away, or
+     asked to work by an approved request, is not one of them. */
+  const offsAhead = (s, date) => {
+    const days = limitFor(s.id, 'days');
+    if (!days) return 0;
+    const week = weekOf(date);
+    return dates.filter((d) => d > date && weekOf(d) === week && days[dowOf[d]].off
+      && !onLeave(s, d) && !keep[`${s.id}|${d}`]
+      && (requested[`${s.id}|${d}`] ?? OFF_CAT) === OFF_CAT).length;
   };
   // Anyone with a Try rule of their own: it is then the first thing to give way.
   const ownTry = staff.some((s) =>
@@ -1744,7 +1912,7 @@ function buildOnce(cfg, seed, ctx) {
     const stillToCover = perDay * later.length;
     let stillToGive = 0;
     for (const s of staff) {
-      const daysHere = later.filter((d) => !onLeave(s, d) && !keep[`${s.id}|${d}`]).length;
+      const daysHere = later.filter((d) => !onLeave(s, d) && !keep[`${s.id}|${d}`] && !fixedOff(s.id, d)).length;
       const today = assignedToday[s.id];
       const worksToday = String(s.id) === String(workerId) || (today != null && today !== OFF_CAT);
       const allowed = dutyCeiling(cfg, s) - weekDuties(s.id, date) - (worksToday ? 1 : 0);
@@ -2105,11 +2273,11 @@ function buildOnce(cfg, seed, ctx) {
       const allowed = allowedOverride(rules, prev[s.id]);
       const offBanned = banned.has('off') && !allowed.has('off');
 
-      const offMax = cfg.weeklyPerStaff?.offMax;
-      const hadOff = offMax != null && weekCount(s.id, date, 'off') >= offMax;
+      const offMax = limitFor(s.id, 'offMax');
+      const hadOff = offMax != null && weekCount(s.id, date, 'off') + offsAhead(s, date) >= offMax;
       // Below their weekly duty minimum, so a rest day now would leave the
       // week short. Treated the same as having used up the off allowance.
-      const dutyMin = cfg.weeklyDuties?.min;
+      const dutyMin = limitFor(s.id, 'dutyMin');
       const owedDuties = dutyMin != null && weekDuties(s.id, date) < dutyMin;
       /* Off days are taken singly. Two together reads as a weekend, which
          is not how a seven-day rota works — someone off yesterday should
@@ -2356,6 +2524,9 @@ function buildOnce(cfg, seed, ctx) {
       if (keep[`${id}|${date}`]) return false;
       const req = requested[`${id}|${date}`];
       if (req && req !== sh) return false;
+      // Nor does a repair take a day their own rule speaks for.
+      const today = dayRule(id, date);
+      if (today && sh !== OFF_CAT && (today.off || (today.only && !today.allow.has(sh)))) return false;
       return true;
     };
 

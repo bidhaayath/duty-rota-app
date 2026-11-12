@@ -259,6 +259,9 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
   const lockedNames = [...locked].map(nameOf).filter(Boolean);
   const skippedNames = rows.filter((s) => skipped.has(s.id)).map((s) => s.name);
   const clean = !proposal.shortfalls.length && !proposal.seniorGaps.length && !proposal.bent.length;
+  // Gaps a person's own Must is named on, and the rest.
+  const namedGaps = proposal.shortfalls.some((s) => s.because);
+  const otherGaps = proposal.shortfalls.filter((s) => !s.because);
   // The ward's own word for the person in charge, as Smart Roster uses it.
   const seniorWord = seniorTermsOf(mergeRules(data.rosterRules || {})).lower;
   // The one-line version for phones.
@@ -394,16 +397,20 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
                 {proposal.shortfalls.filter((s) => s.because).map((s) => (
                   <li key={`${s.date}|${s.shift}`}>
-                    {s.shift.charAt(0).toUpperCase() + s.shift.slice(1)} on {prettyWeekday(s.date)} uncovered: {mustCauseText(s.because)}
+                    {s.shift.charAt(0).toUpperCase() + s.shift.slice(1)} on {prettyWeekday(s.date)} uncovered. {mustCauseText(s.because)}.
                   </li>
                 ))}
               </ul>
+              {/* Said here too: the box below may not appear at all. */}
+              <div style={{ marginTop: 4 }}>You can apply this and fill them by hand.</div>
             </div>
           )}
-          {proposal.shortfalls.length > 0 && (
+          {/* A gap already named with its Must above is not blamed on the
+              rest rules here as well; only the others are listed. */}
+          {otherGaps.length > 0 && (
             <div style={box("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
-              <strong>{plural(proposal.shortfalls.length, "shift")} could not be filled:</strong>{" "}
-              {listOf(proposal.shortfalls.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.
+              <strong>{plural(otherGaps.length, `${namedGaps ? "other " : ""}shift`)} could not be filled:</strong>{" "}
+              {listOf(otherGaps.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.
               {proposal.shortWeeks.map((w) => (
                 <div key={w.week}>
                   The week of {prettyDay(w.week)} needs {w.needed} duties and your staff can work {w.available} between
