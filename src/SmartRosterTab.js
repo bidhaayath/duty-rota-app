@@ -115,7 +115,14 @@ const RULE_COUNTS = {
   apart: { start: 2, min: 1, max: 6 },
   together: { start: 2, min: 2, max: 2 },
 };
+/* Rules about days of the week: ticked days in place of a shift and a
+   number. Just the seven days — weekends differ from ward to ward, so
+   there is no shortcut for one, and a public holiday is not a day here. */
+const DAY_TYPES = ["offOn", "onlyOn"];
 const upperFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const andList = (words) => (words.length < 2 ? words.join("")
+  : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
+const toggled = (list, x) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
 
 export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
@@ -150,7 +157,7 @@ export default function SmartRosterTab({
   const [busy, setBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
   // The personal rule being written, before Add.
-  const [draft, setDraft] = useState({ staffId: "", type: "atMost", count: 1, shift: "night" });
+  const [draft, setDraft] = useState({ staffId: "", type: "atMost", count: 1, shift: "night", days: [], shifts: [] });
   /* Decided once, when the page opens: a ward with its own plural keeps the
      box for the whole visit, so clearing it to retype does not make it vanish. */
   const [showPlural] = useState(() => !!(rules.seniorTermPlural || "").trim());
@@ -392,15 +399,98 @@ export default function SmartRosterTab({
   // Only shifts the ward runs can carry a rule.
   const runShifts = SHIFTS.filter((sh) => rules.coverage[sh]?.max !== 0);
   const draftShift = runShifts.includes(draft.shift) ? draft.shift : runShifts[0];
-  const draftRule = { type: draft.type, shift: draftShift, count: draft.type === "together" ? 2 : draft.count };
+  const onDays = DAY_TYPES.includes(draft.type);
+  // The week in the ward's own order, so a Monday ward reads Saturday and Sunday.
+  const weekOrder = [...Array(7)].map((_, i) => (firstDay + i) % 7);
+  const draftRule = onDays
+    ? { type: draft.type, days: weekOrder.filter((d) => draft.days.includes(d)),
+        ...(draft.type === "onlyOn" ? { shifts: runShifts.filter((sh) => draft.shifts.includes(sh)) } : {}) }
+    : { type: draft.type, shift: draftShift, count: draft.type === "together" ? 2 : draft.count };
+  const draftComplete = onDays
+    ? draftRule.days.length > 0 && (draft.type === "offOn" || draftRule.shifts.length > 0)
+    : !!draftShift;
   const draftPerson = allStaff.find((s) => String(s.id) === draft.staffId);
+
+  // Somebody's rules about days, as saved and readable.
+  const dayRulesOf = (staffId, list = ownRules) => list.filter((r) => String(r.staffId) === String(staffId)
+    && DAY_TYPES.includes(r.type) && Array.isArray(r.days) && (r.type === "offOn" || Array.isArray(r.shifts)));
+  // Days of the week those leave open for a shift: not off, and not kept to other shifts.
+  const daysOpenFor = (dayRules, shift) => weekOrder.filter((d) => !dayRules.some((r) => r.days.includes(d)
+    && (r.type === "offOn" || !r.shifts.includes(shift)))).length;
+  const daysWord = (n) => `${n} day${n === 1 ? "" : "s"}`;
+
+  /* More days fixed off than the ward's most: theirs is the number for
+     them, as the engine does it, and the screen says so. */
+  const wardMostOff = rules.weeklyMax?.off;
+  const wardFewest = rules.weeklyDuties?.min;
+  const fixedOffNote = (staffId, list) => {
+    const fixed = new Set(dayRulesOf(staffId, list).filter((r) => r.type === "offOn").flatMap((r) => r.days)).size;
+    if (wardMostOff == null || fixed <= wardMostOff) return null;
+    const name = staffName(staffId) || "this person";
+    return `That is ${daysWord(fixed)} off a week, more than the ward's most of ${wardMostOff}, so for ${name} the most off days is ${fixed}`
+      + (wardFewest != null && wardFewest > 7 - fixed ? ` and the fewest duties ${7 - fixed}.` : ".");
+  };
+  /* Days so many people are always off by a Must that everyone else
+     together could not fill the places the ward needs. Only where the
+     ward could fill them without those rules: a ward short every day is
+     short whatever anyone's rule says. */
+  const placesPerDay = runShifts.reduce((n, sh) => n + (rules.coverage[sh]?.min || 0), 0);
+  const onRota = allStaff.filter((s) => !rules.skipStaff.includes(s.id));
+  const peopleLeftOn = (d, list) => {
+    const off = new Set(list.filter((r) => r.type === "offOn" && r.strength === "hard" && Array.isArray(r.days)
+      && r.days.includes(d)).map((r) => String(r.staffId)));
+    return onRota.filter((s) => !off.has(String(s.id))).length;
+  };
+  const shortDaysNote = (days, list) => {
+    if (onRota.length < placesPerDay) return null;
+    const short = weekOrder.filter((d) => days.includes(d) && peopleLeftOn(d, list) < placesPerDay);
+    if (!short.length) return null;
+    const left = peopleLeftOn(short[0], list);
+    return `On ${andList(short.map((d) => DAY_LABEL[d]))} only ${left} ${left === 1 ? "person is" : "people are"} left `
+      + `for the ${placesPerDay} places the ward fills each day, so a shift will be left uncovered every week.`;
+  };
+
   /* Why the rule as written cannot be added, in the manager's words. Asked
      before saving, so a list never holds two rules that fight each other. */
   const draftProblem = (() => {
-    if (!draftPerson || !draftShift) return null;
+    if (!draftPerson || !draftComplete) return null;
+    const who = draftPerson.name;
+    const dayRules = dayRulesOf(draftPerson.id);
+    if (onDays) {
+      const clash = dayRules.find((r) => r.days.some((d) => draftRule.days.includes(d)));
+      if (clash) {
+        const day = DAY_LABEL[weekOrder.find((d) => clash.days.includes(d) && draftRule.days.includes(d))];
+        return `${who} already has "${personRuleText(clash)}", which covers ${day}. Remove it first to change it.`;
+      }
+      if (draft.type === "offOn" && draftRule.days.length === 7) {
+        return `That is every day of the week. To leave ${who} off the rota, use Skip above.`;
+      }
+      if (draft.type === "onlyOn") {
+        const ticks = rules.staffShifts?.[draftPerson.id] || [];
+        const works = ticks.length ? runShifts.filter((sh) => ticks.includes(sh)) : runShifts;
+        if (!works.some((sh) => draftRule.shifts.includes(sh))) {
+          return `${who} is set up above for ${andList(works.map((sh) => `${sh}s`))} only, so on those days ${who} `
+            + `could only be off. Use "Always off on" for that.`;
+        }
+        if (works.every((sh) => draftRule.shifts.includes(sh))) {
+          return `Those are all the shifts ${who} works, so this rule would change nothing.`;
+        }
+      }
+      const after = [...dayRules, draftRule];
+      const least = ownRules.find((r) => String(r.staffId) === String(draftPerson.id) && r.type === "atLeast"
+        && r.count > daysOpenFor(after, r.shift));
+      if (least) {
+        return `${who} has "${personRuleText(least)}", and with this rule only ${daysWord(daysOpenFor(after, least.shift))} `
+          + `a week would be left for ${least.shift}s.`;
+      }
+      return null;
+    }
     const mine = ownRules.filter((r) => String(r.staffId) === String(draftPerson.id) && r.shift === draftShift);
     const has = (type) => mine.find((r) => r.type === type);
-    const who = draftPerson.name;
+    if (draftRule.type === "atLeast" && draftRule.count > daysOpenFor(dayRules, draftShift)) {
+      return `${who}'s rules about days leave ${daysWord(daysOpenFor(dayRules, draftShift))} a week for ${draftShift}s, `
+        + `so at least ${draftRule.count} could never be met.`;
+    }
     if (has(draftRule.type)) {
       return `${who} already has "${personRuleText(has(draftRule.type))}". Remove it first to change it.`;
     }
@@ -419,10 +509,25 @@ export default function SmartRosterTab({
     return null;
   })();
   const addOwnRule = () => {
-    if (!draftPerson || !draftShift || draftProblem) return;
-    // Every rule starts as Try: it is kept whenever the week allows.
-    setPersonRules([...ownRules, { id: uid(), staffId: draftPerson.id, ...draftRule, strength: "soft" }]);
+    if (!draftPerson || !draftComplete || draftProblem) return;
+    /* A fixed day off starts as Must: it is usually a promise made to the
+       person. Every other rule starts as Try: kept whenever the week allows. */
+    setPersonRules([...ownRules, {
+      id: uid(), staffId: draftPerson.id, ...draftRule, strength: draft.type === "offOn" ? "hard" : "soft",
+    }]);
   };
+  const startsAs = draft.type === "offOn" ? "Must" : "Try";
+  // Said before Add, for a fixed day off as it would be saved.
+  const draftAfter = draftPerson && draftComplete && !draftProblem && draft.type === "offOn"
+    ? [...ownRules, { ...draftRule, staffId: draftPerson.id, strength: "hard" }] : null;
+  const draftFixedNote = draftAfter && fixedOffNote(draftPerson.id, draftAfter);
+  const draftShortNote = draftAfter && shortDaysNote(draftRule.days, draftAfter);
+  const addButton = (
+    <Btn kind="ghost" small disabled={!staffEditable || !draftPerson || !draftComplete || !!draftProblem}
+      onClick={addOwnRule}>
+      <Plus size={14} /> Add
+    </Btn>
+  );
 
   const sel = { ...inputStyle, width: "auto", minWidth: 118, cursor: "pointer", padding: "7px 9px" };
   const title = { fontFamily: "Sora, sans-serif", fontSize: 15, margin: "0 0 3px" };
@@ -772,7 +877,8 @@ export default function SmartRosterTab({
           Rules for one person, on top of the ward's settings above. Anyone without a rule follows
           the ward. <strong>Try</strong> is kept whenever the week allows, and gives way before a
           shift is left uncovered. <strong>Must</strong> is kept even then: the week is still made,
-          and a shift left uncovered because of it is named first when you generate.
+          and a shift left uncovered because of it is named first when you generate. Always off
+          starts as Must; every other rule starts as Try.
         </p>
 
         {shownRules.length > 0 && (
@@ -800,6 +906,17 @@ export default function SmartRosterTab({
                     </span>
                   </p>
                 )}
+                {/* Said once per person, under their first fixed day off. */}
+                {r.type === "offOn" && dayRulesOf(r.staffId).find((x) => x.type === "offOn") === r
+                  && fixedOffNote(r.staffId, ownRules) && (
+                  <p style={{ fontSize: 12, color: T.inkSoft, margin: "5px 0 0" }}>{fixedOffNote(r.staffId, ownRules)}</p>
+                )}
+                {r.type === "offOn" && r.strength === "hard" && Array.isArray(r.days) && shortDaysNote(r.days, ownRules) && (
+                  <p style={{ fontSize: 12, color: "#8A5A0F", margin: "5px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <span>{shortDaysNote(r.days, ownRules)}</span>
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -815,14 +932,16 @@ export default function SmartRosterTab({
           </Field>
           <Field label="Rule">
             <select style={sel} disabled={!staffEditable} value={draft.type}
-              onChange={(e) => setDraft({ ...draft, type: e.target.value, count: RULE_COUNTS[e.target.value].start })}>
+              onChange={(e) => setDraft({ ...draft, type: e.target.value, count: RULE_COUNTS[e.target.value]?.start ?? draft.count })}>
               <option value="atMost">At most … a week</option>
               <option value="atLeast">At least … a week</option>
               <option value="apart">At least … days between</option>
               <option value="together">Kept in pairs</option>
+              <option value="offOn">Always off on …</option>
+              <option value="onlyOn">On … only …</option>
             </select>
           </Field>
-          {draft.type !== "together" && (
+          {!onDays && draft.type !== "together" && (
             <Field label={draft.type === "apart" ? "Days" : "How many"}>
               <input type="number" style={{ ...inputStyle, width: 70 }} disabled={!staffEditable}
                 min={RULE_COUNTS[draft.type].min} max={RULE_COUNTS[draft.type].max} value={draft.count}
@@ -833,20 +952,57 @@ export default function SmartRosterTab({
                 }} />
             </Field>
           )}
-          <Field label="Shift">
-            <select style={sel} disabled={!staffEditable} value={draftShift}
-              onChange={(e) => setDraft({ ...draft, shift: e.target.value })}>
-              {runShifts.map((sh) => <option key={sh} value={sh}>{SHIFT_LABELS[sh]}</option>)}
-            </select>
-          </Field>
-          <Btn kind="ghost" small disabled={!staffEditable || !draftPerson || !draftShift || !!draftProblem}
-            onClick={addOwnRule}>
-            <Plus size={14} /> Add
-          </Btn>
+          {!onDays && (
+            <Field label="Shift">
+              <select style={sel} disabled={!staffEditable} value={draftShift}
+                onChange={(e) => setDraft({ ...draft, shift: e.target.value })}>
+                {runShifts.map((sh) => <option key={sh} value={sh}>{SHIFT_LABELS[sh]}</option>)}
+              </select>
+            </Field>
+          )}
+          {!onDays && addButton}
         </div>
-        {draftShift && (
+        {onDays && (
+          <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: T.inkSoft, minWidth: 48 }}>Days</span>
+              {weekOrder.map((d) => {
+                const on = draft.days.includes(d);
+                return (
+                  <button key={d} disabled={!staffEditable} aria-pressed={on} aria-label={DAY_LABEL[d]}
+                    onClick={() => setDraft({ ...draft, days: toggled(draft.days, d) })} style={chip(on, T.lagoon)}>
+                    {on ? "✓ " : ""}{DAY_LABEL[d].slice(0, 3)}
+                  </button>
+                );
+              })}
+            </div>
+            {draft.type === "onlyOn" && (
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: T.inkSoft, minWidth: 48 }}>Only</span>
+                {runShifts.map((sh) => {
+                  const on = draft.shifts.includes(sh);
+                  return (
+                    <button key={sh} disabled={!staffEditable} aria-pressed={on} aria-label={`Only ${sh}s`}
+                      onClick={() => setDraft({ ...draft, shifts: toggled(draft.shifts, sh) })} style={chip(on, T.lagoon)}>
+                      {on ? "✓ " : ""}{SHIFT_LABELS[sh]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div>{addButton}</div>
+          </div>
+        )}
+        {draftComplete && (
           <p style={{ ...hint, margin: "8px 0 0" }}>
-            {draftPerson ? `${draftPerson.name}: ` : ""}{personRuleText(draftRule)} — starts as Try.
+            {draftPerson ? `${draftPerson.name}: ` : ""}{personRuleText(draftRule)} — starts as {startsAs}.
+          </p>
+        )}
+        {draftFixedNote && <p style={{ ...hint, margin: "4px 0 0" }}>{draftFixedNote}</p>}
+        {draftShortNote && (
+          <p style={{ fontSize: 12.5, color: "#8A5A0F", margin: "6px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
+            <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 3 }} />
+            <span>{draftShortNote}</span>
           </p>
         )}
         {draftProblem && (
@@ -1145,13 +1301,15 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
 
   /* People's own rules, kept apart from the ward's settings so each can be
      said with the person's name. One line per person and rule; Days between
-     is missed on a day, so it lists the days. A Must comes first. */
+     and the rules about days are missed on a day, so they list the days —
+     a rule about days with the shift worked. A Must comes first. */
   const nameOf = (id) => (data.staff || []).find((s) => String(s.id) === String(id))?.name || "Someone";
   const wardBent = (report.relaxations || []).filter((r) => !r.personal);
   const ownBent = Object.values((report.relaxations || []).filter((r) => r.personal).reduce((m, r) => {
     const key = `${r.staffId}|${r.rule}`;
     const g = m[key] || (m[key] = { name: nameOf(r.staffId), rule: r.rule, must: r.strength === "hard", days: [] });
     if (r.ruleType === "apart") g.days.push(prettyWeekday(r.date));
+    if (DAY_TYPES.includes(r.ruleType)) g.days.push(`${prettyWeekday(r.date)} ${r.shift}`);
     return m;
   }, {})).sort((a, b) => (b.must ? 1 : 0) - (a.must ? 1 : 0));
   const mustGaps = report.shortfalls.filter((s) => s.because);
@@ -1178,7 +1336,7 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {mustGaps.map((s) => (
                 <li key={`${s.date}|${s.shift}`}>
-                  {SHIFT_LABELS[s.shift]} on {prettyWeekday(s.date)} uncovered: {mustCauseText(s.because)}
+                  {SHIFT_LABELS[s.shift]} on {prettyWeekday(s.date)} uncovered. {mustCauseText(s.because)}.
                 </li>
               ))}
             </ul>

@@ -189,6 +189,23 @@ describe("end to end with the engine", () => {
     ]);
   });
 
+  test("a rule about days is named by the day, with the shift worked", () => {
+    const data = makeData();
+    const prep = prepareMonth({ data, month: "2026-10", keepExisting: true });
+    const report = {
+      shortfalls: [], seniorGaps: [], budget: [],
+      relaxations: [
+        { date: "2026-10-09", shift: "night", staffId: "s1", rule: "always off on Friday and Saturday", personal: true, ruleType: "offOn", strength: "hard" },
+        { date: "2026-10-16", shift: "afternoon", staffId: "s2", rule: "on Friday only mornings", personal: true, ruleType: "onlyOn", strength: "soft" },
+      ],
+    };
+    const fin = finishMonth(prep, { rotaCells: {}, cells: {}, report }, data);
+    expect(fin.bent).toEqual([
+      { rule: "always off on Friday and Saturday (Must)", places: ["Staff 1 (Fri 9 Oct night)"] },
+      { rule: "on Friday only mornings (Try)", places: ["Staff 2 (Fri 16 Oct afternoon)"] },
+    ]);
+  });
+
   test("the fingerprint notices a change to the month, and ignores one outside it", () => {
     const data = makeData();
     const before = monthFingerprint(data, "2026-09-27", "2026-10-31");

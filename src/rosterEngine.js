@@ -1555,18 +1555,26 @@ function mustReasons(cfg, ctx, cells, shortfalls) {
 
 /* Those reasons as one line for a screen. One person: "Shau: at most 1
    night a week (Must)". Several on the same rule are shortened, so a long
-   list cannot bury the gap: "S1, S2 and 5 others: no nights (Must)".    */
+   list cannot bury the gap: "S1, S2 and 5 others: no nights (Must)".
+
+   A rule about days says what it did to that day, because the name means
+   "off that day by this rule", not "this rule made the week short":
+   "Ana is off that day by a personal rule: always off on Friday (Must)". */
 export function mustCauseText(because) {
   const byRule = {};
   (because || []).forEach((b) => {
     const text = personRuleText(b.rule);
-    (byRule[text] = byRule[text] || []).push(b.name || 'someone');
+    const g = byRule[text] || (byRule[text] = { type: b.rule.type, names: [] });
+    g.names.push(b.name || 'someone');
   });
-  return Object.entries(byRule).map(([text, names]) => {
+  return Object.entries(byRule).map(([text, { type, names }]) => {
     const who = names.length === 1 ? names[0]
       : names.length === 2 ? `${names[0]} and ${names[1]}`
       : names.length === 3 ? `${names[0]}, ${names[1]} and ${names[2]}`
       : `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+    const are = names.length === 1 ? 'is' : 'are';
+    if (type === 'offOn') return `${who} ${are} off that day by a personal rule: ${text} (Must)`;
+    if (type === 'onlyOn') return `${who} ${are} limited that day by a personal rule: ${text} (Must)`;
     return `${who}: ${text} (Must)`;
   }).join('; ');
 }

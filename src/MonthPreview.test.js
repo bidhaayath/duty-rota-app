@@ -187,11 +187,24 @@ test("a shift a person's own Must left uncovered is said first, with the rule an
   };
   render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
     onDiscard={jest.fn()} onApplied={jest.fn()} />);
-  const why = screen.getByText("Night on Thu 8 Oct uncovered: Staff 1: at most 1 night a week (Must)");
+  const why = screen.getByText("Night on Thu 8 Oct uncovered. Staff 1: at most 1 night a week (Must).");
   expect(why.closest(".mp-details")).toBeNull();
   // Before the plain list of unfilled shifts, which still has both.
   const short = screen.getByText("2 shifts could not be filled:");
   expect(why.compareDocumentPosition(short) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("somebody always off by a Must is said to be off that day by it", () => {
+  const data = makeData();
+  const off = { id: "p2", staffId: "s1", type: "offOn", days: [5, 6], strength: "hard" };
+  const proposal = {
+    ...build(data, true),
+    shortfalls: [{ date: "2026-10-09", shift: "night", needed: 1, because: [{ staffId: "s1", name: "Staff 1", rule: off }] }],
+  };
+  render(<MonthPreview proposal={proposal} data={data} update={jest.fn()} T={T}
+    onDiscard={jest.fn()} onApplied={jest.fn()} />);
+  expect(screen.getByText("Night on Fri 9 Oct uncovered. Staff 1 is off that day by a personal rule: "
+    + "always off on Friday and Saturday (Must).")).toBeInTheDocument();
 });
 
 test("the long summaries start closed as one line each; shifts short or with nobody in charge are always shown", () => {

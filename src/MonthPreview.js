@@ -394,7 +394,7 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
                 {proposal.shortfalls.filter((s) => s.because).map((s) => (
                   <li key={`${s.date}|${s.shift}`}>
-                    {s.shift.charAt(0).toUpperCase() + s.shift.slice(1)} on {prettyWeekday(s.date)} uncovered: {mustCauseText(s.because)}
+                    {s.shift.charAt(0).toUpperCase() + s.shift.slice(1)} on {prettyWeekday(s.date)} uncovered. {mustCauseText(s.because)}.
                   </li>
                 ))}
               </ul>
