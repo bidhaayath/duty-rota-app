@@ -27,6 +27,7 @@ import {
 } from "./rosterConfig";
 import { checkSettings, settingsKey } from "./settingsCheck";
 import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
+import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 
@@ -1052,6 +1053,13 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
   const mustGaps = report.shortfalls.filter((s) => s.because);
   // The rest: a gap already named with its Must is not blamed on the rest rules too.
   const otherGaps = report.shortfalls.filter((s) => !s.because);
+  /* In-charge held as a Must and still missing somewhere: said at the top,
+     each with why nobody who can take charge was free, and not again below. */
+  const inChargeMust = rules.ruleStates?.seniors?.state === "hard";
+  const noInCharge = inChargeMust ? (report.seniorGaps || []).map((g) => noInChargeText({
+    ...g, termOne,
+    reasons: whyNoInCharge({ ...g, cells: proposal.cells, data, rules, staff: activeStaff, from: proposal.from, to: proposal.to }),
+  })) : [];
 
   return (
     <>
@@ -1084,6 +1092,16 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
           </div>
         )}
 
+        {noInCharge.length > 0 && (
+          <div style={urgent}>
+            <strong>No {termOne} where one is a Must:</strong>
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {noInCharge.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+            <div style={{ marginTop: 4 }}>You can apply this and change it by hand.</div>
+          </div>
+        )}
+
         {otherGaps.length > 0 && (
           <div style={note}>
             <strong>{otherGaps.length} {mustGaps.length ? "other " : ""}shift{otherGaps.length === 1 ? "" : "s"} could not be filled:</strong>{" "}
@@ -1097,7 +1115,7 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
           </div>
         )}
 
-        {report.seniorGaps?.length > 0 && (
+        {!inChargeMust && report.seniorGaps?.length > 0 && (
           <div style={note}>
             <strong>{report.seniorGaps.length} shift{report.seniorGaps.length === 1 ? " has" : "s have"} no {lower} on duty:</strong>{" "}
             {report.seniorGaps.map((s) => `${dayOf(s.date)} ${s.shift}`).join(", ")}.{" "}
