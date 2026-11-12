@@ -189,9 +189,12 @@ test("a shift a person's own Must left uncovered is said first, with the rule an
     onDiscard={jest.fn()} onApplied={jest.fn()} />);
   const why = screen.getByText("Night on Thu 8 Oct uncovered. Staff 1: at most 1 night a week (Must).");
   expect(why.closest(".mp-details")).toBeNull();
-  // Before the plain list of unfilled shifts, which still has both.
-  const short = screen.getByText("2 shifts could not be filled:");
+  // Before the plain list of unfilled shifts, which has only the other one:
+  // a gap named with its Must is not blamed on the rest rules as well.
+  const short = screen.getByText("1 other shift could not be filled:");
   expect(why.compareDocumentPosition(short) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(short.parentElement).toHaveTextContent("Fri 9 Oct morning.");
+  expect(short.parentElement).not.toHaveTextContent("Thu 8 Oct");
 });
 
 test("somebody always off by a Must is said to be off that day by it", () => {
@@ -205,6 +208,9 @@ test("somebody always off by a Must is said to be off that day by it", () => {
     onDiscard={jest.fn()} onApplied={jest.fn()} />);
   expect(screen.getByText("Night on Fri 9 Oct uncovered. Staff 1 is off that day by a personal rule: "
     + "always off on Friday and Saturday (Must).")).toBeInTheDocument();
+  // Its only gap is named, so there is no "could not be filled" box blaming the rest rules.
+  expect(screen.queryByText(/could not be filled/)).toBeNull();
+  expect(screen.queryByText(/rest rules/)).toBeNull();
 });
 
 test("the long summaries start closed as one line each; shifts short or with nobody in charge are always shown", () => {

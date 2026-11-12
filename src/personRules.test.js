@@ -342,6 +342,34 @@ describe("the Personal rules card", () => {
     expect("personRules" in saved.rosterRules).toBe(false);
   });
 
+  test("a gap named with its Must is not listed again as one the rest rules left unfilled", async () => {
+    // Eight on the rota and five places a day; four always off on Friday by a Must.
+    const offFriday = [0, 1, 2, 3].map((i) => ({ id: `f${i}`, staffId: `a${i}`, type: "offOn", days: [5], strength: "hard" }));
+    function Ward() {
+      const [data, setData] = useState(() => ({
+        staff: [...Array(8)].map((_, i) => ({ id: `a${i}`, name: NAMES[i] || `Nurse ${i}`, leavePeriods: [] })),
+        codes: CODES, cells: {}, cellMeta: {}, nonOfficial: [], dutyRequests: [], fridayRule: false,
+        rosterRules: { personRules: offFriday },
+      }));
+      const update = (fn) => setData((d) => fn(JSON.parse(JSON.stringify(d))));
+      return (
+        <SmartRosterTab deptId="d1" data={data} update={update} staffEditable T={T} Card={Card} Btn={Btn} Field={Field}
+          inputStyle={{}} th={{}} td={{}} uid={() => "u"} dstr={iso} onApplied={() => {}} />
+      );
+    }
+    render(<Ward />);
+    fireEvent.click(screen.getByText("Generate this week"));
+    const red = (await screen.findByText("Left uncovered by a personal Must rule:", {}, { timeout: 30000 })).parentElement;
+    const named = within(red).getAllByRole("listitem").map((li) => {
+      const [, shift, day] = li.textContent.match(/^(\w+) on \w+ (\d+) \w+ uncovered\. .* off that day by a personal rule: always off on Friday \(Must\)\.$/);
+      return `${day} ${shift.toLowerCase()}`;
+    });
+    expect(named.length).toBeGreaterThan(0);
+    // The amber box, if there is one, lists only gaps nobody's Must is named on.
+    const amber = screen.queryByText(/shifts? could not be filled:/);
+    if (amber) named.forEach((gap) => expect(amber.parentElement.textContent).not.toMatch(new RegExp(`\\b${gap}\\b`)));
+  }, 60000);
+
   test("a day too many people are always off by a Must is warned about", () => {
     render(<App count={6} />);
     // Six on the rota and five places a day: two off every Friday leaves four.
@@ -353,9 +381,18 @@ describe("the Personal rules card", () => {
     choose("Shau", "a1");
     expect(screen.getByText(/On Friday only 4 people are left for the 5 places the ward fills each day/)).toBeInTheDocument();
     add();
-    // Under both rules now, and gone once one is Try.
-    expect(screen.getAllByText(/On Friday only 4 people are left/)).toHaveLength(2);
-    fireEvent.click(within(screen.getAllByText("Always off on Friday")[1].parentElement).getByRole("button", { name: "Try" }));
-    expect(screen.queryByText(/On Friday only 4 people are left/)).toBeNull();
+    // Said once, under the list, not under each Friday rule.
+    expect(screen.getAllByText(/On Friday only 4 people are left/)).toHaveLength(1);
+    // A third on Friday: Friday is already said, so not again before Add.
+    choose("Mariyam", "a2");
+    expect(screen.getAllByText(/On Friday only/)).toHaveLength(1);
+    add();
+    expect(screen.getAllByText(/On Friday only/)).toHaveLength(1);
+    expect(screen.getByText(/On Friday only 3 people are left/)).toBeInTheDocument();
+    // Gone once enough of them are Try.
+    const tryOn = (i) => fireEvent.click(within(screen.getAllByText("Always off on Friday")[i].parentElement)
+      .getByRole("button", { name: "Try" }));
+    tryOn(1); tryOn(2);
+    expect(screen.queryByText(/On Friday only/)).toBeNull();
   });
 });

@@ -441,14 +441,15 @@ export default function SmartRosterTab({
       && r.days.includes(d)).map((r) => String(r.staffId)));
     return onRota.filter((s) => !off.has(String(s.id))).length;
   };
-  const shortDaysNote = (days, list) => {
-    if (onRota.length < placesPerDay) return null;
-    const short = weekOrder.filter((d) => days.includes(d) && peopleLeftOn(d, list) < placesPerDay);
-    if (!short.length) return null;
-    const left = peopleLeftOn(short[0], list);
-    return `On ${andList(short.map((d) => DAY_LABEL[d]))} only ${left} ${left === 1 ? "person is" : "people are"} left `
+  const shortDays = (list) => (onRota.length < placesPerDay ? []
+    : weekOrder.filter((d) => peopleLeftOn(d, list) < placesPerDay));
+  // One line per day, said once under the list rather than under each rule.
+  const shortDayText = (d, list) => {
+    const left = peopleLeftOn(d, list);
+    return `On ${DAY_LABEL[d]} only ${left} ${left === 1 ? "person is" : "people are"} left `
       + `for the ${placesPerDay} places the ward fills each day, so a shift will be left uncovered every week.`;
   };
+  const shortNow = shortDays(ownRules);
 
   /* Why the rule as written cannot be added, in the manager's words. Asked
      before saving, so a list never holds two rules that fight each other. */
@@ -521,7 +522,11 @@ export default function SmartRosterTab({
   const draftAfter = draftPerson && draftComplete && !draftProblem && draft.type === "offOn"
     ? [...ownRules, { ...draftRule, staffId: draftPerson.id, strength: "hard" }] : null;
   const draftFixedNote = draftAfter && fixedOffNote(draftPerson.id, draftAfter);
-  const draftShortNote = draftAfter && shortDaysNote(draftRule.days, draftAfter);
+  // Only a day this rule would newly leave short; one already short is said under the list.
+  const draftShortNotes = draftAfter
+    ? shortDays(draftAfter).filter((d) => draftRule.days.includes(d) && !shortNow.includes(d))
+      .map((d) => shortDayText(d, draftAfter))
+    : [];
   const addButton = (
     <Btn kind="ghost" small disabled={!staffEditable || !draftPerson || !draftComplete || !!draftProblem}
       onClick={addOwnRule}>
@@ -911,13 +916,13 @@ export default function SmartRosterTab({
                   && fixedOffNote(r.staffId, ownRules) && (
                   <p style={{ fontSize: 12, color: T.inkSoft, margin: "5px 0 0" }}>{fixedOffNote(r.staffId, ownRules)}</p>
                 )}
-                {r.type === "offOn" && r.strength === "hard" && Array.isArray(r.days) && shortDaysNote(r.days, ownRules) && (
-                  <p style={{ fontSize: 12, color: "#8A5A0F", margin: "5px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
-                    <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} />
-                    <span>{shortDaysNote(r.days, ownRules)}</span>
-                  </p>
-                )}
               </div>
+            ))}
+            {shortNow.map((d) => (
+              <p key={d} style={{ fontSize: 12, color: "#8A5A0F", margin: 0, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+                <span>{shortDayText(d, ownRules)}</span>
+              </p>
             ))}
           </div>
         )}
@@ -999,12 +1004,12 @@ export default function SmartRosterTab({
           </p>
         )}
         {draftFixedNote && <p style={{ ...hint, margin: "4px 0 0" }}>{draftFixedNote}</p>}
-        {draftShortNote && (
-          <p style={{ fontSize: 12.5, color: "#8A5A0F", margin: "6px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
+        {draftShortNotes.map((text) => (
+          <p key={text} style={{ fontSize: 12.5, color: "#8A5A0F", margin: "6px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
             <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 3 }} />
-            <span>{draftShortNote}</span>
+            <span>{text}</span>
           </p>
-        )}
+        ))}
         {draftProblem && (
           <p style={{ fontSize: 12.5, color: "#8A5A0F", margin: "6px 0 0", display: "flex", gap: 6, alignItems: "flex-start" }}>
             <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 3 }} />
@@ -1313,6 +1318,8 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
     return m;
   }, {})).sort((a, b) => (b.must ? 1 : 0) - (a.must ? 1 : 0));
   const mustGaps = report.shortfalls.filter((s) => s.because);
+  // The rest: a gap already named with its Must is not blamed on the rest rules too.
+  const otherGaps = report.shortfalls.filter((s) => !s.because);
 
   return (
     <>
@@ -1343,10 +1350,10 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
           </div>
         )}
 
-        {report.shortfalls.length > 0 && (
+        {otherGaps.length > 0 && (
           <div style={note}>
-            <strong>{report.shortfalls.length} shift{report.shortfalls.length === 1 ? "" : "s"} could not be filled:</strong>{" "}
-            {report.shortfalls.map((s) => `${dayOf(s.date)} ${s.shift}`).join(", ")}.{" "}
+            <strong>{otherGaps.length} {mustGaps.length ? "other " : ""}shift{otherGaps.length === 1 ? "" : "s"} could not be filled:</strong>{" "}
+            {otherGaps.map((s) => `${dayOf(s.date)} ${s.shift}`).join(", ")}.{" "}
             {/* The numbers, not "there were not enough staff free" — two duties
                 short and five duties short need different answers. */}
             {week && week.spare < 0
