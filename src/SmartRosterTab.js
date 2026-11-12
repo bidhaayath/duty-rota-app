@@ -23,7 +23,7 @@ import { prettyWeekday } from "./monthBuild";
 import {
   DEFAULT_RULES, mergeRules, seniorTermsOf, seniorNeedOf,addDays, shiftISO, employedOn,
   weekDatesFrom, activeStaffFor, codeTextById, codeIdByText, flattenCells,
-  chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches,
+  chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches, LOOK_BACK_ALL,
 } from "./rosterConfig";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
@@ -1143,20 +1143,26 @@ export default function SmartRosterTab({
 
             <div style={{ marginTop: 18 }}>
               <Field label="Look back at recent duties">
-                <select value={rules.lookbackDays} disabled={!staffEditable} style={{ ...sel, minWidth: 160 }}
+                <select value={rules.lookbackDays || 0} disabled={!staffEditable} style={{ ...sel, minWidth: 160 }}
                   onChange={(e) => setRules({ lookbackDays: Number(e.target.value) })}>
                   <option value={0}>Do not look back</option>
                   <option value={14}>Last 14 days</option>
                   <option value={30}>Last 30 days</option>
                   <option value={60}>Last 60 days</option>
                   <option value={90}>Last 90 days</option>
+                  <option value={LOOK_BACK_ALL}>The entire roster</option>
+                  {/* A saved number not on the list is shown as it is, and kept. */}
+                  {Number.isFinite(rules.lookbackDays) && ![0, 14, 30, 60, 90, LOOK_BACK_ALL].includes(rules.lookbackDays) && (
+                    <option value={rules.lookbackDays}>Custom ({rules.lookbackDays} days)</option>
+                  )}
                 </select>
               </Field>
               <p style={{ ...hint, margin: "6px 0 0" }}>
                 Recent duties are counted so fairness carries across weeks — someone who did a lot of
                 nights last week gets fewer this week. Non-official days are counted over the same
                 period. Staff who joined recently are compared on their rate, not their totals, so
-                they are never given extra to catch up.
+                they are never given extra to catch up. This is for fairness only: rest and what
+                may follow what always check the days just before the week, whatever is chosen here.
               </p>
             </div>
           </div>

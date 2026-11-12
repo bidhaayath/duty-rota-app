@@ -1710,9 +1710,14 @@ function buildOnce(cfg, seed, ctx) {
     const catOf = {};
     cfg.codes.forEach((c) => { catOf[c.code] = c.counts; });
     const seen = {};
+    // A look-back of "the entire roster" can be years of days to check.
+    const nonOffBefore = new Set(cfg.history.nonOfficialDates || []);
+    // Days given for rest and runs only, before the look-back began.
+    const fairFrom = cfg.history.fairFrom;
     for (const [key, code] of Object.entries(cfg.history.cells)) {
       const [id, date] = key.split('|');
       if (!totals[id]) continue;                     // staff no longer on the rota
+      if (fairFrom && date < fairFrom) continue;
       const cat = catOf[code];
       if (!cat) continue;
       if (!seen[`${id}|${date}`]) { totals[id].daysAvailable += 1; seen[`${id}|${date}`] = 1; }
@@ -1722,7 +1727,7 @@ function buildOnce(cfg, seed, ctx) {
         if (cat === 'off') totals[id].fridayOff += 1;
         if (cat === 'afternoon') totals[id].fridayAfternoon += 1;
       }
-      if ((cfg.history.nonOfficialDates || []).includes(date) && cat !== 'off') totals[id].nonOfficial += 1;
+      if (nonOffBefore.has(date) && cat !== 'off') totals[id].nonOfficial += 1;
     }
   }
 

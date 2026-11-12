@@ -43,7 +43,7 @@
 import { SHIFTS, PRESERVE, checkFeasible, datesBetween, generateRoster, toRotaCells } from "./rosterEngine";
 import {
   mergeRules, buildRosterConfig, activeStaffFor, employedOn, shiftISO, firstCodeIdOf,
-  codeIdByText, chosenCodesFor,
+  codeIdByText, chosenCodesFor, LOOK_BACK_ALL,
 } from "./rosterConfig";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
@@ -114,11 +114,13 @@ export const periodWords = (from, to) => {
 export const lookbackOptions = (from, rosterRules, historyFrom) => {
   const rules = mergeRules(rosterRules || {});
   const days = rules.lookbackDays || 0;
+  const all = days >= LOOK_BACK_ALL;
   const year = from.slice(0, 4);
   const out = [{
     id: "usual",
-    label: days ? `Usual (last ${days} days)` : "Usual (no look-back)",
+    label: all ? "Usual (the entire roster)" : days ? `Usual (last ${days} days)` : "Usual (no look-back)",
     from: days ? shiftISO(from, -days) : null,
+    ...(all ? { all: true } : {}),
   }];
   // Since 1 January means nothing when the period starts on 1 January.
   if (from !== `${year}-01-01`) out.push({ id: "year", label: "Since 1 January", from: `${year}-01-01` });
@@ -137,6 +139,12 @@ export const lookbackIdFor = (options, historyFrom) =>
 // the day before it.
 export const lookbackSentence = (option, from) => {
   if (!option || !option.from) return "Fairness does not look back at earlier rosters.";
+  // Its start date is a century ago, which is no date to print.
+  if (option.all) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(from || "")
+      ? `Fairness based on the entire roster, up to ${prettyDay(shiftISO(from, -1))}.`
+      : "Fairness based on the entire roster.";
+  }
   // Never print a broken date: without a real first day, say only where it starts.
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "")) return `Fairness based on rosters from ${prettyDay(option.from)} ${option.from.slice(0, 4)}.`;
   const lastDay = shiftISO(from, -1);
@@ -157,12 +165,12 @@ const onLeave = (person, date) =>
 
 function configFor({ data, rules, from, to, periodFrom, periodTo, lookFrom, keepExisting, lockedStaff }) {
   const staff = activeStaffFor(data.staff, datesBetween(from, to));
-  // History ends the day before the first day built; with no look-back it
-  // is simply empty.
+  // History ends the day before the first day built. With no look-back,
+  // fairness reads none of it, but rest still reads the days just before.
   const cfg = buildRosterConfig({
     data, rules, from, to, staff, lookFrom: lookFrom || from, lookTo: shiftISO(from, -1),
   });
-  if (!lookFrom) cfg.history = { cells: {}, nonOfficialDates: [] };
+  if (!lookFrom && !cfg.history.fairFrom) cfg.history = { cells: {}, nonOfficialDates: [] };
 
   const skipped = new Set(rules.skipStaff || []);
   const pinned = {};              // "sid|date" -> category, fixed for the engine

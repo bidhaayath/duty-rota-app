@@ -1,0 +1,900 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Smart Roster</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;font-family:Inter,system-ui,sans-serif;color:#12313a;background:#eef5f6}
+a{color:#0b6e78}a:hover{color:#08515a}
+button,input{font-family:inherit}
+.ini-shadow{position:absolute;left:10px;bottom:3px;width:44px;height:5px;border-radius:50%;background:rgba(18,49,58,.16);animation:ini-shadow 4.5s ease-in-out infinite}
+.ini-body{position:absolute;left:2px;top:9px;width:60px;height:45px;background:#9ed066;border-radius:40% 40% 40% 40% / 42% 42% 42% 42%;animation:ini-morph 4.5s ease-in-out infinite;transition:transform .3s}
+.ini-eye{position:absolute;top:11px;width:16px;height:16px;border-radius:50%;background:#ffffff;overflow:hidden;transition:transform .25s,height .2s,top .2s,background .2s}
+.ini-eye-l{left:13.5px}.ini-eye-r{left:30.5px}
+.ini-pupil{position:absolute;left:6px;top:5.3px;width:4px;height:4px;border-radius:50%;background:#945600;transition:transform .12s ease-out}
+.ini-lid{position:absolute;left:0;top:0;width:100%;height:0;background:#9ed066;animation:ini-blink 4.6s infinite;transition:height .25s}
+.ini-eye-r .ini-lid{animation-delay:.03s}
+.ini-mouth{position:absolute;left:26.5px;top:29px;width:7px;height:2.5px;border:1.6px solid #945600;border-top:none;border-radius:0 0 7px 7px;transition:all .2s}
+.ini-btn:hover .ini-eye{transform:scale(1.15)}
+.ini-btn:hover .ini-mouth{width:9px;left:25.5px;height:3.5px}
+.ini-sleep .ini-eye{height:2.5px;top:19px;background:#945600}
+.ini-sleep .ini-pupil{opacity:0}
+.ini-sleep .ini-lid{animation:none;height:0}
+.ini-sleep .ini-mouth{width:3px;height:3px;left:28.5px;top:30px;border:1.6px solid #945600;border-radius:50%}
+.ini-sleep{animation:ini-breathe 2.4s ease-in-out infinite}
+.ini-think .ini-lid{animation:none;height:55%}
+.ini-think .ini-mouth{width:4px;height:0;left:28px;top:31px;border-radius:0;border-width:0 0 1.6px 0}
+.ini-think{border-radius:48% 48% 34% 34% / 62% 62% 38% 38%;animation:ini-squish 1.6s ease-in-out infinite}
+.ini-party .ini-eye{transform:scale(1.2)}
+.ini-party .ini-mouth{width:10px;height:6px;left:25px;background:#945600;border-radius:0 0 9px 9px}
+.ini-party{animation:ini-bounce .6s ease-in-out infinite}
+.ini-surprise .ini-eye{transform:scale(1.25)}
+.ini-surprise .ini-mouth{width:4px;height:4px;left:27.5px;top:29px;border:1.6px solid #945600;border-radius:50%}
+@keyframes ini-morph{0%,100%{border-radius:40% 40% 40% 40% / 42% 42% 42% 42%;transform:scale(1,1)}25%{border-radius:46% 38% 42% 40% / 46% 40% 44% 42%;transform:scale(1.03,.97)}50%{border-radius:38% 44% 40% 42% / 40% 46% 42% 44%;transform:scale(.98,1.03)}75%{border-radius:42% 40% 44% 38% / 44% 42% 40% 46%;transform:scale(1.02,.98)}}
+@keyframes ini-breathe{0%,100%{transform:scale(1,1);border-radius:48% 48% 40% 40% / 56% 56% 44% 44%}50%{transform:scale(1.04,.95);border-radius:46% 50% 42% 40% / 54% 58% 42% 46%}}
+@keyframes ini-squish{0%,100%{transform:scale(1,1)}50%{transform:scale(1.06,.92)}}
+@keyframes ini-bounce{0%,100%{transform:translateY(0) scale(1,1)}40%{transform:translateY(-6px) scale(.96,1.05)}70%{transform:translateY(0) scale(1.08,.92)}}
+@keyframes ini-blink{0%,93%,100%{height:0}96%{height:100%}}
+@keyframes ini-shadow{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.9)}}
+.ini-btn{transition:transform .25s cubic-bezier(.34,1.56,.64,1);border-radius:50%}
+.ini-btn:hover{transform:translateY(-3px) scale(1.1) rotate(-4deg)}
+.ini-btn:active{transform:scale(0.86);transition-duration:.08s}
+.ini-btn:focus-visible{outline:3px solid #0b6e78;outline-offset:2px}
+@keyframes ini-wiggle{0%,100%{transform:rotate(0)}20%{transform:rotate(-12deg)}40%{transform:rotate(10deg)}60%{transform:rotate(-6deg)}80%{transform:rotate(4deg)}}
+@keyframes ini-jump{0%,100%{transform:translateY(0) scale(1)}30%{transform:translateY(-14px) scale(1.05,0.95)}55%{transform:translateY(0) scale(1.1,0.88)}75%{transform:translateY(-4px) scale(0.97,1.03)}}
+@keyframes ini-spin{0%{transform:rotate(0) scale(1)}50%{transform:rotate(180deg) scale(1.15)}100%{transform:rotate(360deg) scale(1)}}
+@keyframes ini-pop{0%{opacity:0;transform:translateY(6px) scale(.8)}60%{opacity:1;transform:translateY(-2px) scale(1.05)}100%{opacity:1;transform:translateY(0) scale(1)}}
+.ini-wiggle{animation:ini-wiggle .6s ease-in-out}
+.ini-jump{animation:ini-jump .7s ease-out}
+.ini-spin{animation:ini-spin .8s ease-in-out}
+.ini-bubble{animation:ini-pop .35s ease-out}
+@media (prefers-reduced-motion: reduce){.ini-btn,.ini-btn:hover,.ini-btn:active{transform:none;transition:none}.ini-wiggle,.ini-jump,.ini-spin,.ini-bubble,.ini-body,.ini-shadow,.ini-sleep,.ini-think,.ini-party{animation:none}.ini-lid{animation:none}}
+</style>
+</helmet>
+<div onPointerMove="{{ track }}" onPointerLeave="{{ untrack }}" style="min-height: 100%; background: #eef5f6; padding: 28px 16px 64px; box-sizing: border-box">
+<div style="max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px">
+
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 13px; font-weight: 600; color: #0b6e78; letter-spacing: 0.04em; text-transform: uppercase">Emergency Room · 16 staff</div>
+<h1 style="margin: 0; font-size: 28px; font-weight: 700">Smart Roster</h1>
+</div>
+
+<div style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+<div style="position: relative; display: flex; align-items: center; gap: 8px">
+<button type="button" class="ini-btn" onClick="{{ iniPoke }}" onMouseEnter="{{ iniHover }}" aria-label="Ini, your roster helper. Tap to say hello." style="width: 64px; height: 64px; padding: 0; border: none; background: none; cursor: pointer; flex-shrink: 0">
+<span class="{{ iniWiggleClass }}" style="display: block; width: 64px; height: 64px; position: relative">
+<span class="ini-shadow"></span>
+<span class="{{ iniBodyClass }}" ref="{{ iniRef }}">
+<span class="ini-eye ini-eye-l"><span class="ini-pupil" style="{{ pupilStyle }}"></span><span class="ini-lid"></span></span>
+<span class="ini-eye ini-eye-r"><span class="ini-pupil" style="{{ pupilStyle }}"></span><span class="ini-lid"></span></span>
+<span class="ini-mouth"></span>
+</span>
+</span>
+</button>
+<sc-if value="{{ iniBubbleOn }}" hint-placeholder-val="{{ false }}">
+<span class="ini-bubble" role="status" style="position: absolute; left: 56px; top: -30px; background: #12313a; color: #ffffff; font-size: 13px; font-weight: 600; padding: 6px 10px; border-radius: 12px; white-space: nowrap; z-index: 2">{{ iniBubble }}</span>
+</sc-if>
+<label for="ini" style="font-weight: 600; font-size: 15px">Ask Ini</label>
+</div>
+<input id="ini" type="text" onFocus="{{ iniFocus }}" placeholder="e.g. We need 3 on mornings with 1 Shift Manager. Shau only 1 night a week." style="flex: 1 1 320px; min-width: 0; border: 1px solid #b9d2d6; border-radius: 10px; padding: 12px 14px; font-size: 15px; color: #12313a">
+<button type="button" onClick="{{ iniSend }}" style="background: #0b6e78; color: #ffffff; border: none; border-radius: 10px; padding: 12px 18px; font-size: 15px; font-weight: 600; min-height: 44px; cursor: pointer">Send</button>
+<span style="font-size: 13px; color: #4a6670; flex-basis: 100%">{{ iniLine }}</span>
+</div>
+
+<nav aria-label="Steps" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ steps }}" as="s" hint-placeholder-count="3">
+<button type="button" onClick="{{ s.go }}" aria-current="{{ s.current }}" style="{{ s.style }}">
+<span style="{{ s.dot }}">{{ s.mark }}</span>
+<span style="display: flex; flex-direction: column; gap: 2px; text-align: left; min-width: 0">
+<span style="font-size: 15px; font-weight: 600">{{ s.title }}</span>
+<span style="font-size: 13px; color: #4a6670">{{ s.sub }}</span>
+</span>
+</button>
+</sc-for>
+</nav>
+
+<sc-if value="{{ isStep1 }}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+
+<div style="{{ checkStyle }}" role="status">
+<div style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 360px">
+<strong style="font-size: 15px">{{ checkTitle }}</strong>
+<span style="font-size: 14px">{{ checkText }}</span>
+</div>
+<sc-if value="{{ canFix }}" hint-placeholder-val="{{ true }}">
+<button type="button" onClick="{{ fix }}" style="background: #7a3c00; color: #ffffff; border: none; border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 600; min-height: 44px; cursor: pointer">Fix it for me</button>
+</sc-if>
+</div>
+
+<section style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<div>
+<h2 style="margin: 0; font-size: 18px">Who's needed on each shift</h2>
+<div style="font-size: 14px; color: #4a6670; margin-top: 4px">Every day, Smart Roster puts this many people on each shift.</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px">
+<sc-for list="{{ shifts }}" as="sh" hint-placeholder-count="3">
+<div style="border: 1px solid #dce9eb; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="{{ sh.swatch }}"></span>
+<strong style="font-size: 16px">{{ sh.name }}</strong>
+</div>
+<sc-for list="{{ sh.rows }}" as="r" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<span style="font-size: 14px">{{ r.label }}</span>
+<div style="display: flex; align-items: center; gap: 4px">
+<button type="button" onClick="{{ r.dec }}" aria-label="{{ r.decLabel }}" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">−</button>
+<span style="min-width: 32px; text-align: center; font-size: 17px; font-weight: 700">{{ r.value }}</span>
+<button type="button" onClick="{{ r.inc }}" aria-label="{{ r.incLabel }}" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">+</button>
+</div>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 6px; border-top: 1px solid #eef4f5">
+<span style="font-size: 15px; flex: 1 1 260px">Staff numbers (at least / at most)</span>
+<span style="font-size: 14px; font-weight: 600; color: #0d4a3f; background: #e6f4f1; border-radius: 10px; padding: 10px 14px">Must — always</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px">
+<span style="font-size: 15px; flex: 1 1 260px">{{ termPlural }} on every shift</span>
+<select aria-label="{{ seniors.strLabel }}" value="{{ seniors.str }}" onChange="{{ seniors.setStr }}" style="{{ seniors.strStyle }}">
+<sc-for list="{{ levels }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+</div>
+<button type="button" style="align-self: flex-start; background: none; border: none; color: #0b6e78; font-size: 15px; font-weight: 600; padding: 8px 0; min-height: 44px; cursor: pointer">+ Add a shift (e.g. Evening)</button>
+</section>
+
+<section style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<div>
+<h2 style="margin: 0; font-size: 18px">Each person, each week</h2>
+<div style="font-size: 14px; color: #4a6670; margin-top: 4px">The same for everyone unless you give someone their own rule in step 2.</div>
+</div>
+<div style="border: 1px solid #dce9eb; border-radius: 14px; overflow-x: auto">
+<div style="min-width: 860px">
+<div style="display: grid; grid-template-columns: minmax(110px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(170px, 1.2fr) minmax(160px, 1.1fr); gap: 8px; padding: 10px 14px; background: #f6fafb; font-size: 13px; font-weight: 600; color: #4a6670">
+<span>Each person gets</span>
+<span style="text-align: center">At least</span>
+<span style="text-align: center">At most</span>
+<span>In a row</span>
+<span>If it can't all fit</span>
+</div>
+<sc-for list="{{ perShift }}" as="ps" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: minmax(110px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(170px, 1.2fr) minmax(160px, 1.1fr); gap: 8px; padding: 8px 14px; border-top: 1px solid #eef4f5; align-items: center">
+<span style="display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500"><span style="{{ ps.swatch }}"></span>{{ ps.name }}</span>
+<sc-for list="{{ ps.pair }}" as="r" hint-placeholder-count="2">
+<div style="display: flex; align-items: center; justify-content: center; gap: 4px">
+<button type="button" onClick="{{ r.dec }}" aria-label="{{ r.decLabel }}" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">−</button>
+<span style="min-width: 32px; text-align: center; font-size: 17px; font-weight: 700">{{ r.value }}</span>
+<button type="button" onClick="{{ r.inc }}" aria-label="{{ r.incLabel }}" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">+</button>
+</div>
+</sc-for>
+<select aria-label="{{ ps.runLabel }}" value="{{ ps.run }}" onChange="{{ ps.setRun }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 14px; color: #12313a; background: #ffffff; min-height: 44px; width: 100%">
+<sc-for list="{{ ps.options }}" as="o" hint-placeholder-count="5"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+<select aria-label="{{ ps.strLabel }}" value="{{ ps.str }}" onChange="{{ ps.setStr }}" style="{{ ps.strStyle }}">
+<sc-for list="{{ levels }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 13px; color: #4a6670">"At least 1 night" means everyone gets a night every week. "In pairs" puts two nights side by side, but a single night is still fine so everyone gets one.</div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{ weekly }}" as="r" hint-placeholder-count="2">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid #eef4f5">
+<span style="font-size: 15px; flex: 1 1 200px">{{ r.label }}</span>
+<div style="display: flex; align-items: center; gap: 4px">
+<button type="button" onClick="{{ r.dec }}" aria-label="{{ r.decLabel }}" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">−</button>
+<span style="min-width: 32px; text-align: center; font-size: 17px; font-weight: 700">{{ r.value }}</span>
+<button type="button" onClick="{{ r.inc }}" aria-label="{{ r.incLabel }}" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">+</button>
+</div>
+<select aria-label="{{ r.strLabel }}" value="{{ r.str }}" onChange="{{ r.setStr }}" style="{{ r.strStyle }}">
+<sc-for list="{{ levels }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+</div>
+</sc-for>
+<sc-for list="{{ fairness }}" as="r" hint-placeholder-count="2">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid #eef4f5">
+<span style="font-size: 15px; flex: 1 1 300px">{{ r.label }}</span>
+<select aria-label="{{ r.strLabel }}" value="{{ r.str }}" onChange="{{ r.setStr }}" style="{{ r.strStyle }}">
+<sc-for list="{{ levels }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+</div>
+</sc-for>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 0; border-bottom: 1px solid #eef4f5">
+<label for="lookback" style="display: flex; flex-direction: column; gap: 2px; flex: 1 1 300px">
+<span style="font-size: 15px">Look back at past duties</span>
+<span style="font-size: 13px; color: #4a6670">{{ lookHint }}</span>
+</label>
+<select id="lookback" value="{{ lookback }}" onChange="{{ setLookback }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 14px; color: #12313a; min-height: 44px; min-width: 170px; background: #ffffff">
+<sc-for list="{{ lookOpts }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+</div>
+</div>
+</section>
+
+<section style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<div>
+<h2 style="margin: 0; font-size: 18px">When it can't all fit, what gives way first</h2>
+<div style="font-size: 14px; color: #4a6670; margin-top: 4px">Some weeks there aren't enough people for every rule. Smart Roster bends rules from left to right, and only as much as it has to. Covering every shift comes before everything except Must.</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px">
+<sc-for list="{{ ladder }}" as="l" hint-placeholder-count="5">
+<div style="{{ l.box }}">
+<div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #4a6670">{{ l.step }}</div>
+<div style="font-size: 15px; font-weight: 700">{{ l.name }}</div>
+<div style="font-size: 13px; color: #4a6670">{{ l.hint }}</div>
+<div style="display: flex; flex-direction: column; gap: 4px; margin-top: 6px">
+<sc-for list="{{ l.items }}" as="it" hint-placeholder-count="2">
+<span style="font-size: 13px; background: #ffffff; border: 1px solid #dce9eb; border-radius: 8px; padding: 4px 8px">{{ it }}</span>
+</sc-for>
+<sc-if value="{{ l.empty }}" hint-placeholder-val="{{ false }}">
+<span style="font-size: 13px; color: #4a6670">Nothing here</span>
+</sc-if>
+</div>
+</div>
+</sc-for>
+</div>
+<div style="font-size: 13px; color: #4a6670">Set to Ignore and a rule is switched off. Change any rule's level with the box next to it above.</div>
+</section>
+
+<section style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; overflow: hidden">
+<button type="button" onClick="{{ toggleAdv }}" aria-expanded="{{ advOpen }}" style="width: 100%; background: none; border: none; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: 600; color: #12313a; cursor: pointer; min-height: 56px">
+<span>What may follow what <span style="font-weight: 400; color: #4a6670; font-size: 14px">· {{ followSummary }}</span></span>
+<span aria-hidden="true">{{ advArrow }}</span>
+</button>
+<sc-if value="{{ advOpen }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 20px 18px; display: flex; flex-direction: column; gap: 10px; font-size: 15px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px">
+<span style="font-size: 14px; color: #4a6670; flex: 1 1 300px">From one day to the next. Already set to the usual rules.</span>
+<select aria-label="What may follow what: if it can't all fit" value="{{ follow.str }}" onChange="{{ follow.setStr }}" style="{{ follow.strStyle }}">
+<sc-for list="{{ levels }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+</div>
+<sc-for list="{{ followRules }}" as="f" hint-placeholder-count="6">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #eef4f5">
+<span style="flex: 1 1 260px">{{ f.text }}</span>
+<button type="button" onClick="{{ f.remove }}" aria-label="{{ f.removeLabel }}" style="background: none; border: none; width: 44px; height: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4a6670" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</div>
+</sc-for>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #eef4f5">
+<select aria-label="Never or always" value="{{ draft.kind }}" onChange="{{ draft.setKind }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 14px; min-height: 44px; background: #ffffff; color: #12313a">
+<option value="never">Never give</option><option value="always">Always give</option>
+</select>
+<select aria-label="This duty" value="{{ draft.a }}" onChange="{{ draft.setA }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 14px; min-height: 44px; background: #ffffff; color: #12313a">
+<sc-for list="{{ dutyOpts }}" as="o" hint-placeholder-count="5"><option value="{{ o }}">{{ o }}</option></sc-for>
+</select>
+<span>after</span>
+<select aria-label="After this duty" value="{{ draft.b }}" onChange="{{ draft.setB }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 14px; min-height: 44px; background: #ffffff; color: #12313a">
+<sc-for list="{{ dutyOpts }}" as="o" hint-placeholder-count="5"><option value="{{ o }}">{{ o }}</option></sc-for>
+</select>
+<button type="button" onClick="{{ draft.add }}" style="background: #0b6e78; color: #ffffff; border: none; border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 600; min-height: 44px; cursor: pointer">Add</button>
+<button type="button" onClick="{{ resetFollow }}" style="background: none; border: none; color: #0b6e78; font-size: 14px; font-weight: 600; min-height: 44px; cursor: pointer">Reset to the usual rules</button>
+</div>
+</div>
+</sc-if>
+</section>
+
+<button type="button" onClick="{{ goStep2 }}" style="align-self: flex-end; background: #0b6e78; color: #ffffff; border: none; border-radius: 10px; padding: 12px 22px; font-size: 16px; font-weight: 600; min-height: 48px; cursor: pointer">Next: your staff →</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isStep2 }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<section style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<div>
+<h2 style="margin: 0; font-size: 18px">Your staff</h2>
+<div style="font-size: 14px; color: #4a6670; margin-top: 4px">Everything about each person in one row: which shifts they do, who can take charge, who to skip, their own rules, and approved requests from the Duty requests tab. Approved requests are always kept (Must).</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: #f6fafb; border-radius: 12px; padding: 10px 12px">
+<label for="term" style="font-size: 14px; font-weight: 600">This ward calls the person in charge</label>
+<input id="term" type="text" value="{{ term }}" onChange="{{ setTerm }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 8px 12px; font-size: 15px; color: #12313a; width: 180px; min-height: 40px">
+<span style="font-size: 13px; color: #4a6670">e.g. Shift Manager, In-charge, Sister</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: #4a6670">
+<span><strong style="color: #12313a">Shifts:</strong> tick only if they never do the others. No ticks = any shift.</span>
+<span><strong style="color: #12313a">Skip:</strong> you enter their duties by hand.</span>
+<span><strong style="color: #12313a">Blue labels:</strong> approved duty requests, always kept.</span>
+<span><strong style="color: #12313a">Purple labels:</strong> duties you fixed, always kept.</span>
+</div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{ staff }}" as="p" hint-placeholder-count="8">
+<div style="{{ p.rowStyle }}">
+<div style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; min-width: 0">
+<strong style="font-size: 15px">{{ p.name }}</strong>
+<div style="display: flex; flex-wrap: wrap; gap: 4px">
+<sc-for list="{{ p.chips }}" as="c" hint-placeholder-count="1">
+<span style="{{ c.style }}">{{ c.t }}</span>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+<sc-for list="{{ p.shiftBtns }}" as="b" hint-placeholder-count="3">
+<button type="button" onClick="{{ b.toggle }}" aria-pressed="{{ b.on }}" disabled="{{ p.skipped }}" style="{{ b.style }}">{{ b.label }}</button>
+</sc-for>
+<span aria-hidden="true" style="width: 1px; height: 28px; background: #dce9eb; margin: 0 4px"></span>
+<button type="button" onClick="{{ p.toggleMgr }}" aria-pressed="{{ p.mgr }}" disabled="{{ p.skipped }}" style="{{ p.mgrStyle }}">{{ p.mgrLabel }}</button>
+<button type="button" onClick="{{ p.toggleSkip }}" aria-pressed="{{ p.skipped }}" style="{{ p.skipStyle }}">{{ p.skipLabel }}</button>
+<button type="button" onClick="{{ p.toggleOpen }}" aria-expanded="{{ p.open }}" aria-label="{{ p.ruleLabel }}" style="background: none; border: none; color: #0b6e78; font-size: 14px; font-weight: 600; min-height: 40px; padding: 0 8px; cursor: pointer">{{ p.ruleBtn }}</button>
+</div>
+<sc-if value="{{ p.open }}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1 1 100%; background: #f6fafb; border: 1px solid #dce9eb; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 15px; font-weight: 600">{{ p.name }}'s own rules</div>
+<sc-if value="{{ p.noRules }}" hint-placeholder-val="{{ false }}">
+<div style="font-size: 14px; color: #4a6670">No rules yet. {{ p.name }} follows the ward's settings.</div>
+</sc-if>
+<sc-for list="{{ p.ruleItems }}" as="r" hint-placeholder-count="1">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; background: #ffffff; border: 1px solid #dce9eb; border-radius: 10px; padding: 8px 12px">
+<span style="font-size: 15px">{{ r.t }}</span>
+<div style="display: flex; align-items: center; gap: 6px">
+<sc-if value="{{ r.notFixed }}" hint-placeholder-val="{{ true }}">
+<div role="group" aria-label="How strict" style="display: inline-flex; background: #eef4f5; border-radius: 10px; padding: 3px">
+<button type="button" onClick="{{ r.setMust }}" aria-pressed="{{ r.isMust }}" style="{{ r.mustStyle }}">Must</button>
+<button type="button" onClick="{{ r.setTry }}" aria-pressed="{{ r.isTry }}" style="{{ r.tryStyle }}">Try</button>
+</div>
+</sc-if>
+<sc-if value="{{ r.fixed }}" hint-placeholder-val="{{ false }}">
+<span style="font-size: 13px; font-weight: 600; color: #5b2d8a; background: #efe6fb; border-radius: 8px; padding: 8px 12px">Always kept</span>
+</sc-if>
+<button type="button" onClick="{{ r.remove }}" aria-label="{{ r.removeLabel }}" style="background: none; border: none; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4a6670" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</div>
+</div>
+</sc-for>
+<sc-if value="{{ p.hasReq }}" hint-placeholder-val="{{ false }}">
+<div style="font-size: 13px; color: #0b4f8a">Blue labels are approved duty requests. Change them in the Duty requests tab.</div>
+</sc-if>
+<div style="display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #dce9eb; padding-top: 12px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Add a rule
+<select value="{{ b.type }}" onChange="{{ b.setType }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 15px; min-height: 44px; background: #ffffff; color: #12313a; max-width: 420px">
+<sc-for list="{{ b.types }}" as="o" hint-placeholder-count="6"><option value="{{ o.v }}">{{ o.t }}</option></sc-for>
+</select>
+</label>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<sc-if value="{{ b.needN }}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; align-items: center; gap: 4px">
+<button type="button" onClick="{{ b.dec }}" aria-label="Less" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">−</button>
+<span style="min-width: 32px; text-align: center; font-size: 17px; font-weight: 700">{{ b.n }}</span>
+<button type="button" onClick="{{ b.inc }}" aria-label="More" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #b9d2d6; background: #ffffff; font-size: 18px; color: #0b6e78; cursor: pointer">+</button>
+</div>
+</sc-if>
+<sc-if value="{{ b.needShift }}" hint-placeholder-val="{{ true }}">
+<select aria-label="Which shift" value="{{ b.shift }}" onChange="{{ b.setShift }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 15px; min-height: 44px; background: #ffffff; color: #12313a">
+<option value="Morning">Morning</option><option value="Afternoon">Afternoon</option><option value="Night">Night</option>
+</select>
+</sc-if>
+</div>
+<sc-if value="{{ b.needFixed }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<label style="display: flex; align-items: center; gap: 8px; font-size: 14px">Date
+<input type="date" value="{{ b.date }}" onChange="{{ b.setDate }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 9px 10px; font-size: 15px; min-height: 44px; color: #12313a">
+</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 14px">Duty
+<select value="{{ b.fshift }}" onChange="{{ b.setFShift }}" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 15px; min-height: 44px; background: #ffffff; color: #12313a">
+<option value="Morning">Morning</option><option value="Afternoon">Afternoon</option><option value="Night">Night</option><option value="Off">Off</option>
+</select>
+</label>
+</div>
+<div style="font-size: 13px; color: #4a6670">For a duty you decide yourself, not one the staff member asked for. Smart Roster builds the rest of the week around it.</div>
+</sc-if>
+<sc-if value="{{ b.needDays }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; gap: 6px" role="group" aria-label="Which days">
+<sc-for list="{{ b.dayBtns }}" as="d" hint-placeholder-count="7">
+<button type="button" onClick="{{ d.toggle }}" aria-pressed="{{ d.on }}" style="{{ d.style }}">{{ d.label }}</button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ b.needShifts }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; gap: 6px" role="group" aria-label="Which shifts">
+<sc-for list="{{ b.shiftBtns }}" as="d" hint-placeholder-count="3">
+<button type="button" onClick="{{ d.toggle }}" aria-pressed="{{ d.on }}" style="{{ d.style }}">{{ d.label }}</button>
+</sc-for>
+</div>
+</sc-if>
+<div style="font-size: 15px; background: #ffffff; border: 1px dashed #b9d2d6; border-radius: 10px; padding: 10px 12px"><strong>{{ p.name }}:</strong> {{ b.preview }} <span style="color: #4a6670">— starts as {{ b.startStr }}</span></div>
+<sc-if value="{{ b.warn }}" hint-placeholder-val="{{ false }}">
+<div style="font-size: 14px; color: #7a3c00">{{ b.warnText }}</div>
+</sc-if>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" onClick="{{ p.addRule }}" disabled="{{ b.warn }}" style="{{ b.addStyle }}">Add rule</button>
+<button type="button" onClick="{{ p.toggleOpen }}" style="background: none; border: none; color: #0b6e78; font-size: 15px; font-weight: 600; min-height: 44px; padding: 0 10px; cursor: pointer">Done</button>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<div style="font-size: 13px; color: #4a6670">Staff on recorded leave are skipped automatically for those days.</div>
+</section>
+<div style="display: flex; justify-content: space-between; gap: 10px">
+<button type="button" onClick="{{ goStep1 }}" style="background: #ffffff; color: #0b6e78; border: 1.5px solid #0b6e78; border-radius: 10px; padding: 12px 18px; font-size: 15px; font-weight: 600; min-height: 48px; cursor: pointer">← Ward needs</button>
+<button type="button" onClick="{{ goStep3 }}" style="background: #0b6e78; color: #ffffff; border: none; border-radius: 10px; padding: 12px 22px; font-size: 16px; font-weight: 600; min-height: 48px; cursor: pointer">Next: make the roster →</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isStep3 }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<section style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="wk" style="font-size: 14px; font-weight: 600">Which week?</label>
+<input id="wk" type="text" value="Sun 15 – Sat 21 Nov" style="border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px 12px; font-size: 15px; color: #12313a; width: 220px">
+</div>
+<button type="button" onClick="{{ generate }}" style="background: #0b6e78; color: #ffffff; border: none; border-radius: 12px; padding: 14px 26px; font-size: 17px; font-weight: 700; min-height: 52px; cursor: pointer">Make the roster</button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<sc-for list="{{ ready }}" as="k" hint-placeholder-count="4">
+<div style="display: flex; align-items: center; gap: 10px; font-size: 15px">
+<span style="{{ k.icon }}">{{ k.mark }}</span>
+<span>{{ k.t }}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+<sc-if value="{{ generated }}" hint-placeholder-val="{{ false }}">
+<section style="background: #ffffff; border: 1px solid #cfe1e4; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px" aria-live="polite">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px">
+<h2 style="margin: 0; font-size: 18px">Option {{ optionNo }} of 3</h2>
+<span style="font-size: 14px; color: #4a6670">Nothing is saved until you press Use this roster</span>
+</div>
+<div style="background: #e6f4f1; border-radius: 12px; padding: 12px 14px; font-size: 15px"><strong>{{ okLine }}</strong></div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="font-size: 14px; font-weight: 600; color: #4a6670">What had to give</div>
+<sc-for list="{{ bent }}" as="b" hint-placeholder-count="2">
+<div style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; background: #fff7ea; border-radius: 10px; padding: 10px 12px">
+<span style="font-weight: 700; color: #7a3c00">!</span>
+<span><strong>{{ b.who }}</strong> {{ b.what }} <span style="color: #4a6670">— {{ b.why }}</span></span>
+</div>
+</sc-for>
+</div>
+<div style="overflow-x: auto; border: 1px solid #dce9eb; border-radius: 12px">
+<table style="border-collapse: collapse; width: 100%; min-width: 560px; font-size: 14px; text-align: center">
+<thead>
+<tr style="background: #f6fafb">
+<th style="text-align: left; padding: 8px 12px; font-weight: 600">Staff</th>
+<sc-for list="{{ days }}" as="d" hint-placeholder-count="7"><th style="padding: 8px 6px; font-weight: 600">{{ d }}</th></sc-for>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{ grid }}" as="g" hint-placeholder-count="5">
+<tr style="border-top: 1px solid #eef4f5">
+<td style="text-align: left; padding: 8px 12px; font-weight: 500">{{ g.name }}</td>
+<sc-for list="{{ g.cells }}" as="c" hint-placeholder-count="7"><td style="padding: 4px"><span style="{{ c.style }}">{{ c.t }}</span></td></sc-for>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="font-size: 13px; color: #4a6670">Showing 5 of 16 staff · <a href="#">See the full week</a></div>
+<div style="display: flex; flex-wrap: wrap; gap: 10px">
+<button type="button" style="background: #0b6e78; color: #ffffff; border: none; border-radius: 10px; padding: 12px 20px; font-size: 15px; font-weight: 600; min-height: 48px; cursor: pointer">Use this roster</button>
+<button type="button" onClick="{{ another }}" style="background: #ffffff; color: #0b6e78; border: 1.5px solid #0b6e78; border-radius: 10px; padding: 12px 18px; font-size: 15px; font-weight: 600; min-height: 48px; cursor: pointer">Show another option</button>
+<button type="button" onClick="{{ discard }}" style="background: none; color: #4a6670; border: none; padding: 12px 10px; font-size: 15px; font-weight: 600; min-height: 48px; cursor: pointer">Discard</button>
+</div>
+</section>
+</sc-if>
+
+<button type="button" onClick="{{ goStep2 }}" style="align-self: flex-start; background: #ffffff; color: #0b6e78; border: 1.5px solid #0b6e78; border-radius: 10px; padding: 12px 18px; font-size: 15px; font-weight: 600; min-height: 48px; cursor: pointer">← Your staff</button>
+</div>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1400}}'>
+class Component extends DCLogic {
+  componentDidMount() { this.mood('wake', 1800); }
+  componentWillUnmount() { clearTimeout(this.moodTimer); clearTimeout(this.workTimer); clearTimeout(this.bubbleTimer); clearTimeout(this.wiggleTimer); clearTimeout(this.surpriseTimer); if (this.raf) cancelAnimationFrame(this.raf); }
+  say(text, ms) {
+    clearTimeout(this.bubbleTimer);
+    this.setState({ bubble: text });
+    this.bubbleTimer = setTimeout(() => this.setState({ bubble: '' }), ms || 2200);
+  }
+  move(kind, ms) {
+    clearTimeout(this.wiggleTimer);
+    this.setState({ wiggle: '' });
+    setTimeout(() => this.setState({ wiggle: kind }), 20);
+    this.wiggleTimer = setTimeout(() => this.setState({ wiggle: '' }), ms || 800);
+  }
+  mood(m, ms, then) {
+    clearTimeout(this.moodTimer);
+    this.setState({ ini: m });
+    if (m === 'celebrate') setTimeout(() => this.move('jump', 750), 30);
+    if (ms) this.moodTimer = setTimeout(() => { if (then) then(); else this.setState({ ini: 'listen' }); }, ms);
+  }
+  constructor(props) {
+    super(props);
+    this.iniRefFn = (el) => { this.iniEl = el; };
+    this.pending = null;
+    this.state = { look: { x: 0, y: 0 }, surprise: false, ini: 'wake', iniMsg: '', bubble: '', wiggle: '', pokes: 0, lastPoke: 0, hovered: false, lookback: '30', step: 1, advOpen: false, generated: false, option: 1,
+      n: { mMin: 3, mMax: 4, mSen: 1, aMin: 3, aMax: 4, aSen: 1, nMin: 3, nMax: 3, nSen: 1, works: 5, inRow: 5,
+        pmMin: 1, pmMax: 4, paMin: 1, paMax: 4, pnMin: 1, pnMax: 2, poMin: 2, poMax: 2 },
+      runs: { m: 'upto4', a: 'upto4', n: 'pairs', o: 'apart' },
+      strs: { m: 'bneed', a: 'bneed', n: 'pmost', o: 'protect', works: 'must', inRow: 'protect', seniors: 'pmost', fairN: 'protect', fairF: 'bfirst', follow: 'must' },
+      term: 'Shift Manager',
+      follow: [['never', 'Morning', 'Night'], ['never', 'Afternoon', 'Night'], ['never', 'Morning', 'Afternoon'], ['always', 'Off day', 'Night']],
+      draft: { kind: 'never', a: 'Morning', b: 'Night' },
+      openRule: null, bld: { type: 'atMost', n: 1, shift: 'Night', days: [], shifts: [], date: '2026-12-12', fshift: 'Morning' },
+      people: {
+        'SRN MISA': { sh: [], mgr: false, skip: true },
+        'RN ANA': { sh: ['Morning'], mgr: true, skip: false, rules: [{ t: 'Always off Fri & Sat', str: 'must' }] },
+        'SRN SAI': { sh: [], mgr: true, skip: false },
+        'SRN FATHUN': { sh: [], mgr: true, skip: false },
+        'SRN AMINATH': { sh: [], mgr: true, skip: false },
+        'RN RAHEEMA': { sh: ['Morning', 'Afternoon'], mgr: true, skip: false },
+        'RN SHAU': { sh: [], mgr: true, skip: false, rules: [{ t: 'At most 1 Night a week', str: 'try' }] },
+        'SRN NAJU': { sh: [], mgr: true, skip: false },
+        'RN RASHEE': { sh: [], mgr: true, skip: false, req: ['Request: Night, Tue 17 Nov'] },
+        'RN MARIYAM': { sh: [], mgr: false, skip: false, rules: [{ t: 'At least 2 days between Nights', str: 'try' }] },
+        'RN MISA': { sh: [], mgr: false, skip: false },
+        'RN MAI': { sh: [], mgr: false, skip: false, rules: [{ t: 'Fixed: Morning on Sat 12 Dec', str: 'fixed' }] },
+        'RN ZEENA': { sh: [], mgr: false, skip: false },
+        'RN FIRU': { sh: [], mgr: false, skip: false },
+        'RN MIRU': { sh: [], mgr: false, skip: false },
+        'RN SADHA': { sh: [], mgr: false, skip: false }
+      } };
+  }
+  renderVals() {
+    const s = this.state;
+    const n = s.n;
+    const staff = 16;
+    const set = (k, d, lo, hi) => () => {
+      const v = Math.max(lo, Math.min(hi, n[k] + d));
+      this.setState({ n: Object.assign({}, n, { [k]: v }), generated: false });
+    };
+    const row = (label, k, lo, hi) => ({ label: label, value: n[k], dec: set(k, -1, lo, hi), inc: set(k, 1, lo, hi), decLabel: 'Less: ' + label, incLabel: 'More: ' + label });
+    const sw = (c) => 'width: 14px; height: 14px; border-radius: 4px; background: ' + c;
+    const term = (s.term || '').trim() || 'Shift Manager';
+    const termPlural = /s$/i.test(term) ? term : term + 's';
+    const senLabel = termPlural + ', at least';
+    const shifts = [
+      { name: 'Morning', swatch: sw('#f6c48a'), rows: [row('At least', 'mMin', 0, 20), row('At most', 'mMax', 0, 20), row(senLabel, 'mSen', 0, 5)] },
+      { name: 'Afternoon', swatch: sw('#9fd08f'), rows: [row('At least', 'aMin', 0, 20), row('At most', 'aMax', 0, 20), row(senLabel, 'aSen', 0, 5)] },
+      { name: 'Night', swatch: sw('#8fb8e6'), rows: [row('At least', 'nMin', 0, 20), row('At most', 'nMax', 0, 20), row(senLabel, 'nSen', 0, 5)] }
+    ];
+    const levels = [
+      { v: 'must', t: 'Must — never break' },
+      { v: 'pmost', t: 'Protect most' },
+      { v: 'protect', t: 'Protect' },
+      { v: 'bneed', t: 'Bend if needed' },
+      { v: 'bfirst', t: 'Bend first' },
+      { v: 'ignore', t: 'Ignore (off)' }
+    ];
+    const strs = s.strs;
+    const strTint = { must: '#e6f4f1', pmost: '#eaf3f5', protect: '#f1f6f7', bneed: '#fff7ea', bfirst: '#fff1dc', ignore: '#f1f4f5' };
+    const strength = (key, name) => ({
+      str: strs[key], strLabel: name + ': if it can’t all fit',
+      strStyle: 'border: 1px solid #b9d2d6; border-radius: 10px; padding: 10px; font-size: 14px; color: #12313a; min-height: 44px; min-width: 170px; background: ' + strTint[strs[key]],
+      setStr: (e) => this.setState({ strs: Object.assign({}, strs, { [key]: e.target.value }), generated: false })
+    });
+    const weekly = [
+      Object.assign(row('Working days', 'works', 1, 7), strength('works', 'Working days')),
+      Object.assign(row('Working days in a row, at most', 'inRow', 1, 7), strength('inRow', 'Working days in a row'))
+    ];
+    const fairness = [
+      Object.assign({ label: 'Share nights fairly' }, strength('fairN', 'Share nights fairly')),
+      Object.assign({ label: 'Share non-official days (Fridays and holidays) fairly' }, strength('fairF', 'Share non-official days fairly'))
+    ];
+    const seniors = strength('seniors', termPlural + ' on every shift');
+    const follow = strength('follow', 'What may follow what');
+    const nice = (r) => (r[0] === 'never' ? 'Never give ' : 'Always give ') + (r[1] === 'Off day' ? 'an off day' : r[1]) + ' after ' + r[2];
+    const followRules = s.follow.map((r, i) => ({
+      text: nice(r), removeLabel: 'Remove: ' + nice(r),
+      remove: () => this.setState({ follow: s.follow.filter((_, j) => j !== i), generated: false })
+    }));
+    const levelName = { must: 'Must', pmost: 'Protect most', protect: 'Protect', bneed: 'Bend if needed', bfirst: 'Bend first', ignore: 'Off' };
+    const followSummary = s.follow.length + ' rules · ' + levelName[s.strs.follow];
+    const d = s.draft;
+    const setDraft = (k) => (e) => this.setState({ draft: Object.assign({}, d, { [k]: e.target.value }) });
+    const draft = {
+      kind: d.kind, a: d.a, b: d.b, setKind: setDraft('kind'), setA: setDraft('a'), setB: setDraft('b'),
+      add: () => {
+        if (s.follow.some((r) => r[0] === d.kind && r[1] === d.a && r[2] === d.b)) return;
+        this.setState({ follow: s.follow.concat([[d.kind, d.a, d.b]]), generated: false });
+      }
+    };
+    const usualFollow = [['never', 'Morning', 'Night'], ['never', 'Afternoon', 'Night'], ['never', 'Morning', 'Afternoon'], ['always', 'Off day', 'Night']];
+    const pill = (on, tone) => 'border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; min-height: 36px; cursor: pointer; ' +
+      (on ? (tone === 'red' ? 'background: #fde8e6; color: #8a2a1d; border: 1.5px solid #e9a99f' : 'background: #d7ecef; color: #0b5560; border: 1.5px solid #0b6e78') : 'background: #ffffff; color: #12313a; border: 1px solid #cfe1e4');
+    const P = s.people;
+    const upd = (name, patch) => this.setState({ people: Object.assign({}, P, { [name]: Object.assign({}, P[name], patch) }), generated: false });
+    const chipS = 'font-size: 12px; background: #eef4f5; border-radius: 8px; padding: 3px 8px';
+    const reqS = 'font-size: 12px; background: #e2eefb; color: #0b4f8a; border-radius: 8px; padding: 3px 8px';
+    const fixS = 'font-size: 12px; background: #efe6fb; color: #5b2d8a; border-radius: 8px; padding: 3px 8px';
+    const segStyle = (on) => 'border: none; border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 600; min-height: 36px; min-width: 56px; cursor: pointer; ' + (on ? 'background: #0b6e78; color: #ffffff' : 'background: transparent; color: #4a6670');
+    const B = s.bld;
+    const setB = (patch) => this.setState({ bld: Object.assign({}, B, patch) });
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const DAYL = { Sun: 'Sunday', Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday' };
+    const joinAnd = (xs) => xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
+    const types = [
+      { v: 'atMost', t: 'At most … of a shift a week' },
+      { v: 'atLeast', t: 'At least … of a shift a week' },
+      { v: 'apart', t: 'Gap between shifts: at least … days' },
+      { v: 'pairs', t: 'A shift in pairs (2 together)' },
+      { v: 'offOn', t: 'Always off on … (days)' },
+      { v: 'onlyOn', t: 'On … (days), only … (shifts)' },
+      { v: 'fixed', t: 'Fixed duty on a date (set by you)' }
+    ];
+    const pl = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    const daysSorted = DAYS.filter((d) => B.days.includes(d));
+    const shiftsSorted = ['Morning', 'Afternoon', 'Night'].filter((x) => B.shifts.includes(x));
+    let preview = '', warnText = '';
+    if (B.type === 'atMost') preview = 'At most ' + B.n + ' ' + B.shift + (B.n === 1 ? '' : 's') + ' a week';
+    if (B.type === 'atLeast') preview = 'At least ' + B.n + ' ' + B.shift + (B.n === 1 ? '' : 's') + ' a week';
+    if (B.type === 'apart') preview = 'At least ' + pl(B.n, 'day') + ' between ' + B.shift + 's';
+    if (B.type === 'pairs') preview = B.shift + 's in pairs';
+    if (B.type === 'offOn') { preview = daysSorted.length ? 'Always off on ' + joinAnd(daysSorted.map((d) => DAYL[d])) : 'Always off on …'; if (!daysSorted.length) warnText = 'Pick at least one day.'; }
+    if (B.type === 'onlyOn') { preview = 'On ' + (daysSorted.length ? joinAnd(daysSorted.map((d) => DAYL[d])) : '…') + ', only ' + (shiftsSorted.length ? joinAnd(shiftsSorted) : '…'); if (!daysSorted.length || !shiftsSorted.length) warnText = 'Pick the days and the shifts.'; }
+    if (B.type === 'atLeast' && B.n >= 3) warnText = warnText || '';
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const fmtDate = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); if (!m) return ''; const dt = new Date(+m[1], +m[2] - 1, +m[3]); return DAYS[dt.getDay()] + ' ' + (+m[3]) + ' ' + MON[+m[2] - 1]; };
+    if (B.type === 'fixed') { const fd = fmtDate(B.date); preview = fd ? 'Fixed: ' + B.fshift + ' on ' + fd : 'Fixed: ' + B.fshift + ' on …'; if (!fd) warnText = 'Pick a date.'; }
+    const startKey = B.type === 'offOn' ? 'must' : (B.type === 'fixed' ? 'fixed' : 'try');
+    const bInfo = { preview: preview, warn: !!warnText, startKey: startKey };
+    const chipBtn = (on) => 'border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; min-height: 36px; cursor: pointer; ' + (on ? 'background: #d7ecef; color: #0b5560; border: 1.5px solid #0b6e78' : 'background: #ffffff; color: #12313a; border: 1px solid #cfe1e4');
+    const b = {
+      type: B.type, types: types, n: B.n, shift: B.shift,
+      setType: (e) => setB({ type: e.target.value, n: e.target.value === 'apart' ? 2 : 1 }),
+      setShift: (e) => setB({ shift: e.target.value }),
+      dec: () => setB({ n: Math.max(B.type === 'atMost' ? 0 : 1, B.n - 1) }), inc: () => setB({ n: Math.min(7, B.n + 1) }),
+      needN: ['atMost', 'atLeast', 'apart'].includes(B.type), needShift: ['atMost', 'atLeast', 'apart', 'pairs'].includes(B.type),
+      needDays: ['offOn', 'onlyOn'].includes(B.type), needShifts: B.type === 'onlyOn',
+      needFixed: B.type === 'fixed', date: B.date, fshift: B.fshift,
+      setDate: (e) => setB({ date: e.target.value }), setFShift: (e) => setB({ fshift: e.target.value }),
+      dayBtns: DAYS.map((d) => { const on = B.days.includes(d); return { label: d, on: on, style: chipBtn(on), toggle: () => setB({ days: on ? B.days.filter((x) => x !== d) : B.days.concat([d]) }) }; }),
+      shiftBtns: ['Morning', 'Afternoon', 'Night'].map((x) => { const on = B.shifts.includes(x); return { label: x, on: on, style: chipBtn(on), toggle: () => setB({ shifts: on ? B.shifts.filter((y) => y !== x) : B.shifts.concat([x]) }) }; }),
+      preview: preview, warn: !!warnText, warnText: warnText, startStr: startKey === 'must' ? 'Must' : (startKey === 'fixed' ? 'always kept, like an approved request' : 'Try'),
+      addStyle: 'border: none; border-radius: 10px; padding: 10px 18px; font-size: 15px; font-weight: 600; min-height: 44px; ' + (warnText ? 'background: #c9d8db; color: #4a6670; cursor: not-allowed' : 'background: #0b6e78; color: #ffffff; cursor: pointer')
+    };
+    const staffList = Object.keys(P).map((name) => {
+      const p = P[name];
+      const chips = [];
+      if (p.sh.length) chips.push({ t: p.sh.join(' & ') + ' only', style: chipS });
+      (p.rules || []).forEach((r) => chips.push({ t: r.t, style: r.str === 'fixed' ? fixS : chipS }));
+      (p.req || []).forEach((t) => chips.push({ t: t, style: reqS }));
+      return {
+        name: name, chips: chips, skipped: p.skip, mgr: p.mgr,
+        rowStyle: 'display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0; border-top: 1px solid #eef4f5' + (p.skip ? '; opacity: 0.55' : ''),
+        shiftBtns: ['Morning', 'Afternoon', 'Night'].map((sh) => {
+          const on = p.sh.includes(sh);
+          return { label: (on ? '✓ ' : '') + sh, on: on, style: pill(on),
+            toggle: () => upd(name, { sh: on ? p.sh.filter((x) => x !== sh) : p.sh.concat([sh]) }) };
+        }),
+        mgrLabel: (p.mgr ? '✓ ' : '') + term, mgrStyle: pill(p.mgr),
+        toggleMgr: () => upd(name, { mgr: !p.mgr }),
+        skipLabel: p.skip ? '✓ Skipped' : 'Skip', skipStyle: pill(p.skip, 'red'),
+        toggleSkip: () => upd(name, { skip: !p.skip }),
+        ruleLabel: 'Rules for ' + name,
+        open: s.openRule === name, ruleBtn: s.openRule === name ? 'Close' : ((p.rules || []).length ? 'Rules (' + p.rules.length + ')' : '+ Rule'),
+        toggleOpen: () => this.setState({ openRule: s.openRule === name ? null : name, bld: { type: 'atMost', n: 1, shift: 'Night', days: [], shifts: [], date: '2026-12-12', fshift: 'Morning' } }),
+        noRules: !(p.rules || []).length, hasReq: !!(p.req || []).length,
+        ruleItems: (p.rules || []).map((r, i) => {
+          const setS = (v) => () => upd(name, { rules: p.rules.map((x, j) => (j === i ? Object.assign({}, x, { str: v }) : x)) });
+          return { t: r.t, fixed: r.str === 'fixed', notFixed: r.str !== 'fixed', isMust: r.str === 'must', isTry: r.str === 'try',
+            mustStyle: segStyle(r.str === 'must'), tryStyle: segStyle(r.str === 'try'),
+            setMust: setS('must'), setTry: setS('try'), removeLabel: 'Remove: ' + r.t,
+            remove: () => upd(name, { rules: p.rules.filter((_, j) => j !== i) }) };
+        }),
+        addRule: () => {
+          if (bInfo.warn) return;
+          if ((p.rules || []).some((x) => x.t === bInfo.preview)) return;
+          upd(name, { rules: (p.rules || []).concat([{ t: bInfo.preview, str: bInfo.startKey }]) });
+          this.setState({ bld: { type: 'atMost', n: 1, shift: 'Night', days: [], shifts: [], date: '2026-12-12', fshift: 'Morning' } });
+        }
+      };
+    });
+    const mgrCount = Object.keys(P).filter((k) => P[k].mgr && !P[k].skip).length;
+    const activeCount = Object.keys(P).filter((k) => !P[k].skip).length;
+    const shiftRuns = [
+      { v: 'any', t: 'Any pattern' },
+      { v: 'never', t: 'Never 2 in a row' },
+      { v: 'pairs', t: 'In pairs (2 together)' },
+      { v: 'two3', t: '2 or 3 together' },
+      { v: 'upto3', t: 'Up to 3 in a row' },
+      { v: 'upto4', t: 'Up to 4 in a row' }
+    ];
+    const offRuns = [
+      { v: 'apart', t: 'Spread apart' },
+      { v: 'allowed', t: 'Together is fine' },
+      { v: 'together', t: 'Always together' }
+    ];
+    const runs = s.runs;
+    const pr = (key, name, a, b, lo, hi, options) => ({
+      name: name, pair: [row(name + ', at least', a, lo, hi), row(name + ', at most', b, lo, hi)],
+      run: runs[key], options: options, runLabel: name + ' in a row',
+      setRun: (e) => this.setState({ runs: Object.assign({}, runs, { [key]: e.target.value }), generated: false })
+    });
+    const perShift = [
+      Object.assign(pr('m', 'Morning', 'pmMin', 'pmMax', 0, 7, shiftRuns), { swatch: sw('#f6c48a') }, strength('m', 'Morning')),
+      Object.assign(pr('a', 'Afternoon', 'paMin', 'paMax', 0, 7, shiftRuns), { swatch: sw('#9fd08f') }, strength('a', 'Afternoon')),
+      Object.assign(pr('n', 'Night', 'pnMin', 'pnMax', 0, 7, shiftRuns), { swatch: sw('#8fb8e6') }, strength('n', 'Night')),
+      Object.assign(pr('o', 'Off days', 'poMin', 'poMax', 0, 7, offRuns), { swatch: sw('#d3dcde') }, strength('o', 'Off days'))
+    ];
+    const ruleNames = {
+      m: 'Morning per person', a: 'Afternoon per person', n: 'Night per person', o: 'Off days per person',
+      works: 'Working days', inRow: 'Working days in a row', seniors: termPlural + ' on every shift',
+      fairN: 'Fair nights', fairF: 'Fair non-official days', follow: 'What may follow what'
+    };
+    const ladderDefs = [
+      { v: 'bfirst', step: '1st to give way', hint: 'Bent before anything else' },
+      { v: 'bneed', step: '2nd', hint: 'Bent when needed' },
+      { v: 'protect', step: '3rd', hint: 'Kept unless it would leave a gap' },
+      { v: 'pmost', step: 'Last', hint: 'Bent only as a last resort' },
+      { v: 'must', step: 'Never', hint: 'Always kept, even if a shift goes short' }
+    ];
+    const ladder = ladderDefs.map((d) => {
+      const items = Object.keys(ruleNames).filter((k) => strs[k] === d.v).map((k) => ruleNames[k]);
+      if (d.v === 'must') { items.unshift('Duties you fixed'); items.unshift('Approved duty requests'); items.unshift('Staff numbers'); }
+      return {
+        step: d.step, name: levels.find((l) => l.v === d.v).t.replace(' — never break', ''), hint: d.hint,
+        items: items, empty: items.length === 0,
+        box: 'border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px; border: 1px solid #dce9eb; background: ' + strTint[d.v]
+      };
+    });
+    const needsTwo = { pairs: 2, two3: 2 };
+    const duties = staff * n.works;
+    const room = (n.mMax + n.aMax + n.nMax) * 7;
+    const need = (n.mMin + n.aMin + n.nMin) * 7;
+    const minSum = n.pmMin + n.paMin + n.pnMin;
+    const maxSum = n.pmMax + n.paMax + n.pnMax;
+    let canFix = false;
+    let conflict = false, title = 'These settings fit your 16 staff', text = 'Ready to make a roster.';
+    const badPair = perShift.find((p) => p.pair[0].value > p.pair[1].value);
+    const pairClash = perShift.slice(0, 3).find((p) => needsTwo[p.run] && p.pair[1].value < 2 && p.pair[1].value > 0);
+    if (pairClash) {
+      conflict = true;
+      title = pairClash.name + ': pairs need room for 2';
+      text = pairClash.name + ' is set to come in pairs, but each person gets at most ' + pairClash.pair[1].value + '. Raise "at most" to 2, or choose another pattern.';
+    } else if (badPair) {
+      conflict = true;
+      title = badPair.name + ': "at least" is more than "at most"';
+      text = 'Each person can’t get at least ' + badPair.pair[0].value + ' but at most ' + badPair.pair[1].value + '. Lower one of them.';
+    } else if (minSum > n.works) {
+      conflict = true;
+      title = 'The minimums add up to more than a working week';
+      text = 'At least ' + n.pmMin + ' Morning + ' + n.paMin + ' Afternoon + ' + n.pnMin + ' Night is ' + minSum + ' duties, but each person works only ' + n.works + ' days.';
+    } else if (maxSum < n.works) {
+      conflict = true;
+      title = 'The maximums don’t fill a working week';
+      text = 'At most ' + maxSum + ' duties across the shifts, but each person works ' + n.works + ' days. Raise a maximum.';
+    } else if (7 - n.works < n.poMin || 7 - n.works > n.poMax) {
+      conflict = true;
+      title = 'Working days and off days don’t match';
+      text = n.works + ' working days leaves ' + (7 - n.works) + ' off days, but off days are set to ' + n.poMin + '–' + n.poMax + '.';
+    } else if (duties > room) {
+      conflict = true;
+      canFix = true;
+      title = 'Your settings don’t fit together';
+      text = '16 staff working ' + n.works + ' days is ' + duties + ' duties, but your shifts have room for only ' + room + '. Allow one more person on Morning, or fewer working days.';
+    } else if (duties < need) {
+      conflict = true;
+      title = 'Not enough staff for these shifts';
+      text = 'Your shifts need at least ' + need + ' duties a week, but 16 staff working ' + n.works + ' days give only ' + duties + '.';
+    }
+    const checkStyle = 'border-radius: 14px; padding: 14px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; ' + (conflict ? 'background: #fff1dc; border: 1px solid #f3d7a8; color: #5c2d00' : 'background: #e6f4f1; border: 1px solid #b9dfd5; color: #0d4a3f');
+    const stepDefs = [
+      { t: 'Ward needs', sub: conflict ? 'Needs a fix' : 'Done' },
+      { t: 'Your staff', sub: activeCount + ' on the roster' },
+      { t: 'Make the roster', sub: 'Pick a week' }
+    ];
+    const steps = stepDefs.map((d, i) => {
+      const cur = s.step === i + 1;
+      const done = s.step > i + 1 || (i === 0 && !conflict && s.step !== 1);
+      return {
+        title: d.t, sub: d.sub, current: cur ? 'step' : 'false',
+        mark: done ? '✓' : String(i + 1),
+        go: () => this.setState({ step: i + 1 }),
+        style: 'display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 14px; cursor: pointer; min-height: 60px; color: #12313a; ' + (cur ? 'background: #ffffff; border: 2px solid #0b6e78' : 'background: #ffffff; border: 1px solid #cfe1e4'),
+        dot: 'width: 30px; height: 30px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; ' + (cur ? 'background: #0b6e78; color: #ffffff' : (done ? 'background: #d7ecef; color: #0b6e78' : 'background: #eef4f5; color: #4a6670'))
+      };
+    });
+    const ok = (t) => ({ t: t, mark: '✓', icon: 'width: 24px; height: 24px; border-radius: 999px; background: #d7ecef; color: #0b6e78; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px' });
+    const warn = (t) => ({ t: t, mark: '!', icon: 'width: 24px; height: 24px; border-radius: 999px; background: #fff1dc; color: #7a3c00; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px' });
+    const lookOpts = [
+      { v: 'all', t: 'The entire roster' },
+      { v: '90', t: 'Last 90 days' },
+      { v: '60', t: 'Last 60 days' },
+      { v: '30', t: 'Last 30 days' },
+      { v: '14', t: 'Last 14 days' },
+      { v: 'none', t: 'Don\u2019t look back' }
+    ];
+    const lookHint = s.lookback === 'none'
+      ? 'Each new week starts fresh. Fair shares count only this week, and yesterday\u2019s Night is not checked.'
+      : 'So fair shares count nights and Fridays already worked' + (s.lookback === 'all' ? ' since the roster began' : ' in the last ' + s.lookback + ' days') + ', and a Night at the end of last week still gets its rest day.';
+    const lookReady = s.lookback === 'none' ? 'Not looking back at past duties' : 'Looking back at ' + (s.lookback === 'all' ? 'the entire roster' : 'the last ' + s.lookback + ' days') + ' for fair shares';
+    const ready = [
+      conflict ? warn('Ward needs don’t fit together — go back to step 1') : ok('Ward needs fit your 16 staff'),
+      mgrCount >= 4 ? ok(mgrCount + ' ' + termPlural + ' on the roster — enough for 1 on every shift') : warn('Only ' + mgrCount + ' ' + termPlural + ' — some shifts may have none'),
+      ok(activeCount + ' staff on the roster, ' + (Object.keys(P).length - activeCount) + ' skipped'),
+      ok(s.follow.length + ' rules for what may follow what'),
+      ok(lookReady),
+      ok('1 approved duty request this week — always kept (Must)')
+    ];
+    const L = { M: 'background: #fde3c4', A: 'background: #d9efd2', N: 'background: #d6e6f8', O: 'background: #f1f4f5; color: #4a6670' };
+    const cell = (t) => ({ t: t === 'O' ? 'Off' : t, style: 'display: inline-block; min-width: 40px; padding: 6px 4px; border-radius: 8px; font-weight: 600; ' + L[t] });
+    const grids = {
+      1: [['Ana', 'M M M M M O O'], ['Raheema', 'A M O A M A O'], ['Shau', 'N O M A O M A'], ['Mariyam', 'A N O M O A N'], ['Rashee', 'M A N O O M A']],
+      2: [['Ana', 'M M M M M O O'], ['Raheema', 'M A A O M O A'], ['Shau', 'A M O N O A M'], ['Mariyam', 'N O A M A O N'], ['Rashee', 'A M N O M O A']]
+    };
+    const g = grids[s.option === 2 ? 2 : 1];
+    const grid = g.map((r) => ({ name: r[0], cells: r[1].split(' ').map(cell) }));
+    const bentBy = {
+      1: [{ who: 'Shau', what: 'got 2 nights (Try).', why: 'Only 3 people could work Thursday night' }, { who: 'Mon afternoon', what: 'has no Shift Manager (Protect most).', why: 'Both free Shift Managers were on leave' }],
+      2: [{ who: 'Raheema', what: 'has 6 days in a row (Try).', why: 'Fixes Monday’s missing Shift Manager' }],
+      3: [{ who: 'Mariyam', what: 'has only 1 day between nights (Try).', why: 'Keeps Shau to 1 night' }]
+    };
+    return {
+      iniWake: s.ini === 'wake', iniListen: s.ini === 'listen', iniThink: s.ini === 'thinking', iniParty: s.ini === 'celebrate',
+      iniLine: s.iniMsg || (s.ini === 'wake' ? 'Ini is waking up…' : 'Type what you need, or use the steps below.'),
+      iniFocus: () => { if (s.ini !== 'thinking') this.mood('listen'); this.setState({ look: { x: 4, y: 1 } }); },
+      iniSend: () => { this.setState({ iniMsg: 'Reading that…' }); this.mood('thinking', 1800, () => { this.setState({ iniMsg: 'Got it! I\u2019ve added that to step 2 for you to check.' }); this.mood('celebrate', 3000); }); },
+      lookback: s.lookback, lookOpts: lookOpts, lookHint: lookHint,
+      setLookback: (e) => this.setState({ lookback: e.target.value, generated: false }),
+      iniRef: this.iniRefFn,
+      iniBodyClass: 'ini-body' + ({ wake: ' ini-sleep', thinking: ' ini-think', celebrate: ' ini-party' }[s.ini] || '') + (s.surprise ? ' ini-surprise' : ''),
+      pupilStyle: s.ini === 'thinking' ? 'transform: translate(2px, -2px)' : 'transform: translate(' + s.look.x.toFixed(1) + 'px, ' + s.look.y.toFixed(1) + 'px)',
+      track: (e) => {
+        this.pending = { x: e.clientX, y: e.clientY };
+        if (this.raf) return;
+        this.raf = requestAnimationFrame(() => {
+          this.raf = null;
+          const el = this.iniEl; const pt = this.pending;
+          if (!el || !pt) return;
+          const r = el.getBoundingClientRect();
+          const dx = pt.x - (r.left + r.width / 2), dy = pt.y - (r.top + r.height / 2);
+          const d = Math.sqrt(dx * dx + dy * dy) || 1;
+          const k = Math.min(1, d / 120) * 4;
+          this.setState({ look: { x: dx / d * k, y: dy / d * k * 0.8 } });
+        });
+      },
+      untrack: () => this.setState({ look: { x: 0, y: 0 } }),
+      iniBubble: s.bubble, iniBubbleOn: !!s.bubble, iniWiggleClass: s.wiggle ? 'ini-' + s.wiggle : '',
+      iniHover: () => { if (!s.hovered && s.ini !== 'thinking') { this.setState({ hovered: true }); this.move('wiggle', 650); this.say('Hi! Need a hand?'); } },
+      iniPoke: () => {
+        if (s.ini === 'thinking') { this.say('Shh\u2026 I\u2019m thinking!'); this.move('wiggle', 650); return; }
+        const now = Date.now();
+        const pokes = now - s.lastPoke < 900 ? s.pokes + 1 : 1;
+        this.setState({ pokes: pokes, lastPoke: now });
+        if (pokes >= 5) { this.setState({ pokes: 0 }); this.move('spin', 850); this.say('Wheee! That tickles!', 2400); this.mood('celebrate', 3000); return; }
+        const lines = ['Hello! I\u2019m Ini.', 'Tell me who needs what, I\u2019ll do the rest.', 'Try: \u201cShau only 1 night a week\u201d', 'Ready when you are!', 'I love a fair roster.', 'Psst \u2014 tap me 5 times fast!'];
+        this.say(lines[(pokes - 1 + (s.lineIdx || 0)) % lines.length]);
+        this.setState({ lineIdx: (s.lineIdx || 0) + 1 });
+        this.move(pokes % 2 ? 'jump' : 'wiggle', 750);
+        this.setState({ surprise: true }); clearTimeout(this.surpriseTimer); this.surpriseTimer = setTimeout(() => this.setState({ surprise: false }), 700);
+        if (s.ini === 'wake') this.mood('listen');
+      },
+      steps: steps, isStep1: s.step === 1, isStep2: s.step === 2, isStep3: s.step === 3,
+      shifts: shifts, weekly: weekly, perShift: perShift, conflict: conflict, canFix: canFix,
+      levels: levels, fairness: fairness, seniors: seniors, ladder: ladder,
+      term: s.term, termPlural: termPlural, setTerm: (e) => this.setState({ term: e.target.value }),
+      staff: staffList, b: b, follow: follow, followRules: followRules, followSummary: followSummary, draft: draft,
+      dutyOpts: ['Morning', 'Afternoon', 'Night', 'Off day'],
+      resetFollow: () => this.setState({ follow: usualFollow, generated: false }), checkTitle: title, checkText: text, checkStyle: checkStyle,
+      fix: () => { this.setState({ n: Object.assign({}, n, { mMax: n.mMax + 1 }), iniMsg: 'Fixed \u2014 one more person allowed on Morning.' }); this.mood('celebrate', 3000); },
+      advOpen: s.advOpen, advArrow: s.advOpen ? '−' : '+',
+      toggleAdv: () => this.setState({ advOpen: !s.advOpen }),
+      ready: ready,
+      goStep1: () => this.setState({ step: 1 }), goStep2: () => this.setState({ step: 2 }), goStep3: () => this.setState({ step: 3 }),
+      generated: s.generated, optionNo: s.option,
+      okLine: 'All Must rules met, every shift covered, a Shift Manager on 20 of 21 shifts.',
+      bent: bentBy[s.option],
+      days: ['Sun 15', 'Mon 16', 'Tue 17', 'Wed 18', 'Thu 19', 'Fri 20', 'Sat 21'],
+      grid: grid,
+      generate: () => { this.setState({ generated: false, iniMsg: 'Making your roster…' }); this.mood('thinking', 1800, () => { this.setState({ generated: true, option: 1, iniMsg: 'Done! Here is option 1.' }); this.mood('celebrate', 3000); }); },
+      another: () => { const nx = s.option === 3 ? 1 : s.option + 1; this.setState({ iniMsg: 'Finding another option…' }); this.mood('thinking', 1200, () => { this.setState({ option: nx, iniMsg: 'Here is option ' + nx + '.' }); this.mood('listen'); }); },
+      discard: () => this.setState({ generated: false, option: 1 })
+    };
+  }
+}
+</script>
+</body>
+</html>
