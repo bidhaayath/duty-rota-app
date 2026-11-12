@@ -52,7 +52,7 @@ As built in stage 1 (`src/settingsCheck.js`, pure, nothing from the engine):
 - **Nothing said twice.** An engine message in "Worth knowing before you generate" or "These settings cannot produce a week yet" is left out only while the banner is saying the same thing: nobody on the roster (check 0); that shift's maximum below its minimum (check 1); the two "even with every shift at its fullest" sums (check 6); "leaves only about X off days", "Each day needs X people… only Y staff", and the week's "N short" line when N is the banner's number (check 7 — if leave makes the week shorter still, it stays). Everything else stays in those boxes: in-charge messages, how many people a shift reaches, missing codes, requests, "what may follow what" conflicts, "Only these shifts". The engine messages are matched by their wording, pinned in `settingsCheck.test.js`.
 
 ### "Who's needed on each shift"
-One card per shift the ward uses (Morning, Afternoon, Evening, Night — from the ward's duty codes). Each card: **At least**, **At most**, **[In-charge word]s, at least** — each with − / + buttons, not empty boxes. Below the cards: "Staff numbers — **Must — always**" (fixed label) and "[In-charge word]s on every shift" with a strength box. The in-charge strength box has no engine support yet (stage 2b); until then it is not shown.
+One card per shift the ward uses (Morning, Afternoon, Evening, Night — from the ward's duty codes). Each card: **At least**, **At most**, **[In-charge word]s, at least** — each with − / + buttons, not empty boxes. Below the cards: "Staff numbers — **Must — always**" (fixed label) and "[In-charge word]s on every shift" with a strength box. The in-charge strength box (`ruleStates.seniors`) shows **Protect most** until changed — see "As built in stage 2b".
 
 ### "Each person, each week"
 A table, one row per shift plus **Off days**:
@@ -73,11 +73,11 @@ A table, one row per shift plus **Off days**:
   - Saved values that match none of these show as **"Custom (fewest X, most Y)"** (– for unset) and are kept unchanged unless the manager picks another option; picking Custom again writes nothing.
 - The row's "If it can't all fit" box is `ruleStates["weeklyCaps:<shift>"]` and governs **At most** only. At least is always a goal; In a row follows the working-pattern strength.
 - Off days row: At least / At most are `weeklyMin.off` / `weeklyMax.off`; its "If it can't all fit" box is `ruleStates.offMin` (At least). The off-day maximum stays Must and is not shown.
-- Off days In a row: **Spread apart** (today's default behaviour) · **Together is fine** · **Always together**. Only "Spread apart" is offered today. "Together is fine" exists in the engine already (`singleOffDays: false`) and only needs a stored key passed through (stage 2b). "Always together" is new engine behaviour (stage 8).
+- Off days In a row: **Spread apart** (today's default behaviour) · **Together is fine** · **Always together**. Spread apart and Together is fine (`rosterRules.singleOffDays: false`) are offered since stage 2b. "Always together" is new engine behaviour (stage 8).
 - Under the table:
   - **Working days** (− / +) with a fixed **"Must"** label, no strength box. It writes `weeklyDuties.min` and `.max` together; a saved pair that differs shows as **"Custom (fewest X, most Y)"**. The maximum stays unbendable — it is hard throughout the engine and making it bendable is out of scope.
-  - **Working days in a row, at most** (− / +, `maxDaysOn`, 1–6) with a strength box. Today that strength is `ruleStates.workPattern`, shared with every shift's In a row and with spreading off days, so until stage 2b the box says it also covers In a row.
-  - **Share nights fairly** and **Share non-official days (Fridays and holidays) fairly**: strength box offering **Protect most to Ignore only — no Must** (Ignore = off). No engine support yet (stage 2b); not shown until then.
+  - **Working days in a row, at most** (− / +, `maxDaysOn`, 1–6) with a strength box. Since stage 2b its strength is its own key, `ruleStates.daysInRow`, which follows In a row (`ruleStates.workPattern`) until it is changed; In a row's strength is one row under the table, "In a row, every shift".
+  - **Share nights fairly** and **Share non-official days (Fridays and holidays) fairly**: strength box offering **Protect most to Ignore only — no Must** (Ignore = off). `ruleStates.fairNights` / `ruleStates.fairNonOfficial` since stage 2b; Protect until changed.
   - **Look back at past duties**: The entire roster · Last 90 / 60 / 30 / 14 days · Don't look back, with a one-line explanation under it. Stored in `lookbackDays`: "The entire roster" is `36500` (`LOOK_BACK_ALL`), a plain number that older code reads as a very long look-back; Don't look back is `0`; any other saved number shows as **"Custom (N days)"**. Look-back only affects fairness; rest and "what may follow what" always check the 14 days before the week regardless (stage 0).
 
 ### Strength ("If it can't all fit")
@@ -100,6 +100,22 @@ Header shows "N rules · [level]". Inside: rules as sentences ("Never give Morni
 - **Gives way first:** columns built from the saved strengths, only for what is set (a shift with no most has nothing to bend). Also shown: **People's own Try rules** (Bend first, which is what the engine bends first), **People's own Must rules** and **Most off days** (`offMax`) in their columns. Ignore is listed under the columns as "Switched off: …". One line under them: "Always aimed for, but not promised: fewest of each shift, fewest working days." **Duties you fixed** joins the Must column in stage 4.
 - Every − / +, select and remove button is at least 44 × 44px. The rows wrap at phone width rather than scrolling sideways: a − / + keeps its own width and moves to the next line when there is no room; a select takes the room there is and can narrow. Checked in a headless browser at every width from 300 to 430px: nothing reaches past a card's edge.
 - **The ward's own colours.** Each row of "Each person, each week" has its name on a tag in the colour of the duty code Smart Roster writes for it (the one chosen under "Which code to write", or else the first code that counts as it — the same colour as on the rota grid), and a light wash of that colour (one part to nine of white) behind the row. Off days use the Off code's colour. A code with no colour, or no off code, is a neutral grey (`#B7C4C2`). The dots on the shift cards use the same colours. The name on a tag is the app's ink where that reads at 4.5 : 1 or better, otherwise black or white, whichever reads better; captions on the wash also read at 4.5 : 1 or better, for every colour (tested over the whole colour range).
+
+### As built in stage 2b (new strength keys)
+Each key is stored only when a manager changes it. Absent, the engine takes exactly the path it always did (proven against `main` on every seeded week and month). What a box shows when its key is absent is the level that behaves exactly as absent, and saving that level changes nothing — each pair is tested.
+
+| Key | Shows when absent | Levels |
+|---|---|---|
+| `ruleStates.daysInRow` (working days in a row) | In a row's level (`workPattern`), with "Follows In a row until you change it." Saved at In a row's own level it is still the one combined rule. | **Must**: never bent in the first build, priced 5000 in the polish. **Try levels**: its own step in the give-way order, 80 a day. **Ignore**: not checked. The 6-day ceiling stays hard, and the "stretched to avoid an extra off day" path still ignores it, as before. |
+| `ruleStates.seniors` (in-charge on every shift) | **Protect most** | **Must** and **Protect most**: the slot is filled by bending any Try rule, too few in-charge staff stops Generate (as before); Must is priced 5000 in the polish, Protect most 400. **Protect / Bend if needed / Bend first**: searched for only by bending weaker Try rules, then the gap is recorded and the place filled by whoever is free; too few is a warning and the week is still made; 400. **Ignore**: no in-charge asked for anywhere; the numbers stay saved, greyed out. |
+| `ruleStates.fairNights` (share nights fairly) | **Protect** | Protect most to Ignore, no Must (a saved Must reads as Protect most). The level is the place of "who has had fewest nights" among the fairness tie-breaks when a Night is filled; Protect most and Protect both leave it first, where it already was. Polish 3 a point of spread; **Ignore** 0 and the tie-break left out. |
+| `ruleStates.fairNonOfficial` (share non-official days fairly) | **Protect** | The same rules. Covers the non-official measure only (Fridays where the Friday rule makes them non-official, and holidays), not the Friday off-day or Friday afternoon measures. Protect most puts it first among the tie-breaks. |
+| `rosterRules.singleOffDays: false` (off days Together is fine) | Spread apart | Together is fine stores `false` and is passed to the engine only when stored; choosing Spread apart again removes the key. |
+
+- As agreed in stage 0, the level changes the first build; the polish only tells Must, Try and Ignore apart.
+- Screen: the in-charge box sits under "Staff numbers"; "In a row, every shift" (`workPattern`) is one row under the table; working days in a row, then the two fairness boxes (nights only where the ward runs them), then the look-back. Under working days in a row at Must: "Must can leave shifts uncovered rather than allow a longer run."; under in-charge at Must: "Must can leave a shift short rather than go without a [ward's word]." "What usually gives way first" lists every key in its column.
+- Also in this stage: "Each person, each week" opens with one line, "What each person gets in a week. Everyone follows this unless they have their own rule."; "At least 1 Night = everyone gets a Night every week." is said once for the table; "Two side by side; a single one is still fine, so everyone gets one." appears under In a row only for In pairs and 2 or 3 together.
+- Measured with the comparison tool's `keys` job (63 seeded weeks, without the key → with it): working days in a row at Must with the limit at 3 cuts runs past it from 61 to 4 but leaves 125 shifts uncovered against 77; at Ignore 216 runs past it, 60 uncovered. In-charge Must cuts shift-days with no in-charge from 13 to 9; Protect changes nothing; Ignore asks for none. Nights at Ignore: spread 108 → 126; non-official at Ignore: 70 → 75. Together is fine: off days side by side 29 → 91, no change in cover. Build times unchanged.
 
 ## Step 2 — Your staff
 
@@ -139,14 +155,14 @@ Animated Ini in the Ask Ini bar, built from Ini's measured proportions (rounded-
 | Control | Stored today | Engine |
 |---|---|---|
 | Shift cards: at least / at most / in-charge at least | `coverage[sh]`, `seniorCover[sh]` | Yes |
-| In-charge on every shift: strength | — | No (stage 2b) |
+| In-charge on every shift: strength | `ruleStates.seniors` | Yes, since stage 2b |
 | Per shift At least / At most / In a row | `weeklyMin[sh]`, `weeklyMax[sh]`, `blockTogether[sh]` + `blockDays[sh]` | Yes |
 | Per shift strength | `ruleStates["weeklyCaps:<sh>"]` (At most only) | Yes, six levels |
 | Off days At least / At most / strength | `weeklyMin.off`, `weeklyMax.off`, `ruleStates.offMin` | Yes |
-| Off days In a row | Spread apart: engine default · Together is fine: `singleOffDays`, not stored · Always together: — | Partly (2b, 8) |
+| Off days In a row | Spread apart: engine default · Together is fine: `singleOffDays: false` · Always together: — | Partly (stage 8 for Always together) |
 | Working days | `weeklyDuties.min/max` | Yes; fixed Must label |
-| Working days in a row | `maxDaysOn`, strength `ruleStates.workPattern` (shared) | Partly (2b) |
-| Share nights / non-official days fairly | — | No (2b) |
+| Working days in a row | `maxDaysOn`, strength `ruleStates.daysInRow` (follows `workPattern` until set) | Yes, since stage 2b |
+| Share nights / non-official days fairly | `ruleStates.fairNights`, `ruleStates.fairNonOfficial` | Yes, since stage 2b |
 | Look back | `lookbackDays` | Fixed in stage 0 |
 | What may follow what | `sequenceRules`, `ruleStates.sequence` | Yes, six levels |
 | Staff ticks, in-charge, Skip, ward word | `staffShifts`, `seniorStaff`, `skipStaff`, `seniorTerm` (+ `seniorTermPlural`) | Yes |
@@ -162,8 +178,8 @@ Things that change how an existing department's roster is built: only stage 0 (a
 |---|---|---|---|
 | 0 | **Look-back fix.** Rest and "what may follow what" always read the 14 days before the period; fairness counts only from the look-back start (`history.fairFrom`, added only when needed). "The entire roster" = `36500`. Set lookup for non-official dates. Ini's label and sentence for the entire roster. Smart Roster's look-back box gains "The entire roster" and "Custom (N days)". | **Engine (small)** | Merged (PR #71) |
 | 1 | **Live check banner** in today's layout | Screen only | Merged (PR #72) |
-| 2 | **Step 1 controls**: shift cards with − / +, the per-person table with the In a row dropdown, strength boxes, Working days with a fixed Must label, look-back row, the "usually gives way first" columns. The in-charge strength and the two fairness rows stay hidden until 2b. Prove saved settings round-trip unchanged. | Screen only | In progress on `ward-needs-controls` |
-| 2b | **New strength keys**: a separate key for working days in a row (falls back to `workPattern`), in-charge strength, night and non-official fairness (Protect most to Ignore), off days "Together is fine" passed through. All mean today's behaviour when absent. | **Engine (medium)** | |
+| 2 | **Step 1 controls**: shift cards with − / +, the per-person table with the In a row dropdown, strength boxes, Working days with a fixed Must label, look-back row, the "usually gives way first" columns. The in-charge strength and the two fairness rows stay hidden until 2b. Prove saved settings round-trip unchanged. | Screen only | Merged (PR #73) |
+| 2b | **New strength keys**: a separate key for working days in a row (falls back to `workPattern`), in-charge strength, night and non-official fairness (Protect most to Ignore), off days "Together is fine" passed through. All mean today's behaviour when absent. | **Engine (medium)** | In progress on `strength-keys` |
 | 3 | **Step 2 Your staff**: merge Staff exceptions, Personal rules and request labels into one list with the inline rule panel. | Screen only | |
 | 4 | **Manager-fixed duty** (engine + panel type 7). | **Engine (small)** + screen | |
 | 5 | **Three-step layout, ready checklist and result summary.** | Screen only | |
