@@ -34,6 +34,23 @@ Recomputed on every change. Green "These settings fit your N staff" or amber wit
 7. Staff × working days below what the shifts need (sum of shift minimums × 7).
 N = staff not skipped. Show only the first problem found.
 
+As built in stage 1 (`src/settingsCheck.js`, pure, nothing from the engine):
+- **N** is everyone on the rota for the week being planned, minus Skip — the same people Generate uses. Before check 1 comes **nobody on the roster** (everyone skipped, or nobody employed that week).
+- **Shifts** are the ones the ward runs (`coverage[sh].max` not 0), so Evening counts only where it is used.
+- **What each check reads:**
+  1. `coverage[sh].min/max`; `weeklyMin[sh]` / `weeklyMax[sh]`; `weeklyMin.off` / `weeklyMax.off`; `weeklyDuties.min/max`.
+  2. `blockTogether[sh]` (never more than `blockDays[sh]`, as the engine reads it) of 2 or more, with `weeklyMax[sh]` below 2.
+  3. The sum of `weeklyMin[sh]` against `weeklyDuties.max` (empty = 7).
+  4. The sum of `weeklyMax[sh]`, only when every shift the ward runs has one, against `weeklyDuties.min`.
+  5. `weeklyDuties.min/max` against `weeklyMin.off` / `weeklyMax.off`.
+  6. N × `weeklyDuties.min` against the sum of `coverage[sh].max` (empty = min) × 7.
+  7. The sum of `coverage[sh].min` × 7 against what N people can work: `weeklyDuties.max`, and no more than 7 − `weeklyMin.off` except for anyone ticked to a single shift (the engine's own reading).
+- A number whose strength is **Ignore** (`ruleStates["weeklyCaps:<sh>"]`, `offMin`, `offMax`) is not held against checks 1, 2, 4 and 5, because the engine does not apply it.
+- **The green message is a slim, quiet line**, not a card, so the amber card stands out when it appears.
+- **Never blocks Generate.** Where the problem shown is one Generate itself refuses on, the banner adds "Generate cannot make a week until this is changed."
+- **Fix it for me** (check 6 only, and only when one more on one shift is enough): raises the "at most" of the shift the most staff are allowed to do, ties broken Morning, Afternoon, Evening, Night, and never above the number of staff allowed on that shift. It saves at once like any setting, and the banner then says exactly what changed — "Changed — Morning: at most 4 → 5. Undo puts it back." — until the settings next change.
+- **Nothing said twice.** An engine message in "Worth knowing before you generate" or "These settings cannot produce a week yet" is left out only while the banner is saying the same thing: nobody on the roster (check 0); that shift's maximum below its minimum (check 1); the two "even with every shift at its fullest" sums (check 6); "leaves only about X off days", "Each day needs X people… only Y staff", and the week's "N short" line when N is the banner's number (check 7 — if leave makes the week shorter still, it stays). Everything else stays in those boxes: in-charge messages, how many people a shift reaches, missing codes, requests, "what may follow what" conflicts, "Only these shifts". The engine messages are matched by their wording, pinned in `settingsCheck.test.js`.
+
 ### "Who's needed on each shift"
 One card per shift the ward uses (Morning, Afternoon, Evening, Night — from the ward's duty codes). Each card: **At least**, **At most**, **[In-charge word]s, at least** — each with − / + buttons, not empty boxes. Below the cards: "Staff numbers — **Must — always**" (fixed label) and "[In-charge word]s on every shift" with a strength box. The in-charge strength box has no engine support yet (stage 2b); until then it is not shown.
 
@@ -131,8 +148,8 @@ Things that change how an existing department's roster is built: only stage 0 (a
 
 | # | Stage | Kind | Status |
 |---|---|---|---|
-| 0 | **Look-back fix.** Rest and "what may follow what" always read the 14 days before the period; fairness counts only from the look-back start (`history.fairFrom`, added only when needed). "The entire roster" = `36500`. Set lookup for non-official dates. Ini's label and sentence for the entire roster. Smart Roster's look-back box gains "The entire roster" and "Custom (N days)". | **Engine (small)** | In progress on `smart-roster-redesign` |
-| 1 | **Live check banner** in today's layout | Screen only | |
+| 0 | **Look-back fix.** Rest and "what may follow what" always read the 14 days before the period; fairness counts only from the look-back start (`history.fairFrom`, added only when needed). "The entire roster" = `36500`. Set lookup for non-official dates. Ini's label and sentence for the entire roster. Smart Roster's look-back box gains "The entire roster" and "Custom (N days)". | **Engine (small)** | Merged (PR #71) |
+| 1 | **Live check banner** in today's layout | Screen only | In progress on `settings-check-banner` |
 | 2 | **Step 1 controls**: shift cards with − / +, the per-person table with the In a row dropdown, strength boxes, Working days with a fixed Must label, look-back row, the "usually gives way first" columns. The in-charge strength and the two fairness rows stay hidden until 2b. Prove saved settings round-trip unchanged. | Screen only | |
 | 2b | **New strength keys**: a separate key for working days in a row (falls back to `workPattern`), in-charge strength, night and non-official fairness (Protect most to Ignore), off days "Together is fine" passed through. All mean today's behaviour when absent. | **Engine (medium)** | |
 | 3 | **Step 2 Your staff**: merge Staff exceptions, Personal rules and request labels into one list with the inline rule panel. | Screen only | |
