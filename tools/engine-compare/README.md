@@ -42,7 +42,13 @@ as Must, and two mixes). For each list it prints, old engine beside new:
 - shift-days above Most
 - days a day rule was not kept, Try and Must
 - gaps that name a Must day rule
-- seconds spent building
+- seconds spent building, in all and for one week (the middle week and the
+  slowest)
+
+The times are taken with the parts running side by side and with the
+rearranging stage run to its full number of steps (the app stops it after
+15 seconds), so read them old against new rather than as what a manager
+waits.
 
 All of it is counted from the finished rota, not read from the engine's
 report. The report is then checked against the count.

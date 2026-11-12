@@ -211,8 +211,8 @@ only("rules")("weeks with rules set: old and new, counted from the finished rota
       const cfg = steady(weekConfig(fitHistory(withRules(data, list)), start));
       const a = timed(oldE, cfg), b = timed(newE, cfg);
       const t = tally[name] || (tally[name] = {
-        weeks: 0, refused: 0, sameText: 0, old: { uncovered: 0, aboveMost: 0, ms: 0 },
-        new: { uncovered: 0, aboveMost: 0, ms: 0, tryMissed: 0, mustMissed: 0, gapsNamed: 0 },
+        weeks: 0, refused: 0, sameText: 0, old: { uncovered: 0, aboveMost: 0, ms: 0, weekMs: [] },
+        new: { uncovered: 0, aboveMost: 0, ms: 0, weekMs: [], tryMissed: 0, mustMissed: 0, gapsNamed: 0 },
         fixed: { weeks: 0, fixedDaysWorked: 0, weeksWithExtraOff: 0, weeksShortOfDuties: 0 },
         reportDisagrees: [],
       });
@@ -222,6 +222,7 @@ only("rules")("weeks with rules set: old and new, counted from the finished rota
       const ca = recount(cfg, a.out), cb = recount(cfg, b.out), said = reported(b.out);
       t.old.uncovered += ca.uncovered; t.old.aboveMost += ca.aboveMost; t.old.ms += a.ms;
       t.new.uncovered += cb.uncovered; t.new.aboveMost += cb.aboveMost; t.new.ms += b.ms;
+      t.old.weekMs.push(a.ms); t.new.weekMs.push(b.ms);
       t.new.tryMissed += cb.misses.filter((m) => m.endsWith("soft")).length;
       t.new.mustMissed += cb.misses.filter((m) => m.endsWith("hard")).length;
       t.new.gapsNamed += cb.names.length;

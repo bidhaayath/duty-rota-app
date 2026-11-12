@@ -98,6 +98,21 @@ const row = (cells, widths) => cells.map((c, i) => String(c).padEnd(widths[i])).
     });
     console.log("\n(same = weeks identical as text; uncov = uncovered shifts; above = shift-days above Most;");
     console.log(" Try/Must miss = days a day rule was not kept; named = gaps naming a Must day rule; s = seconds building)");
+    // Seconds for one week: the middle week and the slowest, old and new.
+    const typical = (ms) => { const s = [...ms].sort((x, y) => x - y); return s[Math.floor(s.length / 2)] || 0; };
+    const slowest = (ms) => Math.max(0, ...ms);
+    const sec = (ms) => (ms / 1000).toFixed(1);
+    console.log("\nSeconds to build one week (typical = the middle week):");
+    console.log(row(["list", "typical old", "typical new", "slowest old", "slowest new"], [16, 12, 12, 12, 12]));
+    const all = { old: [], new: [] };
+    Object.entries(t).forEach(([name, v]) => {
+      all.old.push(...v.old.weekMs); all.new.push(...v.new.weekMs);
+      console.log(row([name, sec(typical(v.old.weekMs)), sec(typical(v.new.weekMs)),
+        sec(slowest(v.old.weekMs)), sec(slowest(v.new.weekMs))], [16, 12, 12, 12, 12]));
+    });
+    console.log(row(["all lists", sec(typical(all.old)), sec(typical(all.new)),
+      sec(slowest(all.old)), sec(slowest(all.new))], [16, 12, 12, 12, 12]));
+    console.log(`(timed with ${parts} parts running side by side, so a quiet machine is faster)`);
     console.log("\nPeople always off on fixed days, in whole weeks with no leave or request of theirs:");
     Object.entries(t).filter(([, v]) => v.fixed.weeks).forEach(([name, v]) => {
       console.log(row([name, `${v.fixed.weeks} weeks`, `${v.fixed.fixedDaysWorked} fixed days worked`,
