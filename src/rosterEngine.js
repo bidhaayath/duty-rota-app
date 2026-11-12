@@ -503,10 +503,19 @@ export function checkFeasible(cfg) {
     );
     const stillNeeded = Math.max(0, dailyMin - coveredByRequests);
     if (stillNeeded > free) {
+      /* Duties the manager fixed are kept just as approved requests are,
+         and said as what they are. With none, the words are as they were. */
+      const fixed = reqs.filter((r) => r.source === 'manager').length;
+      const asked = reqs.length - fixed;
+      const what = [
+        asked ? `${asked} approved request${asked === 1 ? '' : 's'}` : null,
+        fixed ? `${fixed} ${fixed === 1 ? 'duty' : 'duties'} fixed by you` : null,
+      ].filter(Boolean).join(' and ');
       problems.push(
-        `${date}: ${reqs.length} approved request${reqs.length === 1 ? '' : 's'} leave only ` +
+        `${date}: ${what} leave only ` +
         `${free} staff free, but ${stillNeeded} more are needed to cover the day. ` +
-        `Un-approve a request for that date, or lower the minimums.`
+        (asked ? `Un-approve a request for that date` : `Remove a fixed duty for that date`) +
+        `, or lower the minimums.`
       );
     }
   });

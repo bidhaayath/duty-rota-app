@@ -21,6 +21,7 @@ const PHRASES = {
   leave: () => ["is on leave", "are on leave"],
   request: () => ["is on an approved duty request", "are on approved duty requests"],
   kept: () => ["has this day already set on the rota", "have this day already set on the rota"],
+  fixed: () => ["is on a duty fixed by you", "are on duties fixed by you"],
   working: (c) => [`is working the ${LABEL[c] || c}`, `are working the ${LABEL[c] || c}`],
   notTheirShift: (sh) => [`does not do ${LABEL[sh]}s`, `do not do ${LABEL[sh]}s`],
   ownRule: () => ["is off by their own rule", "are off by their own rule"],
@@ -67,6 +68,8 @@ export function whyNoInCharge({ date, shift, cells, data, rules, staff, from, to
     const today = cells[`${id}|${date}`];
     if (today == null) return ["leave"];                     // a day kept as it was: sick leave and the like
     if (asked && asked.category !== shift) return ["request"];
+    const fixedThen = (rules.fixedDuties || []).find((f) => f && String(f.staffId) === String(id) && f.date === date);
+    if (fixedThen && fixedThen.duty !== shift) return ["fixed"];
     if (kept[`${id}|${date}`]) return ["kept"];
     if (today !== "off") return ["working", today];
 

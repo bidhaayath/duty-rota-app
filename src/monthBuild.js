@@ -298,8 +298,11 @@ export const plainProblems = (prep, problems) => (problems || []).map((p) => {
   const m = /^(\d{4}-\d{2}-\d{2}): /.exec(p);
   if (!m) return p;
   const day = prettyWeekday(m[1]);
-  return `${day}: the duties already on the rota${prep.keepExisting ? " (which you asked to keep)" : ""} and the ` +
-    `approved requests leave too few people free to cover the day. ` +
+  // Duties the manager fixed are named too, where there are any that day.
+  const fixedToo = / fixed by you /.test(p);
+  return `${day}: the duties already on the rota${prep.keepExisting ? " (which you asked to keep)" : ""}` +
+    `${fixedToo ? ", the approved requests and the duties you fixed" : " and the approved requests"} ` +
+    `leave too few people free to cover the day. ` +
     (prep.keepExisting ? `Untick "Keep duties already on the rota", or change that day by hand.` : `Change that day by hand, or lower the minimums.`);
 });
 

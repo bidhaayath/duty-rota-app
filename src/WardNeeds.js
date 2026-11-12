@@ -125,7 +125,7 @@ export function givesWay(rules, { termMany = "Seniors" } = {}) {
   ];
   columns.must.push("Staff numbers");
   if (rules.weeklyDuties?.max != null) columns.must.push("Working days (most)");
-  columns.must.push("Approved duty requests");
+  columns.must.push("Approved duty requests", "Duties you fixed");
   if (own.some((r) => r && r.strength === "hard")) columns.must.push("People's own Must rules");
   entries.forEach(([text, key]) => {
     const raw = levelOf(rules.ruleStates?.[key] ?? ABSENT[key]);
