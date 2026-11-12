@@ -492,7 +492,12 @@ export function PersonWeek({ rules, setRules, dropRule, editable, T, Card, codes
         {/* One strength for In a row on every shift: the working pattern. */}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
                       borderBottom: `1px solid ${T.line}` }}>
-          <span style={{ fontSize: 15, flex: "1 1 200px", minWidth: 0 }}>In a row, every shift</span>
+          <span style={{ display: "grid", gap: 2, flex: "1 1 200px", minWidth: 0 }}>
+            <span style={{ fontSize: 15 }}>In a row, every shift</span>
+            <span style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
+              How strictly the "In a row" choices above are kept, such as Nights in pairs or "Up to 4 in a row".
+            </span>
+          </span>
           <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
             {strength("workPattern", "In a row, every shift: if it can't all fit")}
             <span style={{ fontSize: 12, color: T.inkSoft }}>Ignore also stops keeping off days apart.</span>

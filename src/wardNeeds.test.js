@@ -502,6 +502,12 @@ describe("each person's week", () => {
     expect(screen.getByText(/^Switched off: .*Sharing non-official days fairly/)).toBeInTheDocument();
   });
 
+  test("In a row, every shift says what it is the strength of, and still what Ignore does", async () => {
+    await openWard(rota(undefined));
+    expect(screen.getByText(`How strictly the "In a row" choices above are kept, such as Nights in pairs or "Up to 4 in a row".`)).toBeInTheDocument();
+    expect(screen.getByText("Ignore also stops keeping off days apart.")).toBeInTheDocument();
+  });
+
   test("working days in a row at Must says what it costs, and only at Must", async () => {
     const note = "Must can leave shifts uncovered rather than allow a longer run.";
     await openWard(rota(undefined));
