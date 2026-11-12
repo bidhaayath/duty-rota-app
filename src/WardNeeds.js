@@ -121,7 +121,7 @@ export function givesWay(rules) {
 const fieldStyle = (T, editable) => ({
   fontFamily: "inherit", fontSize: 14, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10,
   padding: "9px 10px", minHeight: 44, background: "#fff", cursor: editable ? "pointer" : "not-allowed",
-  width: "100%", boxSizing: "border-box",
+  width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box", textOverflow: "ellipsis",
 });
 
 /* The strength box for one ruleStates key, tinted by its level. Only a real
@@ -164,8 +164,8 @@ function Stepper({ label, value, onChange, min = 0, max = 99, none, editable, T 
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <button type="button" aria-label={`${label}: one fewer`} disabled={!on(canDown)} style={btn(on(canDown))}
         onClick={() => onChange(down)}>−</button>
-      <output aria-label={label} style={{ minWidth: top ? 64 : 34, textAlign: "center", fontSize: top ? 13 : 17,
-                                          fontWeight: 700, color: T.ink }}>
+      <output aria-label={label} style={{ minWidth: top ? 56 : 34, textAlign: "center", fontSize: top ? 13 : 17,
+                                          fontWeight: 700, color: T.ink, whiteSpace: "nowrap" }}>
         {top ? none.text : cur}
       </output>
       <button type="button" aria-label={`${label}: one more`} disabled={!on(canUp)} style={btn(on(canUp))}
@@ -178,12 +178,56 @@ const sectionTitle = { fontFamily: "Sora, sans-serif", fontSize: 16, margin: 0 }
 const caption = (T) => ({ fontSize: 12, fontWeight: 600, color: T.inkSoft });
 const mustChip = {
   fontSize: 13, fontWeight: 700, color: "#0D4A3F", background: "#E6F4F1", border: "1px solid #B9DFD5",
-  borderRadius: 10, padding: "9px 13px", whiteSpace: "nowrap",
+  borderRadius: 10, padding: "9px 13px", maxWidth: "100%", boxSizing: "border-box",
+};
+
+/* ── The ward's own colours ──
+   Each shift, and off days, in the colour of the duty code Smart Roster
+   writes for it — the one chosen under "Which code to write", or else the
+   first code that counts as it — so a row here looks like its cells on the
+   rota grid. A code with no colour, and off days with no off code, are a
+   neutral grey. */
+export const NEUTRAL = "#B7C4C2";
+const hex6 = (c) => {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(c || "").trim());
+  if (!m) return null;
+  const h = m[1].length === 3 ? m[1].split("").map((x) => x + x).join("") : m[1];
+  return `#${h.toUpperCase()}`;
+};
+export const colourFor = (rules, codes, cat) => {
+  const list = codes || [];
+  const code = list.find((c) => c.id === rules.codeFor?.[cat] && c.counts === cat)
+    || list.find((c) => c.counts === cat);
+  return hex6(code?.color) || NEUTRAL;
+};
+// WCAG relative luminance and contrast ratio.
+const channel = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+const lum = (c) => {
+  const h = hex6(c);
+  return 0.2126 * channel(parseInt(h.slice(1, 3), 16)) + 0.7152 * channel(parseInt(h.slice(3, 5), 16))
+    + 0.0722 * channel(parseInt(h.slice(5, 7), 16));
+};
+export const contrast = (a, b) => {
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+};
+/* The name on a coloured tag: the app's ink where it reads well enough, or
+   else black or white, whichever reads better. One of black and white is
+   always at least 4.58 : 1 against any colour. */
+export const textOn = (bg, ink) => {
+  if (ink && contrast(bg, ink) >= 4.5) return ink;
+  return contrast(bg, "#000000") >= contrast(bg, "#FFFFFF") ? "#000000" : "#FFFFFF";
+};
+// A very light wash of the colour, for behind its row: one part colour to nine of white.
+export const tintOf10 = (c) => {
+  const h = hex6(c) || NEUTRAL;
+  const mix = (i) => Math.round(parseInt(h.slice(i, i + 2), 16) * 0.1 + 255 * 0.9).toString(16).padStart(2, "0");
+  return `#${mix(1)}${mix(3)}${mix(5)}`.toUpperCase();
 };
 const swatch = (colour) => ({
-  width: 14, height: 14, borderRadius: 4, background: colour || "#D3DCDE", display: "inline-block", flexShrink: 0,
+  width: 14, height: 14, borderRadius: 4, background: colour, display: "inline-block", flexShrink: 0,
+  boxShadow: "inset 0 0 0 1px rgba(20,43,51,0.18)",
 });
-const colourOf = (codes, sh) => (codes || []).find((c) => c.counts === sh && c.color)?.color;
 
 /* ── Who's needed on each shift ──
    A card for every shift the ward has a duty code for, and for any shift
@@ -220,7 +264,7 @@ export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany
         {cards.map((sh) => (
           <div key={sh} style={{ border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={swatch(colourOf(codes, sh))} />
+              <span style={swatch(colourFor(rules, codes, sh))} />
               <strong style={{ fontSize: 15 }}>{LABEL[sh]}</strong>
             </div>
             {row("At least", (
@@ -243,7 +287,7 @@ export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany
       {quiet.map((sh) => (
         <div key={sh} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10,
                                fontSize: 13.5, color: T.inkSoft }}>
-          <span style={swatch(colourOf(codes, sh))} />
+          <span style={swatch(colourFor(rules, codes, sh))} />
           <span style={{ flex: "1 1 200px" }}>{LABEL[sh]}: not run on this ward.</span>
           <button type="button" disabled={!editable} onClick={() => setTurnedOn([...turnedOn, sh])}
             style={{ background: "none", border: "none", color: T.lagoon, fontFamily: "inherit", fontSize: 14,
@@ -273,7 +317,7 @@ const lookBackHint = (days) => {
   return `Fair shares count duties from the last ${days} days, so someone who did a lot of nights recently gets fewer. Rest after last week's duties is always checked.`;
 };
 
-export function PersonWeek({ rules, setRules, editable, T, Card }) {
+export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
   const field = fieldStyle(T, editable);
   const setIn = (group, key, n) => setRules({ [group]: { ...rules[group], [key]: n } });
@@ -282,8 +326,13 @@ export function PersonWeek({ rules, setRules, editable, T, Card }) {
       onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, [key]: v } })} />
   );
   const most = { text: "No limit", down: 7, reachable: true };
-  const cell = (text, child, basis = "120px") => (
-    <div style={{ display: "grid", gap: 4, flex: `1 1 ${basis}`, minWidth: 0 }}>
+  /* A number keeps its own width and moves to the next line when there is
+     no room for it; a box takes the room there is and can narrow to fit, so
+     nothing in a row is ever wider than the card. */
+  const cell = (text, child, basis) => (
+    <div style={basis
+      ? { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: `1 1 ${basis}`, minWidth: 0 }
+      : { display: "grid", gap: 4, flex: "0 0 auto" }}>
       <span style={caption(T)}>{text}</span>{child}
     </div>
   );
@@ -304,10 +353,16 @@ export function PersonWeek({ rules, setRules, editable, T, Card }) {
       </select>
     );
   };
-  const personRow = (key, name, cells) => (
-    <div key={key} style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px 14px",
-                            padding: "12px 0", borderTop: `1px solid ${T.line}` }}>
-      <strong style={{ fontSize: 15, flex: "1 1 100%" }}>{name}</strong>
+  /* Each row in its duty code's colour: the name on a tag of that colour,
+     and a light wash of it behind the row. */
+  const personRow = (key, name, colour, cells) => (
+    <div key={key} data-colour={colour}
+      style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px 14px",
+               padding: 12, marginTop: 8, borderRadius: 12, background: tintOf10(colour) }}>
+      <span style={{ flex: "1 1 100%" }}>
+        <strong data-tag style={{ display: "inline-block", fontSize: 14, borderRadius: 999, padding: "4px 12px",
+                                  background: colour, color: textOn(colour, T.ink) }}>{name}</strong>
+      </span>
       {cells}
     </div>
   );
@@ -322,21 +377,21 @@ export function PersonWeek({ rules, setRules, editable, T, Card }) {
         everyone gets a Night every week. "In pairs" puts two side by side, but a single one is still
         fine so everyone gets one.
       </p>
-      {run.map((sh) => personRow(sh, LABEL[sh], <>
+      {run.map((sh) => personRow(sh, LABEL[sh], colourFor(rules, codes, sh), <>
         {cell("At least", <Stepper label={`Each person: ${LABEL[sh]}, at least`} value={rules.weeklyMin?.[sh]}
-          max={7} editable={editable} T={T} onChange={(n) => setIn("weeklyMin", sh, n)} />, "150px")}
+          max={7} editable={editable} T={T} onChange={(n) => setIn("weeklyMin", sh, n)} />)}
         {cell("At most", <Stepper label={`Each person: ${LABEL[sh]}, at most`} value={rules.weeklyMax?.[sh]}
-          max={7} none={most} editable={editable} T={T} onChange={(n) => setIn("weeklyMax", sh, n)} />, "150px")}
+          max={7} none={most} editable={editable} T={T} onChange={(n) => setIn("weeklyMax", sh, n)} />)}
         {cell("In a row", inRow(sh), "180px")}
         {cell("If it can't all fit", strength(`weeklyCaps:${sh}`, `${LABEL[sh]}: if it can't all fit`), "170px")}
       </>))}
-      {personRow("off", "Off days", <>
+      {personRow("off", "Off days", colourFor(rules, codes, "off"), <>
         {cell("At least", <Stepper label="Each person: off days, at least" value={rules.weeklyMin?.off}
-          max={7} editable={editable} T={T} onChange={(n) => setIn("weeklyMin", "off", n)} />, "150px")}
+          max={7} editable={editable} T={T} onChange={(n) => setIn("weeklyMin", "off", n)} />)}
         {cell("At most", <Stepper label="Each person: off days, at most" value={rules.weeklyMax?.off}
-          max={7} none={most} editable={editable} T={T} onChange={(n) => setIn("weeklyMax", "off", n)} />, "150px")}
+          max={7} none={most} editable={editable} T={T} onChange={(n) => setIn("weeklyMax", "off", n)} />)}
         {cell("In a row", <span style={{ ...field, display: "flex", alignItems: "center", cursor: "default",
-                                         background: "#F6FAFA", color: T.inkSoft }}>Spread apart</span>, "180px")}
+                                         background: "#fff", color: T.inkSoft }}>Spread apart</span>, "180px")}
         {cell("If it can't all fit", strength("offMin", "Off days: if it can't all fit"), "170px")}
       </>)}
       <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "4px 0 0", lineHeight: 1.6 }}>
@@ -346,41 +401,46 @@ export function PersonWeek({ rules, setRules, editable, T, Card }) {
       <div style={{ marginTop: 14, borderTop: `1px solid ${T.line}` }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
                       borderBottom: `1px solid ${T.line}` }}>
-          <span style={{ fontSize: 15, flex: "1 1 200px" }}>
+          <span style={{ fontSize: 15, flex: "1 1 200px", minWidth: 0 }}>
             Working days{!oneNumber && <span style={{ color: T.inkSoft }}> — Custom</span>}
           </span>
           {oneNumber ? (
             <Stepper label="Working days" value={work.min} max={7} editable={editable} T={T}
               onChange={(n) => setRules({ weeklyDuties: { ...rules.weeklyDuties, min: n, max: n } })} />
           ) : (
-            <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "6px 14px", alignItems: "center" }}>
-              <span style={caption(T)}>fewest</span>
-              <Stepper label="Working days, fewest" value={work.min} max={7} editable={editable} T={T}
-                onChange={(n) => setIn("weeklyDuties", "min", n)} />
-              <span style={caption(T)}>most</span>
-              <Stepper label="Working days, most" value={work.max} max={7} none={most} editable={editable} T={T}
-                onChange={(n) => setIn("weeklyDuties", "max", n)} />
+            <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "6px 14px", alignItems: "center", maxWidth: "100%" }}>
+              {/* Each word stays with its number when the row wraps. */}
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span style={caption(T)}>fewest</span>
+                <Stepper label="Working days, fewest" value={work.min} max={7} editable={editable} T={T}
+                  onChange={(n) => setIn("weeklyDuties", "min", n)} />
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span style={caption(T)}>most</span>
+                <Stepper label="Working days, most" value={work.max} max={7} none={most} editable={editable} T={T}
+                  onChange={(n) => setIn("weeklyDuties", "max", n)} />
+              </span>
             </span>
           )}
           <span style={mustChip}>Must</span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
                       borderBottom: `1px solid ${T.line}` }}>
-          <span style={{ fontSize: 15, flex: "1 1 200px" }}>Working days in a row, at most</span>
+          <span style={{ fontSize: 15, flex: "1 1 200px", minWidth: 0 }}>Working days in a row, at most</span>
           <Stepper label="Working days in a row, at most" value={rules.maxDaysOn ?? 5} min={1} max={6}
             editable={editable} T={T} onChange={(n) => setRules({ maxDaysOn: n })} />
-          <span style={{ display: "grid", gap: 4, flex: "1 1 190px", maxWidth: 260 }}>
+          <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
             {strength("workPattern", "Working days in a row: if it can't all fit")}
             <span style={{ fontSize: 12, color: T.inkSoft }}>Shared with In a row on every shift.</span>
           </span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0" }}>
-          <label htmlFor="sr-lookback" style={{ display: "grid", gap: 2, flex: "1 1 260px" }}>
+          <label htmlFor="sr-lookback" style={{ display: "grid", gap: 2, flex: "1 1 260px", minWidth: 0 }}>
             <span style={{ fontSize: 15 }}>Look back at past duties</span>
             <span style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>{lookBackHint(rules.lookbackDays)}</span>
           </label>
           <select id="sr-lookback" value={rules.lookbackDays || 0} disabled={!editable}
-            style={{ ...field, width: "auto", minWidth: 180 }}
+            style={{ ...field, width: "auto", minWidth: "min(180px, 100%)", flex: "0 1 auto" }}
             onChange={(e) => setRules({ lookbackDays: Number(e.target.value) })}>
             {LOOK_BACK.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
             {/* A saved number not on the list is shown as it is, and kept. */}

@@ -595,7 +595,7 @@ export default function SmartRosterTab({
       </ShiftNeeds>
 
       {/* ── Each person, each week ── */}
-      <PersonWeek {...needs} Card={Card} />
+      <PersonWeek {...needs} Card={Card} codes={data.codes} />
 
       {/* ── What usually gives way first ── */}
       <GivesWay rules={rules} T={T} Card={Card} />

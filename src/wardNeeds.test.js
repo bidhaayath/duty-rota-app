@@ -6,12 +6,13 @@
    1 November 2026 is a Sunday. */
 
 import React, { useState } from "react";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, act, within, cleanup } from "@testing-library/react";
 import SmartRosterTab from "./SmartRosterTab";
 import { useRotaHistory } from "./useRotaHistory";
 import { DEFAULT_RULES, mergeRules, LOOK_BACK_ALL } from "./rosterConfig";
 import {
   IN_ROW, inRowOf, customInRow, inRowPatch, followText, givesWay, levelOf, scaleIdOf,
+  colourFor, contrast, textOn, tintOf10, NEUTRAL,
 } from "./WardNeeds";
 
 const CODES = [
@@ -459,6 +460,110 @@ describe("what may follow what", () => {
     fireEvent.click(followCard().getByRole("button", { name: /^Add$/ }));
     expect(screen.getByText("Never give Evening after Afternoon")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /What may follow what/ })).toHaveTextContent("6 rules · Must");
+  });
+});
+
+/* ── The ward's own colours ── */
+const WARD_CODES = [
+  { id: "M", code: "M", counts: "morning", color: "#F6C48A" },
+  { id: "MR", code: "M(R)", counts: "morning", color: "#C0392B" },
+  { id: "A", code: "A", counts: "afternoon", color: "#2E7D32" },
+  { id: "E", code: "E", counts: "evening" },                       // no colour of its own
+  { id: "N", code: "N", counts: "night", color: "#1f3a93" },
+  { id: "OFF", code: "OFF", counts: "off", color: "#cfd8dc" },
+];
+
+describe("each row in its duty code's colour", () => {
+  test("the code Smart Roster writes: the one chosen under Which code to write, or else the first", () => {
+    const rules = mergeRules({});
+    expect(colourFor(rules, WARD_CODES, "morning")).toBe("#F6C48A");
+    expect(colourFor(mergeRules({ codeFor: { morning: "MR" } }), WARD_CODES, "morning")).toBe("#C0392B");
+    // A choice that is not a morning code, or no longer exists, falls back to the first.
+    expect(colourFor(mergeRules({ codeFor: { morning: "A" } }), WARD_CODES, "morning")).toBe("#F6C48A");
+    expect(colourFor(mergeRules({ codeFor: { morning: "gone" } }), WARD_CODES, "morning")).toBe("#F6C48A");
+    expect(colourFor(rules, WARD_CODES, "night")).toBe("#1F3A93");
+    expect(colourFor(rules, WARD_CODES, "off")).toBe("#CFD8DC");
+  });
+
+  test("no colour, a colour that cannot be read, or no off code at all: a neutral grey", () => {
+    const rules = mergeRules({});
+    expect(colourFor(rules, WARD_CODES, "evening")).toBe(NEUTRAL);
+    expect(colourFor(rules, [{ id: "O", counts: "off", color: "teal" }], "off")).toBe(NEUTRAL);
+    expect(colourFor(rules, WARD_CODES.filter((c) => c.counts !== "off"), "off")).toBe(NEUTRAL);
+    expect(colourFor(rules, [{ id: "O", counts: "off", color: "#abc" }], "off")).toBe("#AABBCC");
+  });
+
+  /* Every colour a ward could pick, in steps of 17 on each channel: the name
+     on its tag, and the small grey captions on the light wash behind the
+     row, read at 4.5 : 1 or better. */
+  const GRID = [];
+  for (let r = 0; r <= 255; r += 17) for (let g = 0; g <= 255; g += 17) for (let b = 0; b <= 255; b += 17) {
+    GRID.push(`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
+  }
+  test(`the name on its tag reads at 4.5 : 1 or better, on all ${GRID.length} colours`, () => {
+    const worst = Math.min(...[...GRID, NEUTRAL].map((c) => contrast(c, textOn(c, T.ink))));
+    expect(worst).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test("the captions and numbers read at 4.5 : 1 or better on the wash behind every row", () => {
+    const worstSoft = Math.min(...[...GRID, NEUTRAL].map((c) => contrast(tintOf10(c), T.inkSoft)));
+    const worstInk = Math.min(...[...GRID, NEUTRAL].map((c) => contrast(tintOf10(c), T.ink)));
+    expect(worstSoft).toBeGreaterThanOrEqual(4.5);
+    expect(worstInk).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test("the app's ink where it reads well enough, white on a dark code", () => {
+    expect(textOn("#F6C48A", T.ink)).toBe(T.ink);
+    expect(textOn("#1F3A93", T.ink)).toBe("#FFFFFF");
+    expect(tintOf10("#000000")).toBe("#E6E6E6");
+    expect(tintOf10("#FFFFFF")).toBe("#FFFFFF");
+  });
+
+  test("on the screen: each row and each shift card's dot in the same colour", async () => {
+    await openWard(rota({ codeFor: { morning: "MR" } }, WARD_CODES));
+    const rowOf = (name) => screen.getByText(name, { selector: "strong[data-tag]" });
+    const expectRow = (name, colour) => {
+      const tag = rowOf(name);
+      expect(tag.closest("[data-colour]").getAttribute("data-colour")).toBe(colour);
+      expect(tag).toHaveStyle({ background: colour });
+    };
+    expectRow("Morning", "#C0392B");
+    expectRow("Afternoon", "#2E7D32");
+    expectRow("Night", "#1F3A93");
+    expectRow("Off days", "#CFD8DC");
+    expect(rowOf("Night")).toHaveStyle({ color: "#FFFFFF" });
+    expect(rowOf("Off days")).toHaveStyle({ color: T.ink });
+    // The dot on each shift card is the row's colour.
+    const dot = (name) => screen.getByText(name, { selector: "strong:not([data-tag])" }).previousSibling;
+    expect(dot("Night")).toHaveStyle({ background: "#1F3A93" });
+    expect(dot("Morning")).toHaveStyle({ background: "#C0392B" });
+  });
+});
+
+describe("Evening after Turn on", () => {
+  test("back to 0 / 0 and opened again: the quiet line, not a card", async () => {
+    await openWard(rota(undefined));
+    fireEvent.click(screen.getByRole("button", { name: "Turn on Evening" }));
+    press("Evening: at most", "more");
+    press("Evening: at most", "fewer");
+    expect(h.data.rosterRules.coverage.evening).toEqual({ min: 0, max: 0 });
+    // Still a card for now: it was turned on in this visit.
+    expect(shown("Evening: at least")).toBe("0");
+    // A refresh opens the saved settings afresh.
+    const saved = h.data;
+    cleanup();
+    await openWard(saved);
+    expect(screen.getByText("Evening: not run on this ward.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Evening: at least")).toBeNull();
+  });
+
+  test("turned on and nothing changed: nothing saved, so the quiet line is back after a refresh", async () => {
+    const start = await openWard(rota(undefined));
+    fireEvent.click(screen.getByRole("button", { name: "Turn on Evening" }));
+    expect(h.writes).toBe(0);
+    cleanup();
+    await openWard(start);
+    expect(screen.getByText("Evening: not run on this ward.")).toBeInTheDocument();
   });
 });
 
