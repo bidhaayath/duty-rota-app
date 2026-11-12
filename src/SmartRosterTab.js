@@ -25,6 +25,7 @@ import {
   weekDatesFrom, activeStaffFor, codeTextById, codeIdByText, flattenCells,
   chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches, LOOK_BACK_ALL,
 } from "./rosterConfig";
+import { checkSettings, settingsKey } from "./settingsCheck";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 const SEQ_CATS = [...SHIFTS, "off"];
@@ -225,6 +226,31 @@ export default function SmartRosterTab({
     try { return checkFeasible(buildConfig()); } catch { return null; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, rules, weekStart, activeStaff]);
+
+  /* ── Do the settings fit ──
+     Worked out afresh from the settings as they are now, so it follows
+     every change. It only ever says: Generate is never held back by it.
+     The engine's own messages further down are left out where this is
+     already saying the same thing. */
+  const fit = checkSettings(rules, activeStaff);
+  const warningsShown = (feasibility?.warnings || []).filter((w) => !fit.hides(w));
+  const problemsShown = (feasibility?.problems || []).filter((p) => !fit.hides(p));
+  /* "Fix it for me" saves at once, like any other setting, so what it
+     changed is said until the settings next change. */
+  const [fixNote, setFixNote] = useState(null);
+  const rulesKey = settingsKey(rules);
+  useEffect(() => {
+    if (fixNote && fixNote.key !== rulesKey) setFixNote(null);
+  }, [fixNote, rulesKey]);
+  const fixIt = () => {
+    const { shift, to, text } = fit.fix;
+    const coverage = { ...rules.coverage, [shift]: { ...rules.coverage[shift], max: to } };
+    setFixNote({ text, key: settingsKey({ ...rules, coverage }) });
+    setRules({ coverage });
+  };
+  const fixed = fixNote && fixNote.key === rulesKey && (
+    <span><strong>Changed — {fixNote.text}.</strong> Undo puts it back.</span>
+  );
 
   const chosenCodes = useMemo(
     () => chosenCodesFor(rules, data.codes),
@@ -597,6 +623,37 @@ export default function SmartRosterTab({
           </div>
         )}
       </Card>
+
+      {/* ── Do the settings fit ──
+          A slim line while they do, so the amber card stands out when they
+          do not. */}
+      {fit.ok ? (
+        <div role="status" style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap",
+                                    fontSize: 12.5, color: "#0B6B61", padding: "0 6px", lineHeight: 1.6 }}>
+          <Check size={14} style={{ flexShrink: 0 }} />
+          <span>These settings fit your {fit.count} staff{fit.count === 1 ? " member" : ""}.</span>
+          {fixed}
+        </div>
+      ) : (
+        <Card style={{ background: "#FBF1DC", borderColor: "#E7D9B8" }}>
+          <div role="status" style={{ display: "flex", gap: 9, alignItems: "flex-start", fontSize: 13, color: "#8A5A0F", lineHeight: 1.6 }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 3 }} />
+            <div style={{ minWidth: 0 }}>
+              <strong>These settings do not add up yet.</strong> {fit.text}
+              {fit.stops && " Generate cannot make a week until this is changed."}
+              {fixed && <div style={{ marginTop: 6 }}>{fixed}</div>}
+              {fit.fix && (
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+                  <Btn kind="ghost" disabled={!staffEditable} onClick={fixIt} style={{ minHeight: 44, background: "#fff" }}>
+                    <Wand2 size={15} /> Fix it for me
+                  </Btn>
+                  <span>Changes {fit.fix.text}, and saves it.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* ── Staff per shift ── */}
       <Card>
@@ -1199,28 +1256,28 @@ export default function SmartRosterTab({
           </div>
         )}
 
-        {feasibility?.warnings?.length > 0 && feasibility.ok && (
+        {warningsShown.length > 0 && feasibility.ok && (
           <div style={{ background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 10, padding: "11px 13px", marginTop: 14 }}>
             <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
               <AlertTriangle size={15} color="#8A5A0F" style={{ flexShrink: 0, marginTop: 2 }} />
               <div style={{ fontSize: 12.5, color: "#8A5A0F", lineHeight: 1.7, minWidth: 0 }}>
                 <strong>Worth knowing before you generate:</strong>
                 <ul style={{ margin: "5px 0 0", paddingLeft: 17 }}>
-                  {feasibility.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  {warningsShown.map((w, i) => <li key={i}>{w}</li>)}
                 </ul>
               </div>
             </div>
           </div>
         )}
 
-        {feasibility && !feasibility.ok && (
+        {feasibility && !feasibility.ok && problemsShown.length > 0 && (
           <div style={{ background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 10, padding: "11px 13px", marginTop: 14 }}>
             <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
               <AlertTriangle size={15} color="#8A5A0F" style={{ flexShrink: 0, marginTop: 2 }} />
               <div style={{ fontSize: 12.5, color: "#8A5A0F", lineHeight: 1.7, minWidth: 0 }}>
                 <strong>These settings cannot produce a week yet:</strong>
                 <ul style={{ margin: "5px 0 0", paddingLeft: 17 }}>
-                  {feasibility.problems.map((p, i) => <li key={i}>{p}</li>)}
+                  {problemsShown.map((p, i) => <li key={i}>{p}</li>)}
                 </ul>
               </div>
             </div>
