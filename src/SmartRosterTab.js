@@ -514,8 +514,16 @@ export default function SmartRosterTab({
     background: on ? (colour === T.coral ? "#FBEAE7" : "#D8EEE9") : "#fff",
     color: on ? colour : T.inkSoft,
   });
-  // What every part of the ward's needs is handed: the settings, and the one way to write them.
-  const needs = { rules, setRules, editable: staffEditable, T };
+  /* Taking a setting away rather than writing it: what a choice that means
+     "as before" does, so nothing is left behind. One Undo step, as any write. */
+  const dropRule = (key) => update((d) => {
+    const next = { ...rules };
+    delete next[key];
+    d.rosterRules = next;
+    return d;
+  });
+  // What every part of the ward's needs is handed: the settings, and the ways to write them.
+  const needs = { rules, setRules, dropRule, editable: staffEditable, T };
 
   // The sum lives in rosterConfig.js so Ini warns with the same numbers.
   const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = seniorNeedOf(rules, activeStaff);

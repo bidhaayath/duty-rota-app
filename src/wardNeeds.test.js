@@ -293,6 +293,8 @@ const CONTROLS = [
     (r) => ({ weeklyDuties: { ...r.weeklyDuties, min: 4, max: 4 } })],
   ["working days in a row +", () => press("Working days in a row, at most", "more"),
     () => ({ maxDaysOn: 6 })],
+  ["off days together is fine", () => choose("Off days: in a row", "together"),
+    () => ({ singleOffDays: false })],
   ["share non-official days fairly, protect most", () => choose("Share non-official days (Fridays and holidays) fairly: if it can't all fit", "soft1"),
     (r) => ({ ruleStates: { ...r.ruleStates, fairNonOfficial: { state: "soft", priority: 1 } } })],
   ["share nights fairly, bend first", () => choose("Share nights fairly: if it can't all fit", "soft4"),
@@ -538,6 +540,27 @@ describe("each person's week", () => {
     cleanup();
     await openWard(rota({ blockTogether: { night: 3 }, blockDays: { night: 2 } }));
     expect(screen.queryByText(pairText)).toBeNull();
+  });
+
+  test("off days: Together is fine saves the choice, and Spread apart takes it away again", async () => {
+    await openWard(rota({ coverage: { morning: { min: 3, max: 4 } } }));
+    expect(picked("Off days: in a row")).toBe("Spread apart");
+    choose("Off days: in a row", "together");
+    expect(h.data.rosterRules.singleOffDays).toBe(false);
+    expect(picked("Off days: in a row")).toBe("Together is fine");
+    const beforeBack = JSON.stringify(h.data);
+    choose("Off days: in a row", "apart");
+    expect("singleOffDays" in h.data.rosterRules).toBe(false);
+    expect(h.history.depth).toBe(2);
+    act(() => { h.history.undo(); });
+    expect(JSON.stringify(h.data)).toBe(beforeBack);
+  });
+
+  test("off days: with In a row set to Ignore, Spread apart says it is not being applied", async () => {
+    await openWard(rota({ ruleStates: { workPattern: { state: "disabled", priority: 1 } } }));
+    expect(screen.getByText("In a row, every shift is set to Ignore, so off days are not kept apart.")).toBeInTheDocument();
+    choose("Off days: in a row", "together");
+    expect(screen.queryByText(/so off days are not kept apart/)).toBeNull();
   });
 
   test("off days are spread apart, and their box covers at least", async () => {

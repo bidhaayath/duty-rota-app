@@ -357,7 +357,7 @@ const lookBackHint = (days) => {
   return `Fair shares count duties from the last ${days} days, so someone who did a lot of nights recently gets fewer. Rest after last week's duties is always checked.`;
 };
 
-export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
+export function PersonWeek({ rules, setRules, dropRule, editable, T, Card, codes }) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
   // The shift the "at least" hint is said with: Night where the ward runs it.
   const example = run.includes("night") ? "night" : (run[0] || "night");
@@ -449,8 +449,23 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
           max={7} editable={editable} T={T} onChange={(n) => setIn("weeklyMin", "off", n)} />)}
         {cell("At most", <Stepper label="Each person: off days, at most" value={rules.weeklyMax?.off}
           max={7} none={most} editable={editable} T={T} onChange={(n) => setIn("weeklyMax", "off", n)} />)}
-        {cell("In a row", <span style={{ ...field, display: "flex", alignItems: "center", cursor: "default",
-                                         background: "#fff", color: T.inkSoft }}>Spread apart</span>, "180px")}
+        {cell("In a row", <>
+          {/* Spread apart is how it always was: choosing it again takes the setting away. */}
+          <select aria-label="Off days: in a row" value={rules.singleOffDays === false ? "together" : "apart"}
+            disabled={!editable} style={field}
+            onChange={(e) => {
+              if (e.target.value === "together") setRules({ singleOffDays: false });
+              else if ("singleOffDays" in rules) dropRule("singleOffDays");
+            }}>
+            <option value="apart">Spread apart</option>
+            <option value="together">Together is fine</option>
+          </select>
+          {rules.singleOffDays !== false && rules.ruleStates?.workPattern?.state === "disabled" && (
+            <span style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.45 }}>
+              In a row, every shift is set to Ignore, so off days are not kept apart.
+            </span>
+          )}
+        </>, "180px")}
         {cell("If it can't all fit", strength("offMin", "Off days: if it can't all fit"), "170px")}
       </>)}
       <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "4px 0 0", lineHeight: 1.6 }}>

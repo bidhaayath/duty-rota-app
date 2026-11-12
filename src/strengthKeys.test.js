@@ -207,6 +207,38 @@ describe("sharing non-official days fairly: ruleStates.fairNonOfficial", () => {
   });
 });
 
+describe("off days, Together is fine: rosterRules.singleOffDays", () => {
+  const together = (data) => ({ ...data, rosterRules: { ...data.rosterRules, singleOffDays: false } });
+  // Two off days side by side, counted from the finished week.
+  const pairsOff = (data, start, out) => {
+    const cfg = weekConfig(data, start);
+    const days = datesBetween(cfg.from, cfg.to);
+    return cfg.staff.reduce((n, s) => n + days.slice(1).filter((d, i) =>
+      out.cells[`${s.id}|${d}`] === "off" && out.cells[`${s.id}|${days[i]}`] === "off").length, 0);
+  };
+
+  test("handed to the engine only when chosen; Ini's month build hands it on too", () => {
+    const { start, data } = seededWard(2);
+    expect("singleOffDays" in weekConfig(data, start)).toBe(false);
+    expect(weekConfig(together(data), start).singleOffDays).toBe(false);
+    expect(prepareMonth({ data: together(data), month: "2026-11", lookFrom: null }).config.singleOffDays).toBe(false);
+    expect("singleOffDays" in prepareMonth({ data, month: "2026-11", lookFrom: null }).config).toBe(false);
+  });
+
+  test("off days together are no longer priced, and the weeks have more of them", () => {
+    let apart = 0, allowed = 0;
+    for (const seed of SEEDS) {
+      const { start, data } = seededWard(seed);
+      const a = generateRoster(steady(weekConfig(data, start)));
+      const b = generateRoster(steady(weekConfig(together(data), start)));
+      apart += pairsOff(data, start, a);
+      allowed += pairsOff(data, start, b);
+      expect(b.report.relaxations.some((r) => /two off days together/.test(r.rule || ""))).toBe(false);
+    }
+    expect(allowed).toBeGreaterThan(apart);
+  }, 120000);
+});
+
 describe("working days in a row: ruleStates.daysInRow", () => {
   test.each(SEEDS)("ward %i: saved at In a row's own level, it builds exactly as never saved", (seed) => {
     const { start, data } = seededWard(seed);

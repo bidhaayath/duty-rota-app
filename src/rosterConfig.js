@@ -278,6 +278,8 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     maxBlock: rules.blockDays,
     // Runs of at least this many when someone gets more than one; absent = no ask.
     blockTogether: rules.blockTogether,
+    // Off days "Together is fine": only said when chosen, so a ward that never chose is given exactly what it was.
+    ...(rules.singleOffDays === false ? { singleOffDays: false } : {}),
     // One person's own limits, laid over the ward's; absent = everyone follows the ward.
     personRules: rules.personRules,
     maxConsecutiveDays: rules.maxDaysOn ?? 5,
