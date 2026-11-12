@@ -42,7 +42,7 @@ export function StepNav({ step, onStep, status, T }) {
         return (
           <button key={n} type="button" onClick={() => onStep(n)} aria-current={current ? "step" : undefined}
             aria-label={`Step ${n}, ${title}: ${status[n]}`}
-            style={{ fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, padding: "10px 10px", minHeight: 60,
+            style={{ fontFamily: "inherit", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 8px", padding: "10px 10px", minHeight: 60,
                      borderRadius: 14, cursor: "pointer", textAlign: "left", color: T.ink, minWidth: 0,
                      background: "#fff", border: current ? `2px solid ${T.lagoon}` : `1px solid ${T.line}` }}>
             <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 999, flexShrink: 0, display: "flex",
@@ -51,7 +51,8 @@ export function StepNav({ step, onStep, status, T }) {
                                              color: current ? "#fff" : done ? T.lagoon : T.inkSoft }}>
               {done && !current ? "✓" : n}
             </span>
-            <span style={{ display: "grid", gap: 1, minWidth: 0 }}>
+            {/* On the narrowest phones the words go under the number, not past the edge. */}
+            <span style={{ display: "grid", gap: 1, minWidth: 0, flex: "1 1 40px" }}>
               <span style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25 }}>{title}</span>
               <span style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.3 }}>{status[n]}</span>
             </span>
