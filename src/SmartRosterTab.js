@@ -13,7 +13,7 @@
 
    Nothing is written to the rota until Apply is pressed.                */
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Wand2, AlertTriangle, Check, X, ChevronDown, ChevronRight } from "lucide-react";
 import { generateRoster, checkFeasible, toRotaCells, SHIFTS, mustCauseText } from "./rosterEngine";
 import { prettyWeekday } from "./monthBuild";
@@ -30,6 +30,7 @@ import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
 import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
 import YourStaff from "./YourStaff";
 import { StepNav, StepFoot, ReadyList, readyLines, loadStep, saveStep, weekSummary } from "./RosterSteps";
+import { AskIniBar, reducedMotion } from "./IniBuddy";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 
@@ -49,6 +50,8 @@ const DAY_TYPES = ["offOn", "onlyOn"];
 export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
   onApplied, deptId,
+  // The "Ask Ini" bar: where its note goes, and whether the Ini panel is busy with one.
+  onAskIni, iniWorking = false,
 }) {
   const rules = mergeRules(data.rosterRules || {});
 
@@ -82,11 +85,24 @@ export default function SmartRosterTab({
   /* ── Which of the three steps is showing ──
      The one this department was last on, as remembered in this browser. */
   const [step, setStep] = useState(() => loadStep(deptId));
+  const stepsRef = useRef(null);
   useEffect(() => { setStep(loadStep(deptId)); }, [deptId]);
+  // Ini on the bar is pleased for a few seconds after a week is made or "Fix it for me" works.
+  const [celebrate, setCelebrate] = useState(0);
+  useEffect(() => {
+    if (!celebrate) return undefined;
+    const t = setTimeout(() => setCelebrate(0), 3000);
+    return () => clearTimeout(t);
+  }, [celebrate]);
   const goStep = (n) => {
     setStep(n);
     saveStep(deptId, n);
-    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { /* not in every browser */ }
+    /* The new step starts at the step buttons, not wherever the last one was
+       scrolled to. Without smooth scrolling where motion is reduced. */
+    const nav = stepsRef.current;
+    if (nav && nav.scrollIntoView) {
+      nav.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+    }
   };
 
   const setRules = (patch) => update((d) => { d.rosterRules = { ...rules, ...patch }; return d; });
@@ -173,6 +189,7 @@ export default function SmartRosterTab({
     const coverage = { ...rules.coverage, [shift]: { ...rules.coverage[shift], max: to } };
     setFixNote({ text, key: settingsKey({ ...rules, coverage }) });
     setRules({ coverage });
+    setCelebrate(Date.now());
   };
   const fixed = fixNote && fixNote.key === rulesKey && (
     <span><strong>Changed — {fixNote.text}.</strong> Undo puts it back.</span>
@@ -203,6 +220,7 @@ export default function SmartRosterTab({
           rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes),
           from: weekStart, to: weekEnd,
         });
+        setCelebrate(Date.now());
       } catch (e) {
         console.error("Roster generation failed:", e);
         setProposal({ failed: true, problems: ["Something went wrong. Nothing has been changed."], deptId });
@@ -391,7 +409,15 @@ export default function SmartRosterTab({
       </Card>
 
       {/* ── The three steps ── */}
-      <StepNav step={step} onStep={goStep} status={stepStatus} T={T} />
+      {/* ── Ask Ini, on every step ── */}
+      {onAskIni && (
+        <AskIniBar onAsk={onAskIni} thinking={busy || iniWorking} celebrating={!!celebrate}
+          editable={staffEditable} T={T} />
+      )}
+
+      <div ref={stepsRef} style={{ scrollMarginTop: 12 }}>
+        <StepNav step={step} onStep={goStep} status={stepStatus} T={T} />
+      </div>
 
       {/* ── Step 1: what the ward needs ── */}
       {step === 1 && (<>

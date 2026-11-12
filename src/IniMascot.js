@@ -3,20 +3,24 @@
 
    <IniMascot mood="listening" size={48} />
 
-   mood:   'resting' | 'waking' | 'listening' | 'reading' | 'spotted' | 'done'
+   mood:   'resting' | 'waking' | 'listening' | 'reading' | 'thinking' | 'spotted' | 'done'
            Changing the mood melts Ini smoothly from one face to the next.
    size:   width in pixels (height follows). Default 48.
    shadow: true draws the soft shadow under Ini (for large sizes). Default false.
    label:  text for screen readers. Default "Ini".
+   look:   { x, y }, each -1 to 1: where Ini's eyes turn, on top of the face
+           (the pointer, say). Default straight ahead.
+   morph:  true lets Ini's body gently change shape as it bobs. Default false.
 
-   Ini blinks now and then and bobs gently. Both stop for anyone who has
+   Ini blinks now and then and bobs gently. All of it — the bob, the blink,
+   the eyes following, the change of shape — stops for anyone who has
    "reduce motion" turned on. Everything is drawn with inline SVG attributes,
    so nothing depends on CSS classes. Ini's colours are fixed in both themes.
    No libraries, no network. */
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
-const C = { body: '#9FD068', lid: '#8DBF55', eye: '#FFFFFF', pupil: '#9C6000' };
+const C = { body: '#9ED066', lid: '#8DBF55', eye: '#FFFFFF', pupil: '#945600' };
 const SHADOW = 'rgba(29, 43, 38, 0.14)';
 
 /* A blob from four anchor points (top, right, bottom, left), each corner with
@@ -64,6 +68,13 @@ export const INI_MOODS = {
     eyes: [eye(84, 90, 12, { sy: 0.75, lid: 0.42, tilt: 14, pdy: 2, pr: 3.4 }), eye(116, 90, 12, { sy: 0.75, lid: 0.42, tilt: -14, pdy: 2, pr: 3.4 })],
     mouth: { x: 100, y: 106, w: 0, curve: 0, o: 1.8 },
   },
+  // Working something out: eyes turned up, lids half down, mouth a small line.
+  thinking: {
+    name: 'thinking',
+    body: blob({ cx: 100, cy: 90, wl: 68, wr: 68, ht: 54, hb: 50, tx: 2, k: [0.78, 0.8, 0.8, 0.78] }),
+    eyes: [eye(80, 82, 18, { lid: 0.45, pdx: 3, pdy: -9, pr: 4.2 }), eye(120, 82, 18, { lid: 0.45, pdx: 3, pdy: -9, pr: 4.2 })],
+    mouth: { x: 102, y: 107, w: 8, curve: -0.6, o: 0 },
+  },
   spotted: {
     name: 'spotted something',
     body: blob({ cx: 100, cy: 94, wl: 66, wr: 64, ht: 46, hb: 44, tx: -12, bx: 4, ry: 8, ly: -2, k: [0.7, 0.62, 0.72, 0.7] }),
@@ -107,14 +118,17 @@ function ensureKeyframes() {
   s.id = STYLE_ID;
   s.textContent =
     '@keyframes iniMascotBob{0%,100%{transform:translateY(0) scale(1,1)}50%{transform:translateY(-4px) scale(1.012,0.99)}}' +
-    '@keyframes iniMascotShade{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(0.9);opacity:0.75}}';
+    '@keyframes iniMascotShade{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(0.9);opacity:0.75}}' +
+    // A slower, uneven change of shape, so it never quite lines up with the bob.
+    '@keyframes iniMascotMorph{0%,100%{transform:scale(1,1)}33%{transform:scale(1.03,0.97)}66%{transform:scale(0.975,1.025)}}';
   document.head.appendChild(s);
 }
 
 let idCounter = 0;
 
-/* Writes one frame of Ini into the SVG nodes. */
-function paint(n, s, blinkAmt) {
+/* Writes one frame of Ini into the SVG nodes. `look` turns the eyes on top
+   of the face's own, kept inside the eye. */
+function paint(n, s, blinkAmt, look = { x: 0, y: 0 }) {
   if (!n.body) return;
   const b = s.body.map(f);
   n.body.setAttribute('d',
@@ -132,8 +146,8 @@ function paint(n, s, blinkAmt) {
       shape.setAttribute('ry', f(ry));
     });
     const lim = Math.max(0, e.r - e.pr - 2);
-    const lx = Math.max(-lim, Math.min(lim, e.pdx));
-    const lyy = Math.max(-ry, Math.min(ry, e.pdy));
+    const lx = Math.max(-lim, Math.min(lim, e.pdx + look.x * lim * 0.6));
+    const lyy = Math.max(-ry, Math.min(ry, e.pdy + look.y * ry * 0.45));
     node.pupil.setAttribute('cx', f(e.cx + lx));
     node.pupil.setAttribute('cy', f(e.cy + lyy));
     node.pupil.setAttribute('r', f(e.pr));
@@ -163,7 +177,7 @@ function paint(n, s, blinkAmt) {
   n.o.setAttribute('opacity', m.o > 0.4 ? 1 : 0);
 }
 
-export default function IniMascot({ mood = 'listening', size = 48, shadow = false, label = 'Ini', style, className }) {
+export default function IniMascot({ mood = 'listening', size = 48, shadow = false, label = 'Ini', style, className, look, morph = false }) {
   const target = INI_MOODS[mood] ? mood : 'listening';
   const idRef = useRef(null);
   if (idRef.current === null) { idCounter += 1; idRef.current = `ini-mascot-${idCounter}`; }
@@ -174,13 +188,15 @@ export default function IniMascot({ mood = 'listening', size = 48, shadow = fals
   const blink = useRef(0);
   const reduce = useRef(false);
   const tween = useRef(null);
+  // Where the eyes are turned, on top of the face. Straight ahead with reduced motion.
+  const lookRef = useRef({ x: 0, y: 0 });
 
   // Draw the first frame before the browser shows anything, so Ini never
   // flashes up empty.
   useLayoutEffect(() => {
     reduce.current = prefersReducedMotion();
     if (!reduce.current) ensureKeyframes();
-    paint(nodes.current, cur.current, 0);
+    paint(nodes.current, cur.current, 0, lookRef.current);
   }, []);
 
   // Blink now and then.
@@ -198,9 +214,9 @@ export default function IniMascot({ mood = 'listening', size = 48, shadow = fals
           if (!alive) return;
           const t = Math.min(1, (now - t0) / d);
           blink.current = t < 0.5 ? t * 2 : (1 - t) * 2;
-          paint(nodes.current, cur.current, blink.current);
+          paint(nodes.current, cur.current, blink.current, lookRef.current);
           if (t < 1) frame = requestAnimationFrame(step);
-          else { blink.current = 0; paint(nodes.current, cur.current, 0); schedule(); }
+          else { blink.current = 0; paint(nodes.current, cur.current, 0, lookRef.current); schedule(); }
         };
         frame = requestAnimationFrame(step);
       }, 2600 + Math.random() * 3800);
@@ -215,7 +231,7 @@ export default function IniMascot({ mood = 'listening', size = 48, shadow = fals
     if (tween.current) cancelAnimationFrame(tween.current);
     if (reduce.current || prefersReducedMotion()) {
       cur.current = clone(to);
-      paint(nodes.current, cur.current, blink.current);
+      paint(nodes.current, cur.current, blink.current, lookRef.current);
       return undefined;
     }
     const from = clone(cur.current);
@@ -225,12 +241,22 @@ export default function IniMascot({ mood = 'listening', size = 48, shadow = fals
       const now = performance.now();
       const t = Math.min(1, (now - t0) / ms);
       cur.current = lerp(from, to, ease(t));
-      paint(nodes.current, cur.current, blink.current);
+      paint(nodes.current, cur.current, blink.current, lookRef.current);
       tween.current = t < 1 ? requestAnimationFrame(step) : null;
     };
     tween.current = requestAnimationFrame(step);
     return () => { if (tween.current) cancelAnimationFrame(tween.current); tween.current = null; };
   }, [target]);
+
+  // Turn the eyes when `look` changes. With reduced motion they stay ahead.
+  const lookX = look ? look.x : 0;
+  const lookY = look ? look.y : 0;
+  useEffect(() => {
+    if (reduce.current) return;
+    lookRef.current = { x: Math.max(-1, Math.min(1, lookX)), y: Math.max(-1, Math.min(1, lookY)) };
+    // A melt in progress paints every frame anyway.
+    if (!tween.current) paint(nodes.current, cur.current, blink.current, lookRef.current);
+  }, [lookX, lookY]);
 
   const motion = !prefersReducedMotion();
   const set = (path) => (el) => {
@@ -265,7 +291,8 @@ export default function IniMascot({ mood = 'listening', size = 48, shadow = fals
         />
       )}
       <g style={motion ? { animation: 'iniMascotBob 3.4s ease-in-out infinite', transformBox: 'fill-box', transformOrigin: '50% 100%' } : undefined}>
-        <path ref={set(['body'])} fill={C.body} />
+        <path ref={set(['body'])} fill={C.body}
+          style={motion && morph ? { animation: 'iniMascotMorph 5.3s ease-in-out infinite', transformBox: 'fill-box', transformOrigin: '50% 60%' } : undefined} />
         {[0, 1].map((i) => (
           <g clipPath={`url(#${id}-c${i})`} key={i}>
             <ellipse ref={set(['eyes', i, 'white'])} fill={C.eye} />

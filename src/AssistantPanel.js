@@ -39,6 +39,7 @@ import {
 import { startMonthBuild } from "./monthBuildRunner";
 import MonthPreview from "./MonthPreview";
 import IniMascot from "./IniMascot";
+import { useLook } from "./IniBuddy";
 import { mergeRules, seniorTermsOf } from "./rosterConfig";
 import { SHIFTS } from "./rosterEngine";
 import { GROUPS, LEAVE_TYPES, entryFor, readReply, checkLines, applyLines, savedWords } from "./iniActions";
@@ -141,6 +142,10 @@ export default function AssistantPanel({
   visible, deptId, data, update, staffEditable = () => true, currentTab,
   onOpenBilling, onOpenRequests, T, uid, dstr,
   canBuild = false, onMonthApplied,
+  /* From the "Ask Ini" bar on Smart Roster: { text, n }, a new n for each
+     note. Read at once, as "Read my note" reads it. And told whether Ini is
+     busy reading or building, so the bar's Ini can look it. */
+  ask, onWorking,
 }) {
   const [open, setOpen] = useState(false);
   // null while checking; { ok: true, cap, used, remaining } or { ok: false, reason }
@@ -205,6 +210,30 @@ export default function AssistantPanel({
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (!visible) { setOpen(false); stopWaking(); } }, [visible]);
+
+  /* A note from the "Ask Ini" bar: the panel opens with it in the box and
+     reads it straight away — the same read as "Read my note", so what Ini
+     finds is a checklist here and nothing is saved until Add. `read` is
+     made further down, after the panel decides whether to show at all, so
+     it is reached through a ref. */
+  const readRef = useRef(null);
+  const askSeen = useRef(ask ? ask.n : null);
+  // The button's Ini watches the pointer too.
+  const fabRef = useRef(null);
+  const fabLook = useLook(fabRef);
+  useEffect(() => {
+    if (!ask || ask.n === askSeen.current) return;
+    askSeen.current = ask.n;
+    setText(ask.text);
+    setResult(null); setSaved(null); setError(""); setBuildProblems(null);
+    stopWaking(); setOpen(true);
+    if (readRef.current) readRef.current(ask.text);
+    // Only a new note starts this; the rest is read as it is when it arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask]);
+
+  // Busy reading a note or building: said to whoever is listening.
+  useEffect(() => { if (onWorking) onWorking(busy || building); }, [busy, building, onWorking]);
 
   // Pleased for a few seconds after a save, then back to listening.
   useEffect(() => {
@@ -352,8 +381,9 @@ export default function AssistantPanel({
 
   if (!visible || !deptId) return null;
 
-  const read = async () => {
-    const note = text.trim();
+  // `given` is a note from the "Ask Ini" bar; otherwise the box's own.
+  const read = async (given) => {
+    const note = (typeof given === "string" ? given : text).trim();
     if (!note || busy) return;
     if (periodErr) { setError(periodErr); return; }
     if (!staffForMonth.length) {
@@ -431,6 +461,8 @@ export default function AssistantPanel({
     else if (code === "too_many_staff") setError(MSG.tooManyStaff);
     else setError(MSG.retry);
   };
+
+  readRef.current = read;
 
   const setLine = (key, change) =>
     setResult((r) => ({ ...r, lines: r.lines.map((l) => (l.key === key ? { ...l, ...change } : l)) }));
@@ -903,6 +935,7 @@ export default function AssistantPanel({
       {!open && !preview && (
         // White, so Ini stands out over coloured rota cells.
         <button
+          ref={fabRef}
           type="button"
           className="ini-fab"
           aria-label="Ask Ini"
@@ -916,7 +949,7 @@ export default function AssistantPanel({
             boxShadow: "0 6px 18px rgba(20,43,51,0.18)",
           }}
         >
-          <IniMascot mood={iniMood({ ...face, open: false })} size={44} />
+          <IniMascot mood={iniMood({ ...face, open: false })} size={44} look={fabLook} />
         </button>
       )}
 

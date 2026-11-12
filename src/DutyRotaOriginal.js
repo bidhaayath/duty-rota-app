@@ -1350,6 +1350,12 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
      Undo writes to the rota directly, so it needs the department lock too,
      or a view-only department could be edited through it. */
   const history = useRotaHistory(data, setData, deptId, { disabled: editBlocked || currentDeptLocked || viewOnlyRole });
+  /* The "Ask Ini" bar on Smart Roster hands its note to Ini (a new n each
+     time), and Ini says when it is busy, so the bar's Ini can look it. Only
+     where Ini itself is shown — the same check as below. */
+  const [iniAsk, setIniAsk] = useState(null);
+  const [iniWorking, setIniWorking] = useState(false);
+  const iniShown = !!deptId && !viewOnlyRole && !editBlocked && !currentDeptLocked;
 
   if (tab === "dashboard") {
     return (
@@ -2206,6 +2212,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               T={T} Card={Card} Btn={Btn} Field={Field}
               inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
               onApplied={(sunday) => { setWeekStart(sunday); setRotaView("weekly"); setTab("rota"); }}
+              onAskIni={iniShown ? (text) => setIniAsk((a) => ({ text, n: (a ? a.n : 0) + 1 })) : undefined}
+              iniWorking={iniWorking}
             />
           )
         )}
@@ -2218,7 +2226,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       {/* Ini, the rota assistant. Shown only where this person can edit —
           the same three checks that switch Undo off. */}
       <AssistantPanel
-        visible={!!deptId && !viewOnlyRole && !editBlocked && !currentDeptLocked}
+        visible={iniShown}
+        ask={iniAsk} onWorking={setIniWorking}
         deptId={deptId} data={data} update={update} staffEditable={staffEditable}
         currentTab={tab} onOpenBilling={onOpenBilling} onOpenRequests={() => setTab("requests")}
         T={T} uid={uid} dstr={dstr}
