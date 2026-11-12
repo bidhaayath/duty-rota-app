@@ -45,6 +45,7 @@ import {
   mergeRules, buildRosterConfig, activeStaffFor, employedOn, shiftISO, firstCodeIdOf,
   codeIdByText, chosenCodesFor, LOOK_BACK_ALL,
 } from "./rosterConfig";
+import { whyNoInCharge } from "./inChargeGaps";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
   "August", "September", "October", "November", "December"];
@@ -340,6 +341,18 @@ export function finishMonth(prep, result, data) {
   const weekTouches = (wk) => wk <= periodTo && shiftISO(wk, 6) >= periodFrom;
   const shortfalls = report.shortfalls.filter((s) => inPeriod(s.date));
   const seniorGaps = (report.seniorGaps || []).filter((s) => inPeriod(s.date));
+  /* In-charge held as a Must and still missing: why nobody who can take
+     charge was free, as Smart Roster's week says it, from what was built. */
+  const rules = mergeRules(data.rosterRules || {});
+  const noInCharge = rules.ruleStates?.seniors?.state === "hard"
+    ? seniorGaps.map((g) => ({
+      ...g,
+      reasons: whyNoInCharge({
+        ...g, cells: result.cells || {}, data, rules, staff: config.staff,
+        from: config.from, to: config.to, kept: pinned,
+      }),
+    }))
+    : [];
 
   // Rules bent, grouped, with where. Weekly ones name the person and week.
   const groups = {};
@@ -410,7 +423,7 @@ export function finishMonth(prep, result, data) {
     writes, missing: [...missing], replaced, replacedSplit,
     keptCount: Object.keys(pinned).filter((k) => inPeriod(k.slice(-10))).length
       + [...blocked].filter((k) => inPeriod(k.slice(-10))).length,
-    shortfalls, seniorGaps, bent, shortWeeks,
+    shortfalls, seniorGaps, noInCharge, bent, shortWeeks,
     fairness: {
       nights: spread("night"), fridayOff: spread("fridayOff"),
       nonOfficial: spread("nonOfficial"), duties: spread("duties"),

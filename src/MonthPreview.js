@@ -30,6 +30,7 @@ import { codeTextById, writeCells, findMismatches, exchangeMarksIn, employedOn, 
 import { weekTotalsFor, dayCountFor, isNonOff } from "./rotaCounts";
 import { monthFingerprint, prettyDay, prettyWeekday } from "./monthBuild";
 import { mustCauseText } from "./rosterEngine";
+import { noInChargeText } from "./inChargeGaps";
 
 // The rota grid's own reading of a colour (DutyRotaOriginal.js textOn):
 // dark text on light codes, white on dark ones.
@@ -263,7 +264,9 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
   const namedGaps = proposal.shortfalls.some((s) => s.because);
   const otherGaps = proposal.shortfalls.filter((s) => !s.because);
   // The ward's own word for the person in charge, as Smart Roster uses it.
-  const seniorWord = seniorTermsOf(mergeRules(data.rosterRules || {})).lower;
+  const { lower: seniorWord, termOne } = seniorTermsOf(mergeRules(data.rosterRules || {}));
+  // In-charge as a Must and still missing: named at the top with why, as on Smart Roster's week.
+  const noInCharge = proposal.noInCharge || [];
   // The one-line version for phones.
   const summaryLine = [
     proposal.shortfalls.length ? `${plural(proposal.shortfalls.length, "shift")} not filled` : "Every shift covered",
@@ -405,6 +408,20 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
               <div style={{ marginTop: 4 }}>You can apply this and fill them by hand.</div>
             </div>
           )}
+          {/* No in-charge where the ward holds one as a Must: next, with why. */}
+          {noInCharge.length > 0 && (
+            <div style={box("#FBEAE7", "#F1B8AE", "#8A2E1E")}>
+              <strong>No {termOne} where one is a Must:</strong>
+              <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                {noInCharge.map((g) => (
+                  <li key={`${g.date}|${g.shift}`}>
+                    {noInChargeText({ ...g, day: prettyWeekday(g.date), termOne })}
+                  </li>
+                ))}
+              </ul>
+              <div style={{ marginTop: 4 }}>You can apply this and change it by hand.</div>
+            </div>
+          )}
           {/* A gap already named with its Must above is not blamed on the
               rest rules here as well; only the others are listed. */}
           {otherGaps.length > 0 && (
@@ -421,7 +438,7 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
               {" "}You can apply this and fill them by hand.
             </div>
           )}
-          {proposal.seniorGaps.length > 0 && (
+          {!noInCharge.length && proposal.seniorGaps.length > 0 && (
             <div style={box("#FBF1DC", "#E7D9B8", "#8A5A0F")}>
               <strong>{plural(proposal.seniorGaps.length, "shift")} with no {seniorWord}:</strong>{" "}
               {listOf(proposal.seniorGaps.map((s) => `${prettyWeekday(s.date)} ${s.shift}`), 10)}.

@@ -7,7 +7,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { generateRoster } from "./rosterEngine";
 import { weekConfig, mergeRules, activeStaffFor, weekDatesFrom } from "./rosterConfig";
 import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
+import { prepareMonth, runEngine, finishMonth } from "./monthBuild";
 import SmartRosterTab from "./SmartRosterTab";
+import MonthPreview from "./MonthPreview";
 import { seededWard } from "../tools/engine-compare/wards";
 
 const CODES = [
@@ -83,9 +85,86 @@ describe("why each person who can take charge was not free", () => {
   });
 });
 
+describe("over more than a week, as Ini's month is built", () => {
+  // Two weeks, Monday 2 to Sunday 15 November, on a ward whose week starts on Monday.
+  const TWO = [...Array(14)].map((_, i) => `2026-11-${String(i + 2).padStart(2, "0")}`);
+  const fortnight = (days, extra = {}) => {
+    const cells = {};
+    days.forEach((c, i) => { if (c !== null) cells[`a|${TWO[i]}`] = c; });
+    return (date) => whyNoInCharge({
+      date, shift: "night", cells, from: TWO[0], to: TWO[13], staff: [person("a")],
+      data: { codes: CODES, cells: {}, dutyRequests: [], weekStartsOn: 1 },
+      rules: mergeRules({ seniorStaff: ["a"], weeklyDuties: { min: 5, max: 5 } }), ...extra,
+    });
+  };
+
+  test("the week's most duties is counted in the ward's own week around the day, not the whole period", () => {
+    // Five Mornings, Monday to Friday of the first week; the second week only two so far.
+    const ask = fortnight([M, M, M, M, M, O, O, O, A, O, O, A, O, O]);
+    expect(ask("2026-11-07")).toEqual([["weekMax", 5]]);      // Saturday, first week: full
+    expect(ask("2026-11-11")).toEqual([["off"]]);              // Wednesday, second week: two worked
+  });
+
+  test("a day kept as it already was on the rota is said as that", () => {
+    const ask = fortnight([M, M, O, O, M, O, O, O, A, O, O, A, O, O], { kept: { "a|2026-11-04": "off" } });
+    expect(ask("2026-11-04")[0]).toEqual(["kept"]);
+    expect(noInChargeText({ day: "Wed 4 Nov", shift: "night", termOne: "Senior", reasons: [["kept"], ["kept"]] }))
+      .toBe("Night on Wed 4 Nov has no Senior: all 2 have this day already set on the rota.");
+  });
+});
+
+/* A month for Ini: nine staff, a Night needing someone in charge, and the
+   only person who can take charge away all October. */
+const monthWard = (seniors) => {
+  const staff = [...Array(9)].map((_, i) => person(`s${i}`, i === 0 ? { name: "Ali", leavePeriods: [{ start: "2026-09-20", end: "2026-11-10" }] } : {}));
+  return {
+    staff, codes: CODES, cells: {}, dutyRequests: [], weekStartsOn: 0,
+    rosterRules: {
+      seniorStaff: ["s0"], seniorCover: { night: 1 },
+      coverage: { morning: { min: 2, max: 3 }, afternoon: { min: 2, max: 3 }, evening: { min: 0, max: 0 }, night: { min: 1, max: 2 } },
+      ...(seniors ? { ruleStates: { seniors } } : {}),
+    },
+  };
+};
+const buildMonth = (data) => {
+  const prep = prepareMonth({ data, month: "2026-10", keepExisting: false });
+  const out = runEngine({ ...prep.config, polishSteps: 2000, attempts: 1 }, prep.chosenCodes);
+  return finishMonth(prep, out, data);
+};
+
+describe("Ini's month", () => {
+  test("at Must, each shift with nobody in charge carries why; never saved, none do", () => {
+    const must = buildMonth(monthWard({ state: "hard", priority: 1 }));
+    expect(must.seniorGaps.length).toBe(31);
+    expect(must.noInCharge.map((g) => g.date)).toEqual(must.seniorGaps.map((g) => g.date));
+    expect(must.noInCharge.every((g) => JSON.stringify(g.reasons) === JSON.stringify([["leave"]]))).toBe(true);
+    const absent = buildMonth(monthWard(undefined));
+    expect(absent.seniorGaps.length).toBe(31);
+    expect(absent.noInCharge).toEqual([]);
+  }, 60000);
+
+  test("the month preview: the same red box as Smart Roster's week, and not the amber line too", () => {
+    const T = { lagoon: "#0E7C7B", ink: "#142B33", inkSoft: "#4A6570", line: "#D5E2E0", mist: "#EEF4F3", coral: "#E4604E" };
+    const data = { ...monthWard({ state: "hard", priority: 1 }), rosterRules: { ...monthWard({ state: "hard", priority: 1 }).rosterRules, seniorTerm: "Shift Manager" } };
+    render(<MonthPreview proposal={buildMonth(data)} data={data} update={jest.fn()} T={T} onDiscard={jest.fn()} onApplied={jest.fn()} />);
+    const red = screen.getByText("No Shift Manager where one is a Must:").parentElement;
+    expect(red).toHaveTextContent("Night on Thu 1 Oct has no Shift Manager: the only one is on leave.");
+    expect(red.querySelectorAll("li")).toHaveLength(31);
+    expect(screen.queryByText(/with no shift manager:/)).toBeNull();
+  }, 60000);
+
+  test("never saved: the month preview keeps its amber line, with no red box", () => {
+    const T = { lagoon: "#0E7C7B", ink: "#142B33", inkSoft: "#4A6570", line: "#D5E2E0", mist: "#EEF4F3", coral: "#E4604E" };
+    const data = monthWard(undefined);
+    render(<MonthPreview proposal={buildMonth(data)} data={data} update={jest.fn()} T={T} onDiscard={jest.fn()} onApplied={jest.fn()} />);
+    expect(screen.queryByText(/where one is a Must:/)).toBeNull();
+    expect(screen.getByText(/31 shifts with no senior:/)).toBeInTheDocument();
+  }, 60000);
+});
+
 describe("the sentence", () => {
   const say = (reasons, termOne = "Shift Manager") =>
-    noInChargeText({ date: "2026-11-17", shift: "night", reasons, termOne });
+    noInChargeText({ day: "Tue 17 Nov", shift: "night", reasons, termOne });
 
   test("one reason for everyone, and for the only one", () => {
     expect(say([["leave"], ["leave"], ["leave"]])).toBe("Night on Tue 17 Nov has no Shift Manager: all 3 are on leave.");
@@ -128,7 +207,7 @@ test("a real week: each reason is what the week as built shows", () => {
     staff: activeStaffFor(ward.staff, weekDatesFrom(start)), from: cfg.from, to: cfg.to,
   });
   expect(reasons.map((r) => r[0]).sort()).toEqual(["rest", "weekMax", "working"]);
-  expect(noInChargeText({ ...gap, reasons, termOne: "Senior" }))
+  expect(noInChargeText({ ...gap, reasons, termOne: "Senior", day: "Fri 6 Nov" }))
     .toMatch(/^Night on Fri 6 Nov has no Senior: of your 3, /);
 }, 60000);
 

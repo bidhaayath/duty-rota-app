@@ -1057,7 +1057,7 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
      each with why nobody who can take charge was free, and not again below. */
   const inChargeMust = rules.ruleStates?.seniors?.state === "hard";
   const noInCharge = inChargeMust ? (report.seniorGaps || []).map((g) => noInChargeText({
-    ...g, termOne,
+    ...g, termOne, day: prettyWeekday(g.date),
     reasons: whyNoInCharge({ ...g, cells: proposal.cells, data, rules, staff: activeStaff, from: proposal.from, to: proposal.to }),
   })) : [];
 

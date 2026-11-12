@@ -9,7 +9,6 @@
    held as firmly. Pure functions only.                                   */
 
 import { employedOn, shiftISO } from "./rosterConfig";
-import { prettyWeekday } from "./monthBuild";
 
 const LABEL = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
@@ -21,6 +20,7 @@ const PHRASES = {
   skipped: () => ["is skipped", "are skipped"],
   leave: () => ["is on leave", "are on leave"],
   request: () => ["is on an approved duty request", "are on approved duty requests"],
+  kept: () => ["has this day already set on the rota", "have this day already set on the rota"],
   working: (c) => [`is working the ${LABEL[c] || c}`, `are working the ${LABEL[c] || c}`],
   notTheirShift: (sh) => [`does not do ${LABEL[sh]}s`, `do not do ${LABEL[sh]}s`],
   ownRule: () => ["is off by their own rule", "are off by their own rule"],
@@ -33,12 +33,14 @@ const PHRASES = {
 };
 
 /* Why each person who can take charge was not on `shift` on `date`.
-     cells     the proposed week, "staffId|date" -> category
-     data      the rota as saved: staff, codes, cells, duty requests
+     cells     what was built, from..to: "staffId|date" -> category
+     data      the rota as saved: staff, codes, cells, duty requests, week start
      rules     the ward's settings, laid over the defaults
-     staff     everyone on the rota that week (the screen's activeStaff)
+     staff     everyone on the rota then (the screen's activeStaff, or the
+               month build's staff with their leave)
+     kept      for Ini's month: days kept as already set on the rota
    Returns one reason key per person, as [key, arg] pairs.               */
-export function whyNoInCharge({ date, shift, cells, data, rules, staff, from, to }) {
+export function whyNoInCharge({ date, shift, cells, data, rules, staff, from, to, kept = {} }) {
   const catOf = {};
   (data.codes || []).forEach((c) => { catOf[c.id] = c.counts; });
   const saved = (id, d) => {
@@ -51,8 +53,9 @@ export function whyNoInCharge({ date, shift, cells, data, rules, staff, from, to
   const seq = rules.sequenceRules || [];
   const never = (after, then) => seq.some((r) => r.enabled !== false && r.type === "never" && r.after === after && r.then === then);
   const restAfter = (after) => seq.some((r) => r.enabled !== false && r.type === "must" && r.after === after && r.then === "off");
-  const week = [];
-  for (let d = from; d <= to; d = shiftISO(d, 1)) week.push(d);
+  // The ward's own week around the day: a month is judged a week at a time, as the engine judges it.
+  const back = (dowOf(date) - (data.weekStartsOn ?? 0) + 7) % 7;
+  const week = [...Array(7)].map((_, i) => shiftISO(date, i - back));
   const own = (rules.personRules || []).filter(Boolean);
 
   const seniors = (staff || []).filter((s) => (rules.seniorStaff || []).some((id) => String(id) === String(s.id)));
@@ -64,6 +67,7 @@ export function whyNoInCharge({ date, shift, cells, data, rules, staff, from, to
     const today = cells[`${id}|${date}`];
     if (today == null) return ["leave"];                     // a day kept as it was: sick leave and the like
     if (asked && asked.category !== shift) return ["request"];
+    if (kept[`${id}|${date}`]) return ["kept"];
     if (today !== "off") return ["working", today];
 
     const only = rules.staffShifts?.[id];
@@ -95,8 +99,9 @@ export function whyNoInCharge({ date, shift, cells, data, rules, staff, from, to
 /* The sentence. "Night on Tue 17 Nov has no Shift Manager: of your 8, 3
    are on leave, 3 are resting after a night and 2 are off by their own
    rule." — or "all 8 are on leave" where there is one reason. */
-export function noInChargeText({ date, shift, reasons, termOne }) {
-  const head = `${LABEL[shift]} on ${prettyWeekday(date)} has no ${termOne}`;
+// `day` is the date as the screen says it, "Tue 17 Nov" (prettyWeekday).
+export function noInChargeText({ day, shift, reasons, termOne }) {
+  const head = `${LABEL[shift]} on ${day} has no ${termOne}`;
   if (!reasons.length) return `${head}: nobody on the rota this week can take charge.`;
   const groups = [];
   reasons.forEach(([key, ...args]) => {
