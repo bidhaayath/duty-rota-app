@@ -502,6 +502,32 @@ describe("each person's week", () => {
     expect(screen.getByText(/^Switched off: .*Sharing non-official days fairly/)).toBeInTheDocument();
   });
 
+  test("working days in a row at Must says what it costs, and only at Must", async () => {
+    const note = "Must can leave shifts uncovered rather than allow a longer run.";
+    await openWard(rota(undefined));
+    expect(screen.queryByText(note)).toBeNull();
+    choose("Working days in a row: if it can't all fit", "must");
+    expect(screen.getByText(note)).toBeInTheDocument();
+    choose("Working days in a row: if it can't all fit", "soft1");
+    expect(screen.queryByText(note)).toBeNull();
+    // Never saved and following In a row set to Must: it shows Must, so it says so too.
+    cleanup();
+    await openWard(rota({ ruleStates: { workPattern: { state: "hard", priority: 1 } } }));
+    expect(screen.getByText(note)).toBeInTheDocument();
+  });
+
+  test("in-charge at Must says what it costs, in the ward's own word, and only at Must", async () => {
+    await openWard(rota({ seniorTerm: "In-charge", seniorCover: { morning: 1 }, seniorStaff: ["r0", "r1"] }));
+    expect(screen.queryByText(/Must can leave a shift short/)).toBeNull();
+    choose("In-charges on every shift: if it can't all fit", "must");
+    expect(screen.getByText("Must can leave a shift short rather than go without an in-charge.")).toBeInTheDocument();
+    choose("In-charges on every shift: if it can't all fit", "soft1");
+    expect(screen.queryByText(/Must can leave a shift short/)).toBeNull();
+    cleanup();
+    await openWard(rota({ seniorTerm: "Shift Manager", ruleStates: { seniors: { state: "hard", priority: 1 } } }));
+    expect(screen.getByText("Must can leave a shift short rather than go without a shift manager.")).toBeInTheDocument();
+  });
+
   test("the columns list working days in a row on its own once it has its own level", async () => {
     await openWard(rota(undefined));
     const column = (name) => within(screen.getByRole("region", { name })).queryAllByText(/./).map((n) => n.textContent);

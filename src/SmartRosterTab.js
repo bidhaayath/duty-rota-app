@@ -591,7 +591,7 @@ export default function SmartRosterTab({
       )}
 
       {/* ── Who's needed on each shift ── */}
-      <ShiftNeeds {...needs} Card={Card} codes={data.codes} termMany={termMany}>
+      <ShiftNeeds {...needs} Card={Card} codes={data.codes} termMany={termMany} lower={lower}>
         {seniorPerDay > 0 && (
           <p style={{ ...hint, margin: "12px 0 0" }}>
             That is <strong>{seniorPerDay} {seniorPerDay === 1 ? lower : termMany.toLowerCase()} on duty every day</strong>,

@@ -8,7 +8,7 @@
    The pure helpers are exported for the tests.                          */
 
 import React, { useState } from "react";
-import { Plus, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, X, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 import { SHIFTS } from "./rosterEngine";
 import { DEFAULT_RULES, LOOK_BACK_ALL } from "./rosterConfig";
 
@@ -199,6 +199,17 @@ function Stepper({ label, value, onChange, min = 0, max = 99, none, editable, T 
   );
 }
 
+/* Said under a box set to Must where Must costs cover: the same amber note
+   as under a personal "at least" set to Must. */
+function MustCost({ children }) {
+  return (
+    <span style={{ fontSize: 12, color: "#8A5A0F", display: "flex", gap: 6, alignItems: "flex-start", lineHeight: 1.45 }}>
+      <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+      <span>{children}</span>
+    </span>
+  );
+}
+
 const sectionTitle = { fontFamily: "Sora, sans-serif", fontSize: 16, margin: 0 };
 const caption = (T) => ({ fontSize: 12, fontWeight: 600, color: T.inkSoft });
 const mustChip = {
@@ -259,7 +270,7 @@ const swatch = (colour) => ({
    with a number saved. A shift saved as 0 and 0 is not run: it is one
    quiet line, and "Turn on" only shows its card — nothing is written until
    a number changes. */
-export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany, children }) {
+export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany, lower = "senior", children }) {
   const [turnedOn, setTurnedOn] = useState([]);
   // Set to Ignore: the numbers stay saved, but nothing asks for them.
   const seniorsOff = rules.ruleStates?.seniors?.state === "disabled";
@@ -330,10 +341,15 @@ export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", marginTop: 10 }}>
         <span style={{ fontSize: 14, flex: "1 1 240px", minWidth: 0 }}>{termMany} on every shift</span>
-        <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
+        <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
           <StrengthSelect label={`${termMany} on every shift: if it can't all fit`} value={rules.ruleStates?.seniors}
             fallback={ABSENT.seniors} editable={editable} T={T}
             onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, seniors: v } })} />
+          {rules.ruleStates?.seniors?.state === "hard" && (
+            <MustCost>
+              Must can leave a shift short rather than go without {/^[aeiou]/i.test(lower) ? "an" : "a"} {lower}.
+            </MustCost>
+          )}
         </span>
       </div>
       {seniorsOff && (
@@ -517,6 +533,9 @@ export function PersonWeek({ rules, setRules, dropRule, editable, T, Card, codes
             {strength("daysInRow", "Working days in a row: if it can't all fit", rules.ruleStates?.workPattern)}
             {!rules.ruleStates?.daysInRow && (
               <span style={{ fontSize: 12, color: T.inkSoft }}>Follows In a row until you change it.</span>
+            )}
+            {(rules.ruleStates?.daysInRow ?? rules.ruleStates?.workPattern)?.state === "hard" && (
+              <MustCost>Must can leave shifts uncovered rather than allow a longer run.</MustCost>
             )}
           </span>
         </div>
