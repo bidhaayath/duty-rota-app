@@ -197,6 +197,17 @@ export const chosenCodesFor = (rules, codes) => {
   return out;
 };
 
+/* ── How far back ──
+   The look-back is for fairness only. Rest and "what may follow what" read
+   the days just before the period whatever it says — a Night on the last
+   day of last week still earns its rest day — and the engine never reads
+   further back than this for them (runs, days in a row, gaps between).  */
+export const REST_LOOK_DAYS = 14;
+/* "The entire roster": a look-back longer than any rota. Stored as a plain
+   number, so anything that reads lookbackDays as days simply reads it as a
+   very long time — which is what it means. */
+export const LOOK_BACK_ALL = 36500;
+
 /* ── The configuration the engine is given ──
    `staff` is everyone employed somewhere in from..to; `lookFrom`..`lookTo`
    is the history read for fairness. Everything else comes from the ward's
@@ -204,7 +215,17 @@ export const chosenCodesFor = (rules, codes) => {
 export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, lookTo }) => {
   const codeById = codeTextById(data.codes);
   const { termMany, lower } = seniorTermsOf(rules);
-  const history = flattenCells(data.cells, codeById, lookFrom, lookTo);
+  let history = flattenCells(data.cells, codeById, lookFrom, lookTo);
+  /* A look-back shorter than the rest days still hands the engine those
+     days, marked as not for fairness. Only when there is something to add,
+     so a ward that looks back far enough is given exactly what it always
+     was. */
+  const restFrom = shiftISO(lookTo, 1 - REST_LOOK_DAYS);
+  let fairFrom;
+  if (restFrom < lookFrom) {
+    const recent = flattenCells(data.cells, codeById, restFrom, lookTo);
+    if (Object.keys(recent).length > Object.keys(history).length) { history = recent; fairFrom = lookFrom; }
+  }
   /* Somebody who joins on the Wednesday should be rostered from Wednesday,
      not from Sunday. The engine has no notion of employment dates, but it
      does understand leave — so the days outside somebody's employment are
@@ -265,7 +286,11 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     requests: (data.dutyRequests || [])
       .filter((r) => r.approved && r.date >= from && r.date <= to)
       .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category })),
-    history: { cells: history, nonOfficialDates: nonOfficialFor(data, lookFrom, lookTo) },
+    history: {
+      cells: history, nonOfficialDates: nonOfficialFor(data, lookFrom, lookTo),
+      // Fairness counts nothing before this; absent = everything given.
+      ...(fairFrom ? { fairFrom } : {}),
+    },
   };
 };
 
