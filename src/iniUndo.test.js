@@ -127,7 +127,7 @@ test("standing settings and weekly days off save with everything else, one Undo 
   const before = JSON.stringify(api.data);
 
   // What Smart Roster's screen shows: Mariyam's shift chips and the off days.
-  const mariyamChips = () => screen.getAllByText("Mariyam", { selector: "span" })[0].parentElement.textContent;
+  const mariyamChips = () => screen.getByRole("group", { name: "Mariyam" }).textContent;
   const offDays = (row) =>
     screen.getByLabelText(`Each person: off days, ${row === "Fewest" ? "at least" : "at most"}`).textContent;
   expect(mariyamChips()).not.toMatch(/✓/);
@@ -256,7 +256,7 @@ test("senior lines send the ward's word, save in one step with everything else, 
   await screen.findByLabelText("Ask Ini");
   const before = JSON.stringify(api.data);
 
-  const chipsOf = (name) => screen.getAllByText(name, { selector: "span" })[0].parentElement.textContent;
+  const chipsOf = (name) => screen.getByRole("group", { name }).textContent;
   const seniorsOn = (shift) => screen.getByLabelText(`${shift}: in-charges, at least`).textContent;
   expect(chipsOf("Ali")).not.toMatch(/✓ In-charge/);
   expect(chipsOf("Mariyam")).toMatch(/✓ In-charge/);

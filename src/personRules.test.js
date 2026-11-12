@@ -240,46 +240,57 @@ describe("the Personal rules card", () => {
         inputStyle={{}} th={{}} td={{}} uid={() => `p${(n += 1)}`} dstr={iso} onApplied={() => {}} />
     );
   }
-  const choose = (current, value) => fireEvent.change(screen.getByDisplayValue(current), { target: { value } });
-  const add = () => fireEvent.click(screen.getByRole("button", { name: "Add" }));
-  const rowOf = (text) => screen.getByText(text).parentElement;
+  /* The rows of Your staff: a person's row, their rules panel, and the rule being written in it. */
+  const row = (name) => within(screen.getByRole("group", { name }));
+  const openRules = (name) => fireEvent.click(row(name).getByRole("button", { name: /^(\+ Rule|Rules \(\d+\))$/ }));
+  const ruleType = (name, value) => fireEvent.change(screen.getByLabelText(`Add a rule for ${name}`), { target: { value } });
+  const add = () => fireEvent.click(screen.getByRole("button", { name: /Add rule/ }));
+  const addButton = () => screen.getByRole("button", { name: /Add rule/ });
+  const strength = (text, which) => fireEvent.click(within(screen.getByRole("group", { name: `${text}: Must or Try` })).getByRole("button", { name: which }));
+  const remove = (text) => fireEvent.click(screen.getByLabelText(`Remove: ${text}`));
 
-  test("adds a rule as Try, warns on a Must at least, refuses days between with pairs, and removes cleanly", () => {
+  test("adds a rule as Try, warns on a Must at least, refuses a gap between with pairs, and removes cleanly", () => {
     render(<App />);
     // Shau: at most 1 Night a week, the rule as it starts.
-    choose("Choose…", "a0");
+    openRules("Shau");
     expect(screen.getByText("Shau: at most 1 night a week — starts as Try.")).toBeInTheDocument();
     add();
     expect(saved.rosterRules.personRules).toEqual([
       { id: "p1", staffId: "a0", type: "atMost", shift: "night", count: 1, strength: "soft" },
     ]);
-    expect(screen.getByText("At most 1 night a week")).toBeInTheDocument();
+    // On the row as a grey label, and in the panel as a line with Must or Try.
+    expect(row("Shau").getAllByText("At most 1 night a week")).toHaveLength(2);
+    expect(row("Shau").getByRole("button", { name: "Close" })).toBeInTheDocument();
 
     // The same rule again is refused, and Add stays off.
     expect(screen.getByText(/Shau already has "at most 1 night a week"\. Remove it first/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(addButton()).toBeDisabled();
 
     // At least: starts as Try; switched to Must, a warning.
-    choose("At most … a week", "atLeast");
+    ruleType("Shau", "atLeast");
     add();
     expect(saved.rosterRules.personRules[1]).toMatchObject({ type: "atLeast", count: 1, strength: "soft" });
     expect(screen.queryByText(/A Must here can leave another shift uncovered/)).toBeNull();
-    fireEvent.click(within(rowOf("At least 1 night a week")).getByRole("button", { name: "Must" }));
+    strength("At least 1 night a week", "Must");
     expect(saved.rosterRules.personRules[1].strength).toBe("hard");
     expect(screen.getByText(/A Must here can leave another shift uncovered so that Shau gets 1 night/)).toBeInTheDocument();
+    expect(row("Shau").getByText("At least 1 night a week (Must)")).toBeInTheDocument();
 
-    // Mariyam: pairs, then days between on the same shift is refused.
-    choose("Shau", "a1");
-    choose("At least … a week", "together");
+    // Mariyam: pairs, then a gap between on the same shift is refused, under its new name.
+    openRules("Mariyam");
+    ruleType("Mariyam", "together");
     add();
-    choose("Kept in pairs", "apart");
-    expect(screen.getByText(/Mariyam already has "nights kept in pairs"\. Days between and pairs cannot both apply to nights/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    ruleType("Mariyam", "apart");
+    expect(screen.getByRole("option", { name: "Gap between shifts: at least … days" }).selected).toBe(true);
+    expect(screen.getByText(/Mariyam already has "nights kept in pairs"\. A gap between shifts and pairs cannot both apply to nights/)).toBeInTheDocument();
+    expect(addButton()).toBeDisabled();
     expect(saved.rosterRules.personRules).toHaveLength(3);
 
     // Removing every rule leaves nothing saved behind.
-    ["At most 1 night a week", "At least 1 night a week", "Nights kept in pairs"].forEach((text) =>
-      fireEvent.click(within(rowOf(text)).getAllByRole("button").pop()));
+    remove("Nights kept in pairs");
+    openRules("Shau");
+    remove("At most 1 night a week");
+    remove("At least 1 night a week");
     expect("personRules" in saved.rosterRules).toBe(false);
   });
 
@@ -288,25 +299,25 @@ describe("the Personal rules card", () => {
 
   test("rules about days: seven day chips, always off starts as Must, only shifts as Try, and refusals", () => {
     render(<App />);
-    choose("Choose…", "a2");
-    choose("At most … a week", "offOn");
+    openRules("Ana");
+    ruleType("Ana", "offOn");
     // The seven days and no shortcut for a weekend.
     DAYS.forEach((d) => expect(screen.getByRole("button", { name: d })).toBeInTheDocument());
     expect(screen.queryByText(/weekend/i)).toBeNull();
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(addButton()).toBeDisabled();
     tick("Friday"); tick("Saturday");
     expect(screen.getByText("Ana: always off on Friday and Saturday — starts as Must.")).toBeInTheDocument();
     add();
     expect(saved.rosterRules.personRules).toEqual([
       { id: expect.any(String), staffId: "a2", type: "offOn", days: [5, 6], strength: "hard" },
     ]);
-    expect(screen.getByText("Always off on Friday and Saturday")).toBeInTheDocument();
+    expect(row("Ana").getByText("Always off on Friday and Saturday (Must)")).toBeInTheDocument();
 
     // A day already spoken for, in either kind, is refused.
-    choose("Always off on …", "onlyOn");
+    ruleType("Ana", "onlyOn");
     tick("Only mornings");
     expect(screen.getByText(/Ana already has "always off on Friday and Saturday", which covers Friday\. Remove it first/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(addButton()).toBeDisabled();
 
     // Every shift ticked would change nothing.
     tick("Friday"); tick("Saturday"); tick("Thursday");
@@ -317,28 +328,31 @@ describe("the Personal rules card", () => {
     add();
     expect(saved.rosterRules.personRules[1]).toMatchObject(
       { staffId: "a2", type: "onlyOn", days: [4], shifts: ["morning"], strength: "soft" });
-    expect(screen.getByText("On Thursday only mornings")).toBeInTheDocument();
+    expect(row("Ana").getAllByText("On Thursday only mornings")).toHaveLength(2);
 
     // At least more nights than the days left open is refused: four are left.
-    choose("On … only …", "atLeast");
+    ruleType("Ana", "atLeast");
     fireEvent.change(screen.getByLabelText("How many"), { target: { value: "5" } });
     expect(screen.getByText(/Ana's rules about days leave 4 days a week for nights, so at least 5 could never be met/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(addButton()).toBeDisabled();
 
     // More days off than the ward's most of 2: said before Add and after.
-    choose("Ana", "a1");
-    choose("At least … a week", "offOn");
-    tick("Thursday");   // still ticked from Ana's rule
+    openRules("Mariyam");
+    ruleType("Mariyam", "offOn");
     tick("Sunday"); tick("Monday"); tick("Tuesday");
     const note = "That is 3 days off a week, more than the ward's most of 2, so for Mariyam the most off days is 3 and the fewest duties 4.";
     expect(screen.getByText(note)).toBeInTheDocument();
     add();
-    // Now under the saved rule (the draft itself is refused as a repeat).
-    expect(screen.getByText(note).previousElementSibling).toBe(rowOf("Always off on Sunday, Monday and Tuesday"));
+    // Now under the saved rule (the draft itself is refused as a repeat), and said once.
+    expect(screen.getAllByText(note)).toHaveLength(1);
+    expect(screen.getByLabelText("Remove: Always off on Sunday, Monday and Tuesday").parentElement.parentElement)
+      .toHaveTextContent(note);
 
     // Removing them leaves nothing behind.
-    ["Always off on Friday and Saturday", "On Thursday only mornings", "Always off on Sunday, Monday and Tuesday"]
-      .forEach((text) => fireEvent.click(within(rowOf(text)).getAllByRole("button").pop()));
+    remove("Always off on Sunday, Monday and Tuesday");
+    openRules("Ana");
+    remove("Always off on Friday and Saturday");
+    remove("On Thursday only mornings");
     expect("personRules" in saved.rosterRules).toBe(false);
   });
 
@@ -374,26 +388,25 @@ describe("the Personal rules card", () => {
   test("a day too many people are always off by a Must is warned about", () => {
     render(<App count={6} />);
     // Six on the rota and five places a day: two off every Friday leaves four.
-    choose("Choose…", "a0");
-    choose("At most … a week", "offOn");
-    tick("Friday");
+    const offFriday = (name) => { openRules(name); ruleType(name, "offOn"); tick("Friday"); };
+    offFriday("Shau");
     add();
     expect(screen.queryByText(/only \d people are left/)).toBeNull();
-    choose("Shau", "a1");
+    offFriday("Mariyam");
     expect(screen.getByText(/On Friday only 4 people are left for the 5 places the ward fills each day/)).toBeInTheDocument();
     add();
-    // Said once, under the list, not under each Friday rule.
+    // Said once, above the list, not under each Friday rule.
     expect(screen.getAllByText(/On Friday only 4 people are left/)).toHaveLength(1);
     // A third on Friday: Friday is already said, so not again before Add.
-    choose("Mariyam", "a2");
+    offFriday("Ana");
     expect(screen.getAllByText(/On Friday only/)).toHaveLength(1);
     add();
     expect(screen.getAllByText(/On Friday only/)).toHaveLength(1);
     expect(screen.getByText(/On Friday only 3 people are left/)).toBeInTheDocument();
     // Gone once enough of them are Try.
-    const tryOn = (i) => fireEvent.click(within(screen.getAllByText("Always off on Friday")[i].parentElement)
-      .getByRole("button", { name: "Try" }));
-    tryOn(1); tryOn(2);
+    strength("Always off on Friday", "Try");
+    openRules("Mariyam");
+    strength("Always off on Friday", "Try");
     expect(screen.queryByText(/On Friday only/)).toBeNull();
   });
 });
