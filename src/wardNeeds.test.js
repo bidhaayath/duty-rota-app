@@ -293,6 +293,8 @@ const CONTROLS = [
     (r) => ({ weeklyDuties: { ...r.weeklyDuties, min: 4, max: 4 } })],
   ["working days in a row +", () => press("Working days in a row, at most", "more"),
     () => ({ maxDaysOn: 6 })],
+  ["in-charge on every shift, bend if needed", () => choose("Seniors on every shift: if it can't all fit", "soft3"),
+    (r) => ({ ruleStates: { ...r.ruleStates, seniors: { state: "soft", priority: 3 } } })],
   ["In a row on every shift, protect most", () => choose("In a row, every shift: if it can't all fit", "soft1"),
     (r) => ({ ruleStates: { ...r.ruleStates, workPattern: { state: "soft", priority: 1 } } })],
   ["working days in a row, its own Must", () => choose("Working days in a row: if it can't all fit", "must"),
@@ -366,6 +368,32 @@ describe("the shift cards", () => {
     await openWard(rota(undefined));
     fireEvent.click(screen.getByRole("button", { name: "Turn on Evening" }));
     expect(screen.getByLabelText("Evening: seniors, at least: one more")).toBeDisabled();
+    expect(screen.getByLabelText("Morning: seniors, at least: one more")).not.toBeDisabled();
+  });
+
+  test("in-charge on every shift: Protect most until changed, and picking Protect most saves nothing", async () => {
+    const start = await openWard(rota({ seniorCover: { morning: 1 }, seniorStaff: ["r0", "r1", "r2"] }));
+    expect(picked("Seniors on every shift: if it can't all fit")).toBe("Protect most");
+    expect(h.writes).toBe(0);
+    expect(h.data).toBe(start);
+    const column = (name) => within(screen.getByRole("region", { name })).queryAllByText(/./).map((n) => n.textContent);
+    expect(column("Protect most")).toContain("Seniors on every shift");
+    choose("Seniors on every shift: if it can't all fit", "soft4");
+    expect(column("Bend first")).toContain("Seniors on every shift");
+  });
+
+  test("in-charge at Ignore: the numbers stay saved but cannot be changed, and the sum is not said", async () => {
+    await openWard(rota({ seniorCover: { morning: 1, night: 1 }, seniorStaff: ["r0", "r1", "r2"] }));
+    expect(screen.getByText(/on duty every day/)).toBeInTheDocument();
+    choose("Seniors on every shift: if it can't all fit", "ignore");
+    expect(h.data.rosterRules.ruleStates.seniors).toEqual({ state: "disabled", priority: 1 });
+    expect(h.data.rosterRules.seniorCover.morning).toBe(1);
+    expect(shown("Morning: seniors, at least")).toBe("1");
+    expect(screen.getByLabelText("Morning: seniors, at least: one more")).toBeDisabled();
+    expect(screen.getByText("Switched off: no seniors asked for on any shift.")).toBeInTheDocument();
+    expect(screen.queryByText(/on duty every day/)).toBeNull();
+    expect(screen.getByText(/^Switched off: .*Seniors on every shift/)).toBeInTheDocument();
+    act(() => { h.history.undo(); });
     expect(screen.getByLabelText("Morning: seniors, at least: one more")).not.toBeDisabled();
   });
 

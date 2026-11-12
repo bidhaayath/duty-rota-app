@@ -5,8 +5,8 @@
    tool's, and the polish runs a fixed number of steps so every run of a
    week is the same. 1 November 2026 is a Sunday. */
 
-import { generateRoster, rosterContext, datesBetween } from "./rosterEngine";
-import { weekConfig, mergeRules } from "./rosterConfig";
+import { generateRoster, rosterContext, datesBetween, checkFeasible } from "./rosterEngine";
+import { weekConfig, mergeRules, seniorNeedOf } from "./rosterConfig";
 import { prepareMonth } from "./monthBuild";
 import { seededWard } from "../tools/engine-compare/wards";
 
@@ -21,6 +21,96 @@ const weightsOf = (data, start) => {
   const dates = datesBetween(cfg.from, cfg.to);
   return rosterContext(cfg, dates, cfg.staff).W;
 };
+
+/* A seeded ward asking for an in-charge on Mornings and Nights, with every
+   third person able to take charge — or, `few`, with only the first. */
+const withSeniors = (data, few = false) => ({
+  ...data,
+  rosterRules: {
+    ...data.rosterRules,
+    seniorStaff: few ? [data.staff[0].id] : data.staff.filter((_, i) => i % 3 === 0).map((s) => s.id),
+    seniorCover: { morning: 1, afternoon: 0, evening: 0, night: 1 },
+  },
+});
+const gapsOf = (out) => (out.report?.seniorGaps || []).reduce((n, g) => n + g.needed, 0);
+
+describe("in-charge on every shift: ruleStates.seniors", () => {
+  const LEVEL = {
+    must: { state: "hard", priority: 1 }, protectMost: { state: "soft", priority: 1 },
+    protect: { state: "soft", priority: 2 }, bendFirst: { state: "soft", priority: 4 },
+    ignore: { state: "disabled", priority: 1 },
+  };
+
+  test.each(SEEDS)("ward %i: saved at Protect most, the level its box shows, it builds exactly as never saved", (seed) => {
+    const { start, data } = seededWard(seed);
+    const ward = withSeniors(data);
+    expect(build(withStates(ward, { seniors: LEVEL.protectMost }), start)).toBe(build(ward, start));
+  });
+
+  test("too few in-charge staff: never saved, Must and Protect most refuse alike; Protect and weaker warn and build", () => {
+    const { start, data } = seededWard(2);
+    const short = withSeniors(data, true);
+    const refused = generateRoster(steady(weekConfig(short, start)));
+    expect(refused.ok).toBe(false);
+    expect(refused.problems.some((p) => /^Every day needs 2 seniors on duty at once/.test(p))).toBe(true);
+    for (const level of ["must", "protectMost"]) {
+      expect(JSON.stringify(generateRoster(steady(weekConfig(withStates(short, { seniors: LEVEL[level] }), start)))))
+        .toBe(JSON.stringify(refused));
+    }
+    for (const level of ["protect", "bendFirst"]) {
+      const cfg = weekConfig(withStates(short, { seniors: LEVEL[level] }), start);
+      const check = checkFeasible(cfg);
+      expect(check.problems.some((p) => /seniors? on duty at once/.test(p))).toBe(false);
+      expect(check.warnings.some((p) => /^Every day needs 2 seniors on duty at once/.test(p))).toBe(true);
+      const out = generateRoster(steady(cfg));
+      expect(out.ok).toBe(true);
+      expect(gapsOf(out)).toBeGreaterThan(0);
+    }
+  }, 60000);
+
+  test("the price of a shift with nobody in charge: 400 at every Try level, a Must's as Must, nothing at Ignore", () => {
+    const { start, data } = seededWard(1);
+    const ward = withSeniors(data);
+    expect(weightsOf(ward, start).senior).toBe(400);
+    expect(weightsOf(withStates(ward, { seniors: LEVEL.protectMost }), start).senior).toBe(400);
+    expect(weightsOf(withStates(ward, { seniors: LEVEL.bendFirst }), start).senior).toBe(400);
+    expect(weightsOf(withStates(ward, { seniors: LEVEL.must }), start).senior).toBe(5000);
+    expect(weightsOf(withStates(ward, { seniors: LEVEL.ignore }), start).senior).toBe(0);
+  });
+
+  test.each(SEEDS.slice(0, 4))("ward %i: Ignore builds exactly as a ward that asks for no in-charge at all", (seed) => {
+    const { start, data } = seededWard(seed);
+    const ward = withSeniors(data);
+    const none = { ...ward, rosterRules: { ...ward.rosterRules, seniorCover: { morning: 0, afternoon: 0, evening: 0, night: 0 } } };
+    const ignored = generateRoster(steady(weekConfig(withStates(ward, { seniors: LEVEL.ignore }), start)));
+    expect(JSON.stringify(ignored.cells)).toBe(JSON.stringify(generateRoster(steady(weekConfig(none, start))).cells));
+    expect(gapsOf(ignored)).toBe(0);
+  });
+
+  test("Bend first gives up the search sooner: some week comes out differently from never saved", () => {
+    const differs = SEEDS.some((seed) => {
+      const { start, data } = seededWard(seed);
+      const ward = withSeniors(data);
+      return build(withStates(ward, { seniors: LEVEL.bendFirst }), start) !== build(ward, start);
+    });
+    expect(differs).toBe(true);
+  }, 120000);
+
+  test("the in-charge sum on the screen and in Ini asks for none at Ignore", () => {
+    const { data } = seededWard(1);
+    const rules = mergeRules(withSeniors(data).rosterRules);
+    expect(seniorNeedOf(rules, data.staff).seniorPerDay).toBe(2);
+    const ignored = mergeRules(withStates(withSeniors(data), { seniors: LEVEL.ignore }).rosterRules);
+    expect(seniorNeedOf(ignored, data.staff).seniorPerDay).toBe(0);
+  });
+
+  test("Ini's month build hands the engine the same key", () => {
+    const { data } = seededWard(3);
+    const saved = withStates(withSeniors(data), { seniors: LEVEL.bendFirst });
+    expect(prepareMonth({ data: saved, month: "2026-11", lookFrom: null }).config.ruleStates.seniors)
+      .toEqual({ state: "soft", priority: 4 });
+  });
+});
 
 describe("working days in a row: ruleStates.daysInRow", () => {
   test.each(SEEDS)("ward %i: saved at In a row's own level, it builds exactly as never saved", (seed) => {

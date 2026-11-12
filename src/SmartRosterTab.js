@@ -598,7 +598,7 @@ export default function SmartRosterTab({
       <PersonWeek {...needs} Card={Card} codes={data.codes} />
 
       {/* ── What usually gives way first ── */}
-      <GivesWay rules={rules} T={T} Card={Card} />
+      <GivesWay rules={rules} T={T} Card={Card} termMany={termMany} />
 
       {/* ── Exceptions ── */}
       <Card>

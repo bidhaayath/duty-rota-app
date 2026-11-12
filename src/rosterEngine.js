@@ -140,7 +140,22 @@ export function seniorTerms(cfg) {
   return { one, many, a, One: cap(one), Many: cap(many) };
 }
 
+/* How firmly the ward holds its in-charge numbers: ruleStates.seniors.
+   Never saved, Must and Protect most are held as they always have been —
+   the slot is searched for by bending any Try rule, and too few in-charge
+   staff stops the week before it is made. Protect, Bend if needed and Bend
+   first search only by bending Try rules weaker than themselves (`below`
+   is their priority), and too few is said but the week is still made.
+   Ignore asks for no in-charge at all: see seniorsNeededOn.             */
+function seniorHold(cfg) {
+  const s = cfg.ruleStates?.seniors;
+  if (!s?.state || s.state === 'hard') return { refuse: true, below: null };
+  const p = s.priority ?? 2;
+  return p <= 1 ? { refuse: true, below: null } : { refuse: false, below: p };
+}
+
 export function seniorsNeededOn(cfg, shift) {
+  if (cfg.ruleStates?.seniors?.state === 'disabled') return 0;
   const c = cfg.seniorCover;
   if (c == null) return 0;
   if ((cfg.coverage?.[shift]?.min || 0) <= 0) return 0;
@@ -291,14 +306,19 @@ export function checkFeasible(cfg) {
   const T = seniorTerms(cfg);
   const seniors = usable.filter((s) => isSenior(cfg, s));
   const seniorPerDay = SHIFTS.reduce((n, sh) => n + seniorsNeededOn(cfg, sh), 0);
+  /* Too few in-charge staff stops the week where the ward holds its
+     in-charge numbers firmly: never saved, Must or Protect most. At a
+     weaker level it is said, and the week is still made. */
+  const seniorIssue = (msg) => (seniorHold(cfg).refuse ? problems : warnings).push(msg);
+
   if (seniorPerDay > 0) {
     if (!seniors.length) {
-      problems.push(
+      seniorIssue(
         `You have asked for ${T.a} ${T.one} on duty, but nobody is marked as ${T.a} ${T.one}. ` +
         `Tick "${T.One}" for the staff who can take charge of a shift.`
       );
     } else if (seniorPerDay > seniors.length) {
-      problems.push(
+      seniorIssue(
         `Every day needs ${seniorPerDay} ${T.many} on duty at once, but only ` +
         `${seniors.length} ${seniors.length === 1 ? 'person is' : 'people are'} marked as ` +
         `${seniors.length === 1 ? `${T.a} ${T.one}` : T.many}. Mark ${seniorPerDay - seniors.length} ` +
@@ -316,7 +336,7 @@ export function checkFeasible(cfg) {
         return !only || !only.length || only.includes(sh);
       });
       if (eligible.length < need) {
-        problems.push(
+        seniorIssue(
           `${sh}: needs ${need} ${need === 1 ? T.one : T.many}, but only ${eligible.length} ` +
           `${eligible.length === 1 ? `${T.one} is` : `${T.many} are`} allowed to do ${sh} duties. ` +
           `Check the "Only these shifts" settings, or mark another ${T.one}.`
@@ -324,7 +344,7 @@ export function checkFeasible(cfg) {
       }
       const cover = cfg.coverage?.[sh]?.max;
       if (cover != null && need > cover) {
-        problems.push(
+        seniorIssue(
           `${sh}: needs ${need} ${need === 1 ? T.one : T.many} but never runs more than ` +
           `${cover} ${cover === 1 ? 'person' : 'people'}. Raise the ${sh} maximum, or lower ` +
           `the ${T.one} requirement.`
@@ -645,6 +665,11 @@ function costWeights(cfg) {
   w.dutyMax = HARD;
   w.restriction = HARD;
   w.absMax = HARD;
+
+  // A shift with nobody in charge: 400 at every Try level, as always; a Must's price as a Must.
+  const seniors = R.seniors?.state;
+  if (seniors === 'hard') w.senior = HARD;
+  else if (seniors === 'disabled') w.senior = 0;
 
   const seq = stateOf('sequence');
   if (seq === 'hard') { w.sequence = HARD; w.mustRule = 400; }
@@ -2093,12 +2118,22 @@ function buildOnce(cfg, seed, ctx) {
           .sort((a, b) => prioOf(b) - prioOf(a));      // P4 yields first
         // People's own Try rules give way before any of the ward's.
         if (ownTry) relaxable.unshift('personal');
+        /* An in-charge held at Protect or weaker is only searched for by
+           bending what gives way before it — people's own Try rules, and
+           the ward's Try rules at a weaker level. Past that the search
+           stops, the gap is recorded, and the place goes to whoever is free. */
+        const { below } = seniorHold(cfg);
+        const seniorSteps = below == null ? Infinity : (() => {
+          const i = relaxable.findIndex((k) => k !== 'personal' && prioOf(k) <= below);
+          return i < 0 ? relaxable.length : i;
+        })();
 
         let candidates = [];
         let usedLevel = 0;
         let yielded = [];
         // Each step drops one more soft rule; the last step drops everything.
         for (let step = 0; step <= relaxable.length + 1; step++) {
+          if (needSenior && step > seniorSteps) { candidates = []; break; }
           const dropped = new Set(relaxable.slice(0, step));
           const lastResort = step > relaxable.length;
           candidates = available.filter((s) => {

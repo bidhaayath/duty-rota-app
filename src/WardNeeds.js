@@ -93,8 +93,15 @@ export const followText = (r) => {
    first. Only what is actually set: a shift with no most has nothing to
    bend. The Must column always holds what the engine never trades away. */
 export const COLUMNS = ["soft4", "soft3", "soft2", "soft1", "must"];
-export function givesWay(rules) {
+/* What a strength never saved behaves as, and so what its box shows. Any
+   of these, once saved, builds exactly as never saving it. */
+export const ABSENT = {
+  seniors: { state: "soft", priority: 1 },
+};
+
+export function givesWay(rules, { termMany = "Seniors" } = {}) {
   const run = SHIFTS.filter((sh) => rules.coverage?.[sh]?.max !== 0);
+  const asksSenior = run.some((sh) => (rules.coverage?.[sh]?.min || 0) > 0 && (rules.seniorCover?.[sh] || 0) > 0);
   const columns = Object.fromEntries(COLUMNS.map((c) => [c, []]));
   const off = [];
   const own = rules.personRules || [];
@@ -108,13 +115,14 @@ export function givesWay(rules) {
       ? [["In a row, every shift", "workPattern"], ["Working days in a row", "daysInRow"]]
       : [["In a row, and working days in a row", "workPattern"]]),
     ...((rules.sequenceRules || []).length ? [["What may follow what", "sequence"]] : []),
+    ...(asksSenior ? [[`${termMany} on every shift`, "seniors"]] : []),
   ];
   columns.must.push("Staff numbers");
   if (rules.weeklyDuties?.max != null) columns.must.push("Working days (most)");
   columns.must.push("Approved duty requests");
   if (own.some((r) => r && r.strength === "hard")) columns.must.push("People's own Must rules");
   entries.forEach(([text, key]) => {
-    const level = levelOf(rules.ruleStates?.[key]);
+    const level = levelOf(rules.ruleStates?.[key] ?? ABSENT[key]);
     (level === "ignore" ? off : columns[level]).push(text);
   });
   return { columns, off };
@@ -243,6 +251,8 @@ const swatch = (colour) => ({
    a number changes. */
 export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany, children }) {
   const [turnedOn, setTurnedOn] = useState([]);
+  // Set to Ignore: the numbers stay saved, but nothing asks for them.
+  const seniorsOff = rules.ruleStates?.seniors?.state === "disabled";
   const cov = (sh) => rules.coverage?.[sh] || {};
   const notRun = (sh) => (cov(sh).min || 0) === 0 && cov(sh).max === 0;
   const shown = SHIFTS.filter((sh) => (codes || []).some((c) => c.counts === sh) || !notRun(sh));
@@ -285,7 +295,7 @@ export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany
             ))}
             {row(`${termMany}, at least`, (
               <Stepper label={`${LABEL[sh]}: ${termMany.toLowerCase()}, at least`} value={rules.seniorCover?.[sh] ?? 0}
-                max={9} editable={editable && (cov(sh).min || 0) > 0} T={T}
+                max={9} editable={editable && !seniorsOff && (cov(sh).min || 0) > 0} T={T}
                 onChange={(n) => setSeniorCover(sh, n)} />
             ))}
           </div>
@@ -308,7 +318,20 @@ export function ShiftNeeds({ rules, setRules, editable, T, Card, codes, termMany
         <span style={{ fontSize: 14, flex: "1 1 240px" }}>Staff numbers (at least / at most)</span>
         <span style={mustChip}>Must — always</span>
       </div>
-      {children}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", marginTop: 10 }}>
+        <span style={{ fontSize: 14, flex: "1 1 240px", minWidth: 0 }}>{termMany} on every shift</span>
+        <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
+          <StrengthSelect label={`${termMany} on every shift: if it can't all fit`} value={rules.ruleStates?.seniors}
+            fallback={ABSENT.seniors} editable={editable} T={T}
+            onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, seniors: v } })} />
+        </span>
+      </div>
+      {seniorsOff && (
+        <p style={{ fontSize: 12.5, color: T.inkSoft, margin: "6px 0 0" }}>
+          Switched off: no {termMany.toLowerCase()} asked for on any shift.
+        </p>
+      )}
+      {!seniorsOff && children}
     </Card>
   );
 }
@@ -492,8 +515,8 @@ const COLUMN_HINT = {
   soft4: "Bent before anything else", soft3: "Bent when needed", soft2: "Kept unless it would leave a gap",
   soft1: "Bent only as a last resort", must: "Always kept, even if a shift goes short",
 };
-export function GivesWay({ rules, T, Card }) {
-  const { columns, off } = givesWay(rules);
+export function GivesWay({ rules, T, Card, termMany }) {
+  const { columns, off } = givesWay(rules, { termMany });
   return (
     <Card>
       <h3 style={sectionTitle}>When it can't all fit, what usually gives way first</h3>
