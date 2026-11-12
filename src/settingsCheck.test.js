@@ -275,22 +275,24 @@ describe("the banner on the screen", () => {
     );
   }
   const FULL = over({ coverage: { morning: { min: 4, max: 4 }, afternoon: { min: 4, max: 4 } } });
-  // The first boxes on the page: Morning fewest, Morning most.
-  const box = (i) => screen.getAllByRole("spinbutton")[i];
+  // A − or + on the page, by the number it changes.
+  const press = (label, which, times = 1) => {
+    for (let i = 0; i < times; i++) fireEvent.click(screen.getByLabelText(`${label}: one ${which}`));
+  };
   const banner = () => screen.getAllByRole("status")[0];
   const generate = () => screen.getByRole("button", { name: /Generate this week/ });
 
   test("green while the settings fit, amber the moment a box stops them fitting, green again when put back", () => {
     render(<App />);
     expect(banner()).toHaveTextContent("These settings fit your 15 staff.");
-    fireEvent.change(box(0), { target: { value: "9" } });
-    expect(banner()).toHaveTextContent("These settings do not add up yet. Morning: at least 9 on duty, but at most 5. "
+    press("Morning: at least", "more", 2);
+    expect(banner()).toHaveTextContent("These settings do not add up yet. Morning: at least 6 on duty, but at most 5. "
       + "Generate cannot make a week until this is changed.");
     // Said once: the engine's own line for it is left out below.
-    expect(screen.queryByText(/the maximum \(5\) is below the minimum \(9\)/)).toBeNull();
+    expect(screen.queryByText(/the maximum \(5\) is below the minimum \(6\)/)).toBeNull();
     // Generate is never held back by the banner.
     expect(generate()).not.toBeDisabled();
-    fireEvent.change(box(0), { target: { value: "4" } });
+    press("Morning: at least", "fewer", 2);
     expect(banner()).toHaveTextContent("These settings fit your 15 staff.");
   });
 
@@ -306,7 +308,8 @@ describe("the banner on the screen", () => {
     expect(banner()).toHaveTextContent("Changed — Morning: at most 4 → 5. Undo puts it back.");
     expect(screen.queryByRole("button", { name: /Fix it for me/ })).toBeNull();
     // The next change to the settings takes the note away.
-    fireEvent.change(box(1), { target: { value: "6" } });
+    press("Morning: at most", "more");
+    expect(saved.rosterRules.coverage.morning).toEqual({ min: 4, max: 6 });
     expect(banner()).toHaveTextContent("These settings fit your 15 staff.");
     expect(banner()).not.toHaveTextContent("Changed");
   });
@@ -317,9 +320,10 @@ describe("the banner on the screen", () => {
     expect(screen.queryByText(/even with every shift at its fullest/)).toBeNull();
     expect(screen.getByText(/will get no night duty this week/)).toBeInTheDocument();
     // With the banner on an earlier problem, the engine's sum is not the same thing, and is shown.
-    fireEvent.change(screen.getByLabelText("In a row — fewest — Night"), { target: { value: "2" } });
-    // Twelve boxes for staff on each shift, five for Fewest, then Most: Night is the fourth of those.
-    fireEvent.change(box(20), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Night: in a row"), { target: { value: "pairs" } });
+    expect(saved.rosterRules.blockTogether).toEqual({ night: 2 });
+    // Night at most: from No limit, − gives 7, and six more give 1.
+    press("Each person: Night, at most", "fewer", 7);
     expect(saved.rosterRules.weeklyMax.night).toBe(1);
     expect(banner()).toHaveTextContent("Night is set to come 2 together, but each person gets at most 1 Night a week.");
     expect(screen.getByText(/^Duties per week: /)).toBeInTheDocument();

@@ -89,6 +89,17 @@ Five columns, left to right: Bend first → Bend if needed → Protect → Prote
 ### "What may follow what" (collapsed by default)
 Header shows "N rules · [level]". Inside: rules as sentences ("Never give Morning after Night", "Always give an off day after Night") with a remove button; the existing builder (Never/Always give · duty · after · duty · Add); **Reset to the usual rules**; one strength box for the group.
 
+### As built in stage 2 (`src/WardNeeds.js`)
+- **Page order kept** until stage 5: banner, Who's needed on each shift, Each person each week (with working days, In a row and the look-back, moved up from More rules), What usually gives way first, Staff exceptions, Personal rules, What may follow what (collapsed), Which code to write (collapsed, unchanged inside), Generate.
+- **Same keys, same writes.** Every control writes through the existing `setRules`, the key the old box wrote: `coverage[sh].min/max`, `seniorCover[sh]`, `weeklyMin/weeklyMax[sh|off]`, `blockTogether[sh]` + `blockDays[sh]`, `ruleStates[…]`, `weeklyDuties.min/max`, `maxDaysOn`, `lookbackDays`, `sequenceRules`. Nothing is written on opening or by re-picking the current option. Two accepted differences: the six-level box for what may follow what writes priority 1 for Must and Ignore (the old buttons kept the previous number; the engine ignores it at those levels), and a shift's "at most" cannot be emptied again once it has a number (an empty one still shows as "No limit").
+- **Shift cards:** one for every shift the ward has a duty code for, plus any shift with a non-zero number saved. A shift saved as 0 / 0 is a slim line, "Evening: not run on this ward.", with **Turn on Evening**: that only shows the card, and nothing is written until a number changes. An empty "at most" shows "No limit"; − sets it to the "at least" (never below 1) and + stays off.
+- **Each person:** rows only for shifts the ward runs, plus Off days. "At most" runs 0–7 then **No limit** (saved as empty). Off days' In a row is fixed text, "Spread apart", until stage 8.
+- **In a row** options as listed above, with **Up to 2 in a row**. Picking an option writes only the box that changes: a fewest that is already empty or 1 is left alone.
+- **Working days:** one − / + writing fewest and most together when they are equal; when they differ, "Custom" with two − / + (fewest, most), each writing its own key. Fixed **Must** label.
+- **Working days in a row** shares its strength box with In a row (`workPattern`), and says so.
+- **Gives way first:** columns built from the saved strengths, only for what is set (a shift with no most has nothing to bend). Also shown: **People's own Try rules** (Bend first, which is what the engine bends first), **People's own Must rules** and **Most off days** (`offMax`) in their columns. Ignore is listed under the columns as "Switched off: …". One line under them: "Always aimed for, but not promised: fewest of each shift, fewest working days." **Duties you fixed** joins the Must column in stage 4.
+- Every − / +, select and remove button is at least 44 × 44px. The rows wrap at phone width rather than scrolling sideways.
+
 ## Step 2 — Your staff
 
 One list of every staff member. Each row:
@@ -149,8 +160,8 @@ Things that change how an existing department's roster is built: only stage 0 (a
 | # | Stage | Kind | Status |
 |---|---|---|---|
 | 0 | **Look-back fix.** Rest and "what may follow what" always read the 14 days before the period; fairness counts only from the look-back start (`history.fairFrom`, added only when needed). "The entire roster" = `36500`. Set lookup for non-official dates. Ini's label and sentence for the entire roster. Smart Roster's look-back box gains "The entire roster" and "Custom (N days)". | **Engine (small)** | Merged (PR #71) |
-| 1 | **Live check banner** in today's layout | Screen only | In progress on `settings-check-banner` |
-| 2 | **Step 1 controls**: shift cards with − / +, the per-person table with the In a row dropdown, strength boxes, Working days with a fixed Must label, look-back row, the "usually gives way first" columns. The in-charge strength and the two fairness rows stay hidden until 2b. Prove saved settings round-trip unchanged. | Screen only | |
+| 1 | **Live check banner** in today's layout | Screen only | Merged (PR #72) |
+| 2 | **Step 1 controls**: shift cards with − / +, the per-person table with the In a row dropdown, strength boxes, Working days with a fixed Must label, look-back row, the "usually gives way first" columns. The in-charge strength and the two fairness rows stay hidden until 2b. Prove saved settings round-trip unchanged. | Screen only | In progress on `ward-needs-controls` |
 | 2b | **New strength keys**: a separate key for working days in a row (falls back to `workPattern`), in-charge strength, night and non-official fairness (Protect most to Ignore), off days "Together is fine" passed through. All mean today's behaviour when absent. | **Engine (medium)** | |
 | 3 | **Step 2 Your staff**: merge Staff exceptions, Personal rules and request labels into one list with the inline rule panel. | Screen only | |
 | 4 | **Manager-fixed duty** (engine + panel type 7). | **Engine (small)** + screen | |

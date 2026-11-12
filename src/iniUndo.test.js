@@ -128,10 +128,8 @@ test("standing settings and weekly days off save with everything else, one Undo 
 
   // What Smart Roster's screen shows: Mariyam's shift chips and the off days.
   const mariyamChips = () => screen.getAllByText("Mariyam", { selector: "span" })[0].parentElement.textContent;
-  const offDays = (row) => {
-    const inputs = screen.getByText(row, { selector: "td" }).closest("tr").querySelectorAll("input");
-    return inputs[inputs.length - 1].value;
-  };
+  const offDays = (row) =>
+    screen.getByLabelText(`Each person: off days, ${row === "Fewest" ? "at least" : "at most"}`).textContent;
   expect(mariyamChips()).not.toMatch(/✓/);
   expect([offDays("Fewest"), offDays("Most")]).toEqual(["1", "2"]);
 
@@ -181,12 +179,12 @@ test("days and nights in a row save in one step, Smart Roster shows them, and on
   await screen.findByLabelText("Ask Ini");
   const before = JSON.stringify(api.data);
 
-  const daysBox = () => screen.getByLabelText("Days in a row (most)");
-  const nightsBox = () => {
-    const inputs = screen.getByText("In a row — most", { selector: "td" }).closest("tr").querySelectorAll("input");
-    return inputs[inputs.length - 1];
+  const days = () => screen.getByLabelText("Working days in a row, at most").textContent;
+  const nights = () => {
+    const box = screen.getByLabelText("Night: in a row");
+    return box.options[box.selectedIndex].text;
   };
-  expect([daysBox().value, nightsBox().value]).toEqual(["5", "2"]);
+  expect([days(), nights()]).toEqual(["5", "Up to 2 in a row"]);
 
   fireEvent.click(screen.getByLabelText("Ask Ini"));
   fireEvent.click(await screen.findByText("Choose dates"));
@@ -204,35 +202,41 @@ test("days and nights in a row save in one step, Smart Roster shows them, and on
   expect(api.data.rosterRules.maxDaysOn).toBe(3);
   expect(api.data.rosterRules.blockDays.night).toBe(3);
   expect(api.data.cells["2026-11-09"].ali).toBe("N");
-  expect([daysBox().value, nightsBox().value]).toEqual(["3", "3"]);
+  expect([days(), nights()]).toEqual(["3", "Up to 3 in a row"]);
 
   act(() => { api.history.undo(); });
   expect(JSON.stringify(api.data)).toBe(before);
-  expect([daysBox().value, nightsBox().value]).toEqual(["5", "2"]);
+  expect([days(), nights()]).toEqual(["5", "Up to 2 in a row"]);
 });
 
-test("the Days in a row box: 5 by default, saves 1–6 only, and Undo reverts it", async () => {
+test("Working days in a row: 5 by default, stays within 1–6, and Undo reverts it", async () => {
   render(<App withSmartRoster />);
   act(() => { api.open(loaded()); });
-  const box = await screen.findByLabelText("Days in a row (most)");
+  await screen.findByLabelText("Working days in a row, at most");
   const before = JSON.stringify(api.data);
-  expect(box.value).toBe("5");
+  const days = () => screen.getByLabelText("Working days in a row, at most").textContent;
+  const more = () => screen.getByLabelText("Working days in a row, at most: one more");
+  const fewer = () => screen.getByLabelText("Working days in a row, at most: one fewer");
+  expect(days()).toBe("5");
 
-  // 0 and 7 are refused: nothing saved, no Undo step, the box keeps 5.
-  fireEvent.change(box, { target: { value: "0" } });
-  fireEvent.change(box, { target: { value: "7" } });
-  expect(api.history.depth).toBe(0);
-  expect(JSON.stringify(api.data)).toBe(before);
-  expect(screen.getByLabelText("Days in a row (most)").value).toBe("5");
-
-  fireEvent.change(box, { target: { value: "4" } });
-  expect(api.data.rosterRules.maxDaysOn).toBe(4);
-  expect(screen.getByLabelText("Days in a row (most)").value).toBe("4");
+  fireEvent.click(more());
+  expect(api.data.rosterRules.maxDaysOn).toBe(6);
+  expect(days()).toBe("6");
+  expect(api.history.depth).toBe(1);
+  // 7 is refused: + is off at 6, so nothing more is saved.
+  expect(more()).toBeDisabled();
+  fireEvent.click(more());
   expect(api.history.depth).toBe(1);
 
   act(() => { api.history.undo(); });
   expect(JSON.stringify(api.data)).toBe(before);
-  expect(screen.getByLabelText("Days in a row (most)").value).toBe("5");
+  expect(days()).toBe("5");
+
+  // And 0 is refused: − is off at 1.
+  for (let i = 0; i < 4; i++) fireEvent.click(fewer());
+  expect(days()).toBe("1");
+  expect(fewer()).toBeDisabled();
+  expect(api.data.rosterRules.maxDaysOn).toBe(1);
 });
 
 test("senior lines send the ward's word, save in one step with everything else, and Smart Roster shows them", async () => {
@@ -253,10 +257,7 @@ test("senior lines send the ward's word, save in one step with everything else, 
   const before = JSON.stringify(api.data);
 
   const chipsOf = (name) => screen.getAllByText(name, { selector: "span" })[0].parentElement.textContent;
-  const seniorsOn = (shift) => {
-    const inputs = screen.getAllByText(shift, { selector: "td" })[0].closest("tr").querySelectorAll("input");
-    return inputs[inputs.length - 1].value;
-  };
+  const seniorsOn = (shift) => screen.getByLabelText(`${shift}: in-charges, at least`).textContent;
   expect(chipsOf("Ali")).not.toMatch(/✓ In-charge/);
   expect(chipsOf("Mariyam")).toMatch(/✓ In-charge/);
   expect([seniorsOn("Morning"), seniorsOn("Night")]).toEqual(["0", "0"]);
