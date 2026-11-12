@@ -293,8 +293,10 @@ const CONTROLS = [
     (r) => ({ weeklyDuties: { ...r.weeklyDuties, min: 4, max: 4 } })],
   ["working days in a row +", () => press("Working days in a row, at most", "more"),
     () => ({ maxDaysOn: 6 })],
-  ["working pattern, protect most", () => choose("Working days in a row: if it can't all fit", "soft1"),
+  ["In a row on every shift, protect most", () => choose("In a row, every shift: if it can't all fit", "soft1"),
     (r) => ({ ruleStates: { ...r.ruleStates, workPattern: { state: "soft", priority: 1 } } })],
+  ["working days in a row, its own Must", () => choose("Working days in a row: if it can't all fit", "must"),
+    (r) => ({ ruleStates: { ...r.ruleStates, daysInRow: { state: "hard", priority: 1 } } })],
   ["look back 90 days", () => choose(/^Look back at past duties/, "90"),
     () => ({ lookbackDays: 90 })],
   ["remove a rule for what may follow what", () => { openFollow(); fireEvent.click(screen.getByLabelText("Remove: Never give Morning after Night")); },
@@ -410,7 +412,35 @@ describe("each person's week", () => {
   test("working days carries a fixed Must, and working days in a row says what it shares", async () => {
     await openWard(rota(undefined));
     expect(within(screen.getByText("Working days").parentElement).getByText("Must")).toBeInTheDocument();
-    expect(screen.getByText("Shared with In a row on every shift.")).toBeInTheDocument();
+    expect(screen.getByText("Follows In a row until you change it.")).toBeInTheDocument();
+  });
+
+  test("working days in a row shows In a row's level until it has its own, and picking that level saves nothing", async () => {
+    const start = await openWard(rota(undefined));
+    expect(picked("In a row, every shift: if it can't all fit")).toBe("Bend first");
+    expect(picked("Working days in a row: if it can't all fit")).toBe("Bend first");
+    // Following In a row: change In a row, and working days in a row shows the same.
+    choose("In a row, every shift: if it can't all fit", "soft2");
+    expect(picked("Working days in a row: if it can't all fit")).toBe("Protect");
+    expect(h.data.rosterRules.ruleStates.daysInRow).toBeUndefined();
+    act(() => { h.history.undo(); });
+    expect(h.data).toEqual(start);
+    // Its own level, once picked: the hint goes and In a row no longer moves it.
+    choose("Working days in a row: if it can't all fit", "ignore");
+    expect(h.data.rosterRules.ruleStates.daysInRow).toEqual({ state: "disabled", priority: 1 });
+    expect(screen.queryByText("Follows In a row until you change it.")).toBeNull();
+    choose("In a row, every shift: if it can't all fit", "must");
+    expect(picked("Working days in a row: if it can't all fit")).toBe("Ignore (off)");
+  });
+
+  test("the columns list working days in a row on its own once it has its own level", async () => {
+    await openWard(rota(undefined));
+    const column = (name) => within(screen.getByRole("region", { name })).queryAllByText(/./).map((n) => n.textContent);
+    expect(column("Bend first")).toContain("In a row, and working days in a row");
+    choose("Working days in a row: if it can't all fit", "must");
+    expect(column("Must")).toContain("Working days in a row");
+    expect(column("Bend first")).toContain("In a row, every shift");
+    expect(column("Bend first")).not.toContain("In a row, and working days in a row");
   });
 
   test("one short line to open, and the at least hint said once for the table", async () => {

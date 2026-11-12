@@ -651,8 +651,12 @@ function costWeights(cfg) {
   else if (seq === 'disabled') { w.sequence = 0; w.mustRule = 0; }
 
   const pattern = stateOf('workPattern');
-  if (pattern === 'hard') { w.block = HARD; w.consecutive = HARD; }
-  else if (pattern === 'disabled') { w.block = 0; w.consecutive = 0; w.doubleOff = 0; }
+  if (pattern === 'hard') w.block = HARD;
+  else if (pattern === 'disabled') { w.block = 0; w.doubleOff = 0; }
+  // Working days in a row: its own strength where one is saved, else the working pattern's.
+  const days = R.daysInRow?.state || pattern;
+  if (days === 'hard') w.consecutive = HARD;
+  else if (days === 'disabled') w.consecutive = 0;
 
   const offMin = stateOf('offMin');
   if (offMin === 'hard') w.offMin = HARD;
@@ -2078,7 +2082,13 @@ function buildOnce(cfg, seed, ctx) {
         // priority: a ward may guard its night limit fiercely while letting
         // the morning limit stretch.
         const capKey = `weeklyCaps:${shift}`;
-        const relaxable = [capKey, 'workPattern', 'offMin', 'sequence']
+        /* Working days in a row has a strength of its own once one is saved
+           that differs from the working pattern's. Saved the same, or not
+           at all, the two are one rule, held and bent together as always. */
+        const daysOwn = !!R.daysInRow?.state && (R.daysInRow.state !== stateOf('workPattern')
+          || (R.daysInRow.state === 'soft' && prioOf('daysInRow') !== prioOf('workPattern')));
+        const daysKey = daysOwn ? 'daysInRow' : 'workPattern';
+        const relaxable = [capKey, 'workPattern', ...(daysOwn ? ['daysInRow'] : []), 'offMin', 'sequence']
           .filter((k) => stateOf(k) === 'soft')
           .sort((a, b) => prioOf(b) - prioOf(a));      // P4 yields first
         // People's own Try rules give way before any of the ward's.
@@ -2127,6 +2137,9 @@ function buildOnce(cfg, seed, ctx) {
             if (stateOf('workPattern') !== 'disabled' && !dropped.has('workPattern')
                 && (!lastResort || stateOf('workPattern') === 'hard')) {
               if (runOf(s.id, shift, date) >= maxBlock(s.id, shift)) return false;
+            }
+            if (stateOf(daysKey) !== 'disabled' && !dropped.has(daysKey)
+                && (!lastResort || stateOf(daysKey) === 'hard')) {
               if (workedRun(s.id, date) >= maxDaysOn) return false;
             }
             if (!singleShift && stateOf('offMin') !== 'disabled' && !dropped.has('offMin')
@@ -2147,7 +2160,7 @@ function buildOnce(cfg, seed, ctx) {
         }
         if (usedLevel > 0 && candidates.length) {
           const NICE = {
-            workPattern: 'working pattern', offMin: 'off days', sequence: 'duty rule',
+            workPattern: 'working pattern', daysInRow: 'days in a row', offMin: 'off days', sequence: 'duty rule',
             personal: 'personal rules',
           };
           const label = (k) => k.startsWith('weeklyCaps:')

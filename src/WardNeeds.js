@@ -103,7 +103,10 @@ export function givesWay(rules) {
     ...run.filter((sh) => rules.weeklyMax?.[sh] != null).map((sh) => [`Most ${LABEL[sh]}s a week`, `weeklyCaps:${sh}`]),
     ...(rules.weeklyMin?.off != null ? [["Fewest off days", "offMin"]] : []),
     ...(rules.weeklyMax?.off != null ? [["Most off days", "offMax"]] : []),
-    ["In a row, and working days in a row", "workPattern"],
+    // Working days in a row is its own rule once it has a strength of its own.
+    ...(rules.ruleStates?.daysInRow
+      ? [["In a row, every shift", "workPattern"], ["Working days in a row", "daysInRow"]]
+      : [["In a row, and working days in a row", "workPattern"]]),
     ...((rules.sequenceRules || []).length ? [["What may follow what", "sequence"]] : []),
   ];
   columns.must.push("Staff numbers");
@@ -126,8 +129,12 @@ const fieldStyle = (T, editable) => ({
 
 /* The strength box for one ruleStates key, tinted by its level. Only a real
    change is written; re-picking the same option saves nothing. */
-export function StrengthSelect({ value, onPick, label, editable, T }) {
-  const cur = scaleIdOf(value);
+/* `fallback` is what a key that has never been saved behaves as, and so
+   what the box shows for it: picking that same level saves nothing, and
+   saving it behaves exactly as not having saved it. */
+export function StrengthSelect({ value, fallback, onPick, label, editable, T }) {
+  const shown = value ?? fallback;
+  const cur = scaleIdOf(shown);
   const known = STRENGTH_SCALE.some((o) => o.id === cur);
   return (
     <select aria-label={label} value={cur} disabled={!editable}
@@ -136,9 +143,9 @@ export function StrengthSelect({ value, onPick, label, editable, T }) {
         if (!pick || pick.id === cur) return;
         onPick({ state: pick.state, priority: pick.priority });
       }}
-      style={{ ...fieldStyle(T, editable), background: tintOf(value) }}>
+      style={{ ...fieldStyle(T, editable), background: tintOf(shown) }}>
       {STRENGTH_SCALE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-      {!known && <option value={cur}>Bend (P{value?.priority})</option>}
+      {!known && <option value={cur}>Bend (P{shown?.priority})</option>}
     </select>
   );
 }
@@ -323,8 +330,8 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
   const example = run.includes("night") ? "night" : (run[0] || "night");
   const field = fieldStyle(T, editable);
   const setIn = (group, key, n) => setRules({ [group]: { ...rules[group], [key]: n } });
-  const strength = (key, label) => (
-    <StrengthSelect label={label} value={rules.ruleStates?.[key]} editable={editable} T={T}
+  const strength = (key, label, fallback) => (
+    <StrengthSelect label={label} value={rules.ruleStates?.[key]} fallback={fallback} editable={editable} T={T}
       onPick={(v) => setRules({ ruleStates: { ...rules.ruleStates, [key]: v } })} />
   );
   const most = { text: "No limit", down: 7, reachable: true };
@@ -413,6 +420,15 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
       </p>
 
       <div style={{ marginTop: 14, borderTop: `1px solid ${T.line}` }}>
+        {/* One strength for In a row on every shift: the working pattern. */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
+                      borderBottom: `1px solid ${T.line}` }}>
+          <span style={{ fontSize: 15, flex: "1 1 200px", minWidth: 0 }}>In a row, every shift</span>
+          <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
+            {strength("workPattern", "In a row, every shift: if it can't all fit")}
+            <span style={{ fontSize: 12, color: T.inkSoft }}>Ignore also stops keeping off days apart.</span>
+          </span>
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0",
                       borderBottom: `1px solid ${T.line}` }}>
           <span style={{ fontSize: 15, flex: "1 1 200px", minWidth: 0 }}>
@@ -444,8 +460,11 @@ export function PersonWeek({ rules, setRules, editable, T, Card, codes }) {
           <Stepper label="Working days in a row, at most" value={rules.maxDaysOn ?? 5} min={1} max={6}
             editable={editable} T={T} onChange={(n) => setRules({ maxDaysOn: n })} />
           <span style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 4, flex: "1 1 190px", minWidth: 0, maxWidth: 260 }}>
-            {strength("workPattern", "Working days in a row: if it can't all fit")}
-            <span style={{ fontSize: 12, color: T.inkSoft }}>Shared with In a row on every shift.</span>
+            {/* Never saved: it is the working pattern's, and says so. */}
+            {strength("daysInRow", "Working days in a row: if it can't all fit", rules.ruleStates?.workPattern)}
+            {!rules.ruleStates?.daysInRow && (
+              <span style={{ fontSize: 12, color: T.inkSoft }}>Follows In a row until you change it.</span>
+            )}
           </span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 16px", padding: "12px 0" }}>
