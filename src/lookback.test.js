@@ -109,11 +109,9 @@ describe("the look-back box", () => {
         inputStyle={{}} th={{}} td={{}} uid={() => "p1"} dstr={iso} onApplied={() => {}} />
     );
   }
-  const open = () => fireEvent.click(screen.getByRole("button", { name: "More rules" }));
 
   test("offers the entire roster, and saves it as a very long look-back", () => {
     render(<App />);
-    open();
     fireEvent.change(screen.getByDisplayValue("Last 30 days"), { target: { value: String(LOOK_BACK_ALL) } });
     expect(saved.rosterRules.lookbackDays).toBe(LOOK_BACK_ALL);
     expect(screen.getByDisplayValue("The entire roster")).toBeInTheDocument();
@@ -121,7 +119,6 @@ describe("the look-back box", () => {
 
   test("a saved number not on the list is shown as Custom and left alone", () => {
     render(<App rosterRules={{ lookbackDays: 28 }} />);
-    open();
     expect(screen.getByDisplayValue("Custom (28 days)")).toBeInTheDocument();
     expect(saved.rosterRules).toEqual({ lookbackDays: 28 });
   });

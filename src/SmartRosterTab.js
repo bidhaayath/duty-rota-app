@@ -1,7 +1,7 @@
 /* ─────────────── Smart Roster ───────────────
-   One week at a time. The settings that matter are on the page; everything
-   else has a sensible default and lives under "More rules" for the rare
-   occasion someone needs to change it.
+   One week at a time. The settings that matter are on the page — what the
+   ward needs is in WardNeeds.js — and everything else has a sensible
+   default and sits folded away for the rare occasion someone needs it.
 
    What it is trying to do, in order:
      1. Cover every shift with the number of staff you asked for, and with
@@ -21,15 +21,14 @@ import { prettyWeekday } from "./monthBuild";
    rosterConfig.js, shared with Ini's month builder so the two never drift
    apart. Moved there unchanged; rosterConfig.test.js proves it. */
 import {
-  DEFAULT_RULES, mergeRules, seniorTermsOf, seniorNeedOf,addDays, shiftISO, employedOn,
+  mergeRules, seniorTermsOf, seniorNeedOf,addDays, shiftISO, employedOn,
   weekDatesFrom, activeStaffFor, codeTextById, codeIdByText, flattenCells,
-  chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches, LOOK_BACK_ALL,
+  chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches,
 } from "./rosterConfig";
 import { checkSettings, settingsKey } from "./settingsCheck";
+import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
-const SEQ_CATS = [...SHIFTS, "off"];
-const SEQ_LABELS = { ...SHIFT_LABELS, off: "Off day" };
 
 /* Back to the start of whatever the ward calls a week — Sunday in the
    Maldives, Monday across much of Europe. 0 is Sunday, matching JavaScript's
@@ -40,56 +39,6 @@ const weekStartOf = (d, firstDay = 0) => {
   return x;
 };
 const DAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-/* What an empty "In a row — most" box stores: longer than any run can be, so the
-   engine never stops a run for it. A missing value would mean its default. */
-const NO_LIMIT = 99;
-
-/* State and priority as one scale, strongest first. A rule with no saved
-   entry is Must, because that is what the engine does with it. */
-const STRENGTH_SCALE = [
-  { id: "must", label: "Must", state: "hard", priority: 1 },
-  { id: "soft1", label: "Protect most", state: "soft", priority: 1 },
-  { id: "soft2", label: "Protect", state: "soft", priority: 2 },
-  { id: "soft3", label: "Bend if needed", state: "soft", priority: 3 },
-  { id: "soft4", label: "Bend first", state: "soft", priority: 4 },
-  { id: "ignore", label: "Ignore", state: "disabled", priority: 1 },
-];
-// A soft priority outside 1–4 keeps its own id, so it is shown as it is.
-const scaleIdOf = (v) => {
-  if (!v?.state || v.state === "hard") return "must";
-  if (v.state === "disabled") return "ignore";
-  return `soft${v.priority ?? 2}`;
-};
-
-/* Must, Try with a priority, or Ignore. Sits beside a section heading so the
-   strength of a whole group of rules is set in one place. */
-function Strength({ value, onChange, disabled, T, sel }) {
-  const st = value?.state || "soft";
-  const pr = value?.priority ?? 2;
-  return (
-    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-      <span style={{ display: "inline-flex", borderRadius: 7, overflow: "hidden", border: `1px solid ${T.line}` }}>
-        {["hard", "soft", "disabled"].map((v) => (
-          <button key={v} disabled={disabled} onClick={() => onChange({ state: v, priority: pr })}
-            style={{ fontFamily: "inherit", fontSize: 11, fontWeight: 700, border: "none",
-              padding: "4px 9px", cursor: disabled ? "not-allowed" : "pointer",
-              background: st === v ? (v === "hard" ? T.lagoon : v === "soft" ? T.sand : "#9AACA9") : "transparent",
-              color: st === v ? "#fff" : T.inkSoft }}>
-            {v === "hard" ? "Must" : v === "soft" ? "Try" : "Ignore"}
-          </button>
-        ))}
-      </span>
-      {st === "soft" && (
-        <select value={pr} disabled={disabled} style={{ ...sel, minWidth: 110, padding: "4px 6px", fontSize: 11.5 }}
-          onChange={(e) => onChange({ state: st, priority: Number(e.target.value) })}>
-          <option value={1}>Protect most</option><option value={2}>Protect</option>
-          <option value={3}>Bend if needed</option><option value={4}>Bend first</option>
-        </select>
-      )}
-    </span>
-  );
-}
 
 /* Must or Try for one person's rule. No Ignore: a rule nobody wants is removed. */
 function MustTry({ value, onChange, disabled, T }) {
@@ -387,10 +336,6 @@ export default function SmartRosterTab({
     setVerify({ writes, before: data, week: weekStart, deptId });
   };
 
-  const setCoverage = (shift, key, v) =>
-    setRules({ coverage: { ...rules.coverage, [shift]: { ...rules.coverage[shift], [key]: v === "" ? null : Number(v) } } });
-  const setSeniorCover = (shift, v) =>
-    setRules({ seniorCover: { ...rules.seniorCover, [shift]: v === "" ? 0 : Math.max(0, Number(v) || 0) } });
   const toggleSkip = (id) =>
     setRules({ skipStaff: rules.skipStaff.includes(id) ? rules.skipStaff.filter((x) => x !== id) : [...rules.skipStaff, id] });
   const toggleSenior = (id) =>
@@ -401,7 +346,6 @@ export default function SmartRosterTab({
     setRules({ staffShifts: next });
   };
 
-  const num = { ...inputStyle, width: 70, padding: "7px 9px" };
   /* ── One person's own rules ──
      Saved as one list beside the ward's settings. An empty list is removed
      rather than saved, so taking every rule away leaves nothing behind. */
@@ -570,25 +514,8 @@ export default function SmartRosterTab({
     background: on ? (colour === T.coral ? "#FBEAE7" : "#D8EEE9") : "#fff",
     color: on ? colour : T.inkSoft,
   });
-  /* The one "How strongly" box, for any ruleStates key. Only a real change
-     is written; re-picking the same option saves nothing. */
-  const scaleSelect = (key, label) => {
-    const cur = scaleIdOf(rules.ruleStates?.[key]);
-    const known = STRENGTH_SCALE.some((o) => o.id === cur);
-    return (
-      <select value={cur} disabled={!staffEditable} aria-label={label}
-        onChange={(e) => {
-          const pick = STRENGTH_SCALE.find((o) => o.id === e.target.value);
-          if (!pick || pick.id === cur) return;
-          setRules({ ruleStates: { ...rules.ruleStates,
-            [key]: { state: pick.state, priority: pick.priority } } });
-        }}
-        style={{ ...sel, minWidth: 108, padding: "6px 6px", fontSize: 12 }}>
-        {STRENGTH_SCALE.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-        {!known && <option value={cur}>Bend (P{rules.ruleStates?.[key]?.priority})</option>}
-      </select>
-    );
-  };
+  // What every part of the ward's needs is handed: the settings, and the one way to write them.
+  const needs = { rules, setRules, editable: staffEditable, T };
 
   // The sum lives in rosterConfig.js so Ini warns with the same numbers.
   const { seniorCount, seniorPerDay, perPerson: seniorPerPerson, needed: seniorsNeeded } = seniorNeedOf(rules, activeStaff);
@@ -655,42 +582,8 @@ export default function SmartRosterTab({
         </Card>
       )}
 
-      {/* ── Staff per shift ── */}
-      <Card>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
-          <h3 style={{ ...title, margin: 0 }}>How many staff on each shift</h3>
-          <span style={{ ...chip(true, T.lagoon), cursor: "default" }}>Must — always</span>
-        </div>
-        <p style={hint}>
-          Set the minimum to 0 for a shift you do not run. A shift is never left below its
-          minimum — covering it comes before every other rule. The last column is how many of
-          those people must be a{" "}
-          {lower} — leave it at 0 if it does not matter who is on.
-        </p>
-        <table style={{ borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={th}>Shift</th><th style={th}>Fewest</th><th style={th}>Most</th>
-              <th style={{ ...th, background: "#F1F5F4" }}>…of whom {lower}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {SHIFTS.map((s) => (
-              <tr key={s}>
-                <td style={{ ...td, fontWeight: 600 }}>{SHIFT_LABELS[s]}</td>
-                <td style={td}><input type="number" min={0} style={num} disabled={!staffEditable}
-                  value={rules.coverage[s]?.min ?? ""} onChange={(e) => setCoverage(s, "min", e.target.value)} /></td>
-                <td style={td}><input type="number" min={0} style={num} disabled={!staffEditable}
-                  value={rules.coverage[s]?.max ?? ""} onChange={(e) => setCoverage(s, "max", e.target.value)} /></td>
-                <td style={{ ...td, background: "#F1F5F4" }}>
-                  <input type="number" min={0} style={num}
-                    disabled={!staffEditable || (rules.coverage[s]?.min || 0) === 0}
-                    value={rules.seniorCover[s] ?? 0} onChange={(e) => setSeniorCover(s, e.target.value)} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* ── Who's needed on each shift ── */}
+      <ShiftNeeds {...needs} Card={Card} codes={data.codes} termMany={termMany}>
         {seniorPerDay > 0 && (
           <p style={{ ...hint, margin: "12px 0 0" }}>
             That is <strong>{seniorPerDay} {seniorPerDay === 1 ? lower : termMany.toLowerCase()} on duty every day</strong>,
@@ -699,172 +592,13 @@ export default function SmartRosterTab({
             {termMany.toLowerCase()}; you have ticked {seniorCount}.
           </p>
         )}
-      </Card>
+      </ShiftNeeds>
 
-      {/* ── Per-person weekly shape ── */}
-      <Card>
-        <h3 style={title}>What one person should get in a week</h3>
-        <p style={hint}>
-          Laid out the same way as the results, so you can set a rule and check it in the same
-          shape. Leave a box empty for no limit. <strong>Fewest</strong> is a goal — the generator
-          works towards it but cannot always reach it. <strong>Most</strong> is a limit.
-          <strong> In a row — most</strong> is how many of that shift can come together before a
-          change: two nights together is normal, and keeping the others to about three is what
-          stops a whole week of afternoons. Left empty, it has no limit — but a run still stops at{" "}
-          <strong>Days in a row (most)</strong>. <strong>In a row — fewest</strong> asks for that
-          shift to come in runs of at least that many when someone gets more than one — two nights
-          together rather than two singles. It is a goal, not a limit, and while{" "}
-          <strong>Fewest</strong> asks for at least one of that shift, it never comes before
-          someone getting their first.
-        </p>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", minWidth: 640 }}>
-            <thead>
-              <tr>
-                <th style={th}></th>
-                {SHIFTS.map((s) => <th key={s} style={{ ...th, textAlign: "center" }}>{SHIFT_LABELS[s]}</th>)}
-                <th style={{ ...th, textAlign: "center" }}>Off days</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[["weeklyMin", "Fewest"], ["weeklyMax", "Most"]].map(([field, label]) => (
-                <tr key={field}>
-                  <td style={{ ...td, fontWeight: 600 }}>{label}</td>
-                  {[...SHIFTS, "off"].map((sh) => (
-                    <td key={sh} style={{ ...td, textAlign: "center" }}>
-                      <input type="number" min={0} max={7} style={num} disabled={!staffEditable}
-                        value={rules[field]?.[sh] ?? ""}
-                        onChange={(e) => setRules({ [field]: { ...rules[field], [sh]: e.target.value === "" ? null : Number(e.target.value) } })} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-              <tr>
-                <td style={{ ...td, fontWeight: 600 }}>How strongly</td>
-                {[...SHIFTS, "off"].map((sh) => (
-                  <td key={sh} style={{ ...td, textAlign: "center" }}>
-                    {sh === "off"
-                      ? scaleSelect("offMin", "How strongly — fewest off days")
-                      : scaleSelect(`weeklyCaps:${sh}`, `How strongly — most ${SHIFT_LABELS[sh]}`)}
-                  </td>
-                ))}
-              </tr>
-              <tr>
-                <td style={{ ...td, fontWeight: 600 }}>In a row — fewest</td>
-                {SHIFTS.map((sh) => (
-                  <td key={sh} style={{ ...td, textAlign: "center" }}>
-                    <input type="number" min={1} max={7} style={{ ...num, width: 84 }} disabled={!staffEditable}
-                      aria-label={`In a row — fewest — ${SHIFT_LABELS[sh]}`}
-                      value={rules.blockTogether?.[sh] ?? ""}
-                      onChange={(e) => {
-                        /* Empty or 1 means no ask; empty is stored as null. Anything
-                           else outside 1–7 is ignored and the box shows the saved value. */
-                        const raw = e.target.value;
-                        const n = raw === "" ? null : Number(raw);
-                        if (n !== null && !(Number.isInteger(n) && n >= 1 && n <= 7)) return;
-                        if (n === (rules.blockTogether?.[sh] ?? null)) return;
-                        setRules({ blockTogether: { ...rules.blockTogether, [sh]: n } });
-                      }} />
-                  </td>
-                ))}
-                <td style={{ ...td, textAlign: "center", color: T.inkSoft }}>—</td>
-              </tr>
-              <tr>
-                <td style={{ ...td, fontWeight: 600 }}>In a row — most</td>
-                {SHIFTS.map((sh) => (
-                  <td key={sh} style={{ ...td, textAlign: "center" }}>
-                    <input type="number" min={1} max={7} style={{ ...num, width: 84 }} disabled={!staffEditable}
-                      placeholder="No limit"
-                      value={rules.blockDays?.[sh] === NO_LIMIT ? "" : (rules.blockDays?.[sh] ?? "")}
-                      onChange={(e) => {
-                        /* Empty means no limit, stored as NO_LIMIT. Anything else
-                           outside 1–7 is ignored and the box shows the saved value. */
-                        const raw = e.target.value;
-                        const n = raw === "" ? NO_LIMIT : Number(raw);
-                        if (n !== NO_LIMIT && !(Number.isInteger(n) && n >= 1 && n <= 7)) return;
-                        if (n === rules.blockDays?.[sh]) return;
-                        setRules({ blockDays: { ...rules.blockDays, [sh]: n } });
-                      }} />
-                  </td>
-                ))}
-                {/* One setting for both In a row — most and Days in a row (most):
-                    the engine's working pattern covers the two together. */}
-                <td style={{ ...td, textAlign: "center" }}>
-                  <div style={{ fontSize: 11, color: T.inkSoft, marginBottom: 3 }}>How strongly</div>
-                  {scaleSelect("workPattern", "How strongly — In a row — most and Days in a row (most)")}
-                </td>
-              </tr>
-              <tr style={{ background: "#F7FAFA" }}>
-                <td style={{ ...td, fontWeight: 700 }}>Duties in total</td>
-                <td style={{ ...td, textAlign: "center" }} colSpan={2}>
-                  <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                    <span style={{ fontSize: 11.5, color: T.inkSoft }}>fewest</span>
-                    <input type="number" min={0} max={7} style={num} disabled={!staffEditable}
-                      value={rules.weeklyDuties?.min ?? ""}
-                      onChange={(e) => setRules({ weeklyDuties: { ...rules.weeklyDuties, min: e.target.value === "" ? null : Number(e.target.value) } })} />
-                    <span style={{ fontSize: 11.5, color: T.inkSoft }}>most</span>
-                    <input type="number" min={0} max={7} style={num} disabled={!staffEditable}
-                      value={rules.weeklyDuties?.max ?? ""}
-                      onChange={(e) => setRules({ weeklyDuties: { ...rules.weeklyDuties, max: e.target.value === "" ? null : Number(e.target.value) } })} />
-                  </span>
-                </td>
-                <td style={{ ...td, textAlign: "center", fontSize: 11.5, color: T.inkSoft }} colSpan={3}>
-                  Must — never broken. How many days someone works, whatever the shifts.
-                </td>
-              </tr>
-              <tr>
-                <td style={{ ...td, fontWeight: 600 }}>Days in a row (most)</td>
-                <td style={{ ...td, textAlign: "center" }}>
-                  <input type="number" min={1} max={6} step={1} style={num} disabled={!staffEditable}
-                    aria-label="Days in a row (most)"
-                    value={rules.maxDaysOn}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (Number.isInteger(n) && n >= 1 && n <= 6) setRules({ maxDaysOn: n });
-                    }} />
-                </td>
-                <td style={{ ...td, textAlign: "center", fontSize: 11.5, color: T.inkSoft }} colSpan={4}>
-                  Any duties, whatever the shift — 1 to 6
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div style={{ ...hint, margin: "12px 0 0" }}>
-          <p style={{ margin: 0 }}>
-            <strong>How strongly</strong> says what the generator may bend when a shift would
-            otherwise go uncovered:
-          </p>
-          <ul style={{ margin: "4px 0 8px", paddingLeft: 18 }}>
-            <li><strong>Must</strong> — never broken.</li>
-            <li>
-              <strong>Protect most</strong>, <strong>Protect</strong>, <strong>Bend if needed</strong>,{" "}
-              <strong>Bend first</strong> — bent only as a last resort, in that order. Bend first
-              gives way first; Protect most is held longest.
-            </li>
-            <li>
-              <strong>Ignore</strong> — the limit is switched off. On <strong>In a row — most</strong>,
-              Ignore also stops the generator trying to keep someone's two off days together.
-            </li>
-          </ul>
-          <p style={{ margin: "0 0 8px" }}>
-            It applies to the <strong>Most</strong> box above it, and under Off days to Fewest off
-            days. It does not apply to <strong>Fewest</strong> on a shift — that one is a goal the
-            generator works towards, not a limit, so it can be missed. Most off days is always
-            held, whatever else is set.
-          </p>
-          <p style={{ margin: "0 0 8px" }}>
-            <strong>In a row — most</strong> and <strong>Days in a row (most)</strong> share one
-            setting — the box at the end of that row — so they are always set together.{" "}
-            <strong>In a row — fewest</strong> has no How strongly setting: it is always a goal.
-          </p>
-          <p style={{ margin: 0 }}>
-            Covering the shift always comes first, and anything given up is listed after generating.
-            Anyone tied to a single shift is not held to any of this — these limits exist to rotate
-            people between shifts, and they have nowhere else to go.
-          </p>
-        </div>
-      </Card>
+      {/* ── Each person, each week ── */}
+      <PersonWeek {...needs} Card={Card} codes={data.codes} />
+
+      {/* ── What usually gives way first ── */}
+      <GivesWay rules={rules} T={T} Card={Card} />
 
       {/* ── Exceptions ── */}
       <Card>
@@ -1075,153 +809,80 @@ export default function SmartRosterTab({
         )}
       </Card>
 
-      {/* ── More rules ── */}
-      <Card style={{ padding: showMore ? 18 : "12px 18px" }}>
-        <button onClick={() => setShowMore(!showMore)}
-          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit",
-                   fontSize: 14, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", gap: 6 }}>
+      {/* ── What may follow what ── */}
+      <FollowRules {...needs} Card={Card} Btn={Btn} uid={uid} />
+
+      {/* ── Which code gets written ── */}
+      <Card style={{ padding: showMore ? 18 : "6px 18px" }}>
+        <button type="button" aria-expanded={showMore} onClick={() => setShowMore(!showMore)}
+          style={{ background: "none", border: "none", padding: 0, minHeight: 44, cursor: "pointer", fontFamily: "inherit",
+                   fontSize: 15, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", gap: 6 }}>
           {showMore ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          More rules
+          Which code to write
         </button>
         {showMore && (
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "12px 0 0" }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>What may follow what</span>
-            <Strength value={rules.ruleStates?.sequence} disabled={!staffEditable} T={T} sel={sel}
-              onChange={(v) => setRules({ ruleStates: { ...rules.ruleStates, sequence: v } })} />
+          <div style={{ marginTop: 8 }}>
+          <p style={{ ...hint, marginBottom: 12 }}>
+            Several of your codes can count as the same thing — M and M(R) are both mornings,
+            and you may have more than one kind of off day. <strong>Work it out</strong> uses the
+            first code set to count as that type, which is right for most wards. Choose
+            explicitly if it is picking the wrong one.
+          </p>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {[
+              ["morning", "Morning", "morning"],
+              ["afternoon", "Afternoon", "afternoon"],
+              ["evening", "Evening", "evening"],
+              ["night", "Night", "night"],
+              ["off", "Off day", "off"],
+              ["nightOff", "Rest day after nights", "off"],
+            ].filter(([slot]) => {
+              // Only offer shifts the ward actually runs; off days always.
+              if (slot === "off" || slot === "nightOff") return true;
+              return (rules.coverage[slot]?.min || 0) > 0 || (rules.coverage[slot]?.max || 0) > 0;
+            }).map(([slot, label, cat]) => {
+              const options = (data.codes || []).filter((c) => c.counts === cat);
+              const auto = options[0]?.code;
+              const autoNightOff = options.find((c) => /\(N\)/i.test(c.code))?.code;
+              const fallback = slot === "nightOff" ? (autoNightOff || auto) : auto;
+              return (
+                <Field key={slot} label={label}>
+                  <select style={{ ...sel, minWidth: 150 }} disabled={!staffEditable}
+                    value={rules.codeFor?.[slot] || ""}
+                    onChange={(e) => setRules({ codeFor: { ...rules.codeFor, [slot]: e.target.value } })}>
+                    <option value="">Work it out{fallback ? ` — ${fallback}` : ""}</option>
+                    {options.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.label}</option>)}
+                  </select>
+                </Field>
+              );
+            })}
           </div>
-        )}
-        {showMore && (
-          <div style={{ marginTop: 14 }}>
-            <p style={hint}>
-              What may follow what, from one day to the next. These are already set to the usual
-              rules: no morning, afternoon or evening straight after a night, and no morning after
-              an afternoon or evening.
-            </p>
-            <div style={{ display: "grid", gap: 8 }}>
-              {rules.sequenceRules.map((r) => (
-                <div key={r.id} style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
-                  <select value={r.type} disabled={!staffEditable} style={sel}
-                    onChange={(e) => setRules({ sequenceRules: rules.sequenceRules.map((x) => x.id === r.id ? { ...x, type: e.target.value } : x) })}>
-                    <option value="never">Never give</option>
-                    <option value="must">Always give</option>
-                  </select>
-                  <select value={r.then} disabled={!staffEditable} style={sel}
-                    onChange={(e) => setRules({ sequenceRules: rules.sequenceRules.map((x) => x.id === r.id ? { ...x, then: e.target.value } : x) })}>
-                    {SEQ_CATS.map((c) => <option key={c} value={c}>{SEQ_LABELS[c]}</option>)}
-                  </select>
-                  <span style={{ fontSize: 13, color: T.inkSoft }}>after</span>
-                  <select value={r.after} disabled={!staffEditable} style={sel}
-                    onChange={(e) => setRules({ sequenceRules: rules.sequenceRules.map((x) => x.id === r.id ? { ...x, after: e.target.value } : x) })}>
-                    {SEQ_CATS.map((c) => <option key={c} value={c}>{SEQ_LABELS[c]}</option>)}
-                  </select>
-                  <Btn kind="danger" small disabled={!staffEditable}
-                    onClick={() => setRules({ sequenceRules: rules.sequenceRules.filter((x) => x.id !== r.id) })}>
-                    <Trash2 size={13} />
-                  </Btn>
-                </div>
-              ))}
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <Btn kind="ghost" small disabled={!staffEditable}
-                  onClick={() => setRules({ sequenceRules: [...rules.sequenceRules, { id: uid(), type: "never", after: "night", then: "morning" }] })}>
-                  <Plus size={14} /> Add a rule
-                </Btn>
-                <Btn kind="ghost" small disabled={!staffEditable}
-                  onClick={() => setRules({ sequenceRules: DEFAULT_RULES.sequenceRules })}>
-                  Reset to the usual rules
-                </Btn>
-              </div>
-            </div>
-
-            {/* ── Which code gets written ── */}
-            <div style={{ marginTop: 18, borderTop: `1px solid ${T.line}`, paddingTop: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Which code to write</div>
-              <p style={{ ...hint, marginBottom: 12 }}>
-                Several of your codes can count as the same thing — M and M(R) are both mornings,
-                and you may have more than one kind of off day. <strong>Work it out</strong> uses the
-                first code set to count as that type, which is right for most wards. Choose
-                explicitly if it is picking the wrong one.
-              </p>
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                {[
-                  ["morning", "Morning", "morning"],
-                  ["afternoon", "Afternoon", "afternoon"],
-                  ["evening", "Evening", "evening"],
-                  ["night", "Night", "night"],
-                  ["off", "Off day", "off"],
-                  ["nightOff", "Rest day after nights", "off"],
-                ].filter(([slot]) => {
-                  // Only offer shifts the ward actually runs; off days always.
-                  if (slot === "off" || slot === "nightOff") return true;
-                  return (rules.coverage[slot]?.min || 0) > 0 || (rules.coverage[slot]?.max || 0) > 0;
-                }).map(([slot, label, cat]) => {
-                  const options = (data.codes || []).filter((c) => c.counts === cat);
-                  const auto = options[0]?.code;
-                  const autoNightOff = options.find((c) => /\(N\)/i.test(c.code))?.code;
-                  const fallback = slot === "nightOff" ? (autoNightOff || auto) : auto;
-                  return (
-                    <Field key={slot} label={label}>
-                      <select style={{ ...sel, minWidth: 150 }} disabled={!staffEditable}
-                        value={rules.codeFor?.[slot] || ""}
-                        onChange={(e) => setRules({ codeFor: { ...rules.codeFor, [slot]: e.target.value } })}>
-                        <option value="">Work it out{fallback ? ` — ${fallback}` : ""}</option>
-                        {options.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.label}</option>)}
-                      </select>
-                    </Field>
-                  );
-                })}
-              </div>
-              {/* The rest day after nights is the one wards name most variously,
-                  and the one most likely to be guessed wrong in silence. */}
-              {(() => {
-                const offs = (data.codes || []).filter((c) => c.counts === "off");
-                const bracketed = offs.filter((c) => /\(N\)/i.test(c.code));
-                if (rules.codeFor?.nightOff) return null;
-                if (bracketed.length > 1) {
-                  return (
-                    <p style={{ ...hint, margin: "12px 0 0", color: "#8A5A0F" }}>
-                      You have more than one off code with (N) in it — {bracketed.map((c) => c.code).join(", ")} —
-                      so <strong>{bracketed[0].code}</strong> is being used for the rest day after nights.
-                      Choose above if that is the wrong one.
-                    </p>
-                  );
-                }
-                if (bracketed.length === 0 && offs.length > 0) {
-                  return (
-                    <p style={{ ...hint, margin: "12px 0 0" }}>
-                      No off code has (N) in its name, so the rest day after nights is written as{" "}
-                      <strong>{offs[0].code}</strong> like any other off day. If you have a separate
-                      code for it — N/OFF, NOFF, or whatever your ward calls it — choose it above.
-                    </p>
-                  );
-                }
-                return null;
-              })()}
-            </div>
-
-            <div style={{ marginTop: 18 }}>
-              <Field label="Look back at recent duties">
-                <select value={rules.lookbackDays || 0} disabled={!staffEditable} style={{ ...sel, minWidth: 160 }}
-                  onChange={(e) => setRules({ lookbackDays: Number(e.target.value) })}>
-                  <option value={0}>Do not look back</option>
-                  <option value={14}>Last 14 days</option>
-                  <option value={30}>Last 30 days</option>
-                  <option value={60}>Last 60 days</option>
-                  <option value={90}>Last 90 days</option>
-                  <option value={LOOK_BACK_ALL}>The entire roster</option>
-                  {/* A saved number not on the list is shown as it is, and kept. */}
-                  {Number.isFinite(rules.lookbackDays) && ![0, 14, 30, 60, 90, LOOK_BACK_ALL].includes(rules.lookbackDays) && (
-                    <option value={rules.lookbackDays}>Custom ({rules.lookbackDays} days)</option>
-                  )}
-                </select>
-              </Field>
-              <p style={{ ...hint, margin: "6px 0 0" }}>
-                Recent duties are counted so fairness carries across weeks — someone who did a lot of
-                nights last week gets fewer this week. Non-official days are counted over the same
-                period. Staff who joined recently are compared on their rate, not their totals, so
-                they are never given extra to catch up. This is for fairness only: rest and what
-                may follow what always check the days just before the week, whatever is chosen here.
-              </p>
-            </div>
+          {/* The rest day after nights is the one wards name most variously,
+              and the one most likely to be guessed wrong in silence. */}
+          {(() => {
+            const offs = (data.codes || []).filter((c) => c.counts === "off");
+            const bracketed = offs.filter((c) => /\(N\)/i.test(c.code));
+            if (rules.codeFor?.nightOff) return null;
+            if (bracketed.length > 1) {
+              return (
+                <p style={{ ...hint, margin: "12px 0 0", color: "#8A5A0F" }}>
+                  You have more than one off code with (N) in it — {bracketed.map((c) => c.code).join(", ")} —
+                  so <strong>{bracketed[0].code}</strong> is being used for the rest day after nights.
+                  Choose above if that is the wrong one.
+                </p>
+              );
+            }
+            if (bracketed.length === 0 && offs.length > 0) {
+              return (
+                <p style={{ ...hint, margin: "12px 0 0" }}>
+                  No off code has (N) in its name, so the rest day after nights is written as{" "}
+                  <strong>{offs[0].code}</strong> like any other off day. If you have a separate
+                  code for it — N/OFF, NOFF, or whatever your ward calls it — choose it above.
+                </p>
+              );
+            }
+            return null;
+          })()}
           </div>
         )}
       </Card>
