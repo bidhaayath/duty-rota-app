@@ -677,6 +677,9 @@ function costWeights(cfg) {
 
   // Sharing nights, and non-official days, fairly: priced as always at every level but Ignore.
   w.fairNight = R.fairNights?.state === 'disabled' ? 0 : w.fair;
+  // Fair shares over the whole build (auditRoster): nights a little above mornings and afternoons.
+  w.shareNight = R.fairNights?.state === 'disabled' ? 0 : 3;
+  w.shareDay = 1;
   w.fairNonOfficial = R.fairNonOfficial?.state === 'disabled' ? 0 : w.fair;
 
   // A shift with nobody in charge: 400 at every Try level, as always; a Must's price as a Must.
@@ -691,6 +694,28 @@ function costWeights(cfg) {
   const pattern = stateOf('workPattern');
   if (pattern === 'hard') w.block = HARD;
   else if (pattern === 'disabled') { w.block = 0; w.doubleOff = 0; }
+  /* Keeping a shift together (nights in pairs): a pair split, or half a
+     pair left unfinished where it crosses into the next week, is priced by
+     In a row's level — high enough that only covering a shift, or a rule
+     above it, ever splits one. And a run longer than In a row allows is
+     priced a little above that, so a third night is never the way to mend
+     a pair: In a row holds across the start of a week as anywhere. Below
+     an uncovered shift, always. A Must is a Must; Ignore costs nothing. */
+  /* Only on a ward that keeps a shift in pairs; anywhere else, and at Bend
+     first, nothing changes: a manager can choose cover over pairs by
+     lowering the level. */
+  const TOGETHER = { 1: 600, 2: 450, 3: 300 };
+  const pairsOn = SHIFTS.some((sh) => (cfg.blockTogether?.[sh] ?? 0) > 1);
+  const level = Math.min(4, Math.max(1, R.workPattern?.priority ?? 4));
+  w.unfinished = 0;
+  w.pairsFirst = false;
+  // At every level but Ignore, a half pair from last week is finished on the new week's first day where someone is free to.
+  w.pairsCarried = pairsOn && pattern !== 'disabled';
+  if (pairsOn && pattern === 'hard') {
+    w.blockTogether = HARD; w.unfinished = HARD; w.pairsFirst = true;
+  } else if (pairsOn && pattern === 'soft' && TOGETHER[level]) {
+    w.blockTogether = TOGETHER[level]; w.unfinished = w.blockTogether; w.block = w.blockTogether + 50; w.pairsFirst = true;
+  }
   // Working days in a row: its own strength where one is saved, else the working pattern's.
   const days = R.daysInRow?.state || pattern;
   if (days === 'hard') w.consecutive = HARD;
@@ -703,6 +728,12 @@ function costWeights(cfg) {
   const offMax = stateOf('offMax');
   if (offMax === 'hard') w.offMax = HARD;
   else if (offMax === 'disabled') w.offMax = 0;
+
+  /* The gap between night blocks, where the ward sets one: a Must as a Must,
+     Protect and weaker below a rest rule broken (it is a rest preference). A
+     strength never saved is Protect. Priced only where the gap is set. */
+  const gap = R.nightBlockGap?.state || 'soft';
+  w.nightGap = gap === 'hard' ? HARD : gap === 'disabled' ? 0 : 150;
 
   w.caps = {};
   SHIFTS.forEach((sh) => {
@@ -949,6 +980,22 @@ export function rosterContext(cfg, dates, staff) {
     }
   });
 
+  /* The ward's gap between night blocks: at least this many clear days
+     after the last night before another block starts. Read from the days
+     before the range as well, so it holds into a new week and a new month.
+     Unset, or set to Ignore: nothing here, and nothing anywhere looks. */
+  const gapOn = Number.isInteger(cfg.nightBlockGap) && cfg.nightBlockGap >= 1
+    && cfg.ruleStates?.nightBlockGap?.state !== 'disabled';
+  const nightGap = gapOn ? cfg.nightBlockGap : 0;
+  const lastNight = {};          // staffId -> days before the range of their last night
+  if (nightGap) {
+    staff.forEach((s) => {
+      for (let back = 1; back <= nightGap + 1; back++) {
+        if (histCats[`${String(s.id)}|${shiftDate(dates[0], -back)}`] === 'night') { lastNight[String(s.id)] = back; break; }
+      }
+    });
+  }
+
   /* Anyone whose own rule keeps them off on Fridays. Sharing Friday offs and
      non-official duty evenly is about the people who can be given either. */
   const fridayOffIds = new Set(staff.map((s) => String(s.id))
@@ -961,6 +1008,7 @@ export function rosterContext(cfg, dates, staff) {
     W: costWeights(cfg),
     staff, dates, keep, histCats, requested, prevOf, nextOf, weekOf, weekDays, datesOfWeek, fridayOf,
     dowOf, fridayOffIds, dayTry, nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed, limitFor, lastSeen,
+    nightGap, lastNight,
     seniorIds: new Set(staff.filter((s) => isSenior(cfg, s)).map((s) => String(s.id))),
     maxDaysOn: cfg.maxConsecutiveDays ?? 4,
     absMax: cfg.absoluteMaxDaysOn ?? 6,
@@ -990,6 +1038,7 @@ export function auditRoster(cfg, ctx, cells) {
     staff, dates, weekOf, weekDays, fridayOf, nonOff, requested,
     banned, allowed, forced, cov, seniorNeed, seed, seniorIds,
     maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek, limitFor, lastSeen, dowOf, fridayOffIds,
+    nightGap, lastNight,
   } = ctx;
 
   const shortfalls = [], seniorGaps = [], issues = [];
@@ -1047,6 +1096,8 @@ export function auditRoster(cfg, ctx, cells) {
     const apart = limitFor(id, 'apart');
     const lastAt = {};
     if (lastSeen[id]) Object.entries(lastSeen[id]).forEach(([sh, back]) => { lastAt[sh] = -back; });
+    // Their last night, for the ward's gap between night blocks (only when one is set).
+    let lastNightAt = nightGap && lastNight[id] != null ? -lastNight[id] : null;
     // Their rules for each day of the week; nothing for most people.
     const days = limitFor(id, 'days');
     const t = totals[id] = {
@@ -1085,6 +1136,14 @@ export function auditRoster(cfg, ctx, cells) {
       }
 
       const yesterday = runCat;
+      /* A block of nights starting sooner after the last night than the
+         ward's gap. Finishing a block is never this: yesterday was a night. */
+      if (nightGap && cat === 'night') {
+        if (yesterday !== 'night' && lastNightAt != null && day - lastNightAt - 1 < nightGap) {
+          flag(W.nightGap, { date, shift: cat, kind: 'nightGap' });
+        }
+        lastNightAt = day;
+      }
       if (yesterday) {
         if (banned[yesterday]?.has(cat) && !allowed[yesterday]?.has(cat)) {
           flag(W.sequence, { date, shift: cat, kind: 'sequence' });
@@ -1231,6 +1290,19 @@ export function auditRoster(cfg, ctx, cells) {
         const nx = nextOf[days[6]];
         const after = nx ? cells[`${id}|${nx}`] : null;
         for (const { sh, n, rule } of together) {
+          /* Half of the ward's pair left unfinished where it crosses into
+             the next week: begun on the last day of a week and not carried
+             on the next day although they are here — or begun before the
+             range (last Saturday, say) and not carried on into its first
+             day. Priced as a pair split, and reported as one. */
+          // `nights`: the lone night, named with the person where it is reported.
+          const unfinished = (date, nights) => {
+            if (!rule && W.unfinished) flag(W.unfinished, { date, staffId: id, shift: sh, kind: 'blockTogether', nights });
+          };
+          if (weekOf[pv] === undefined && seed[id].runCat === sh && seed[id].runLen < n) {
+            const first = cells[`${id}|${days[0]}`];
+            if (first != null && first !== sh) unfinished(days[0], [shiftDate(days[0], -1)]);
+          }
           let count = 0, runs = 0;
           for (let i = 0; i < 7; i++) {
             if (cells[`${id}|${days[i]}`] !== sh) continue;
@@ -1239,13 +1311,15 @@ export function auditRoster(cfg, ctx, cells) {
             const open = (i === 0 && (before == null || before === sh))
               || (j === 6 && (after == null || after === sh));
             if (!open) { count += j - i + 1; runs += 1; }
+            if (j === 6 && j - i + 1 < n && after != null && after !== sh && !(i === 0 && before === sh)) unfinished(nx, [days[6]]);
             i = j;
           }
           const ideal = Math.ceil(count / n);
           if (runs > ideal && rule) {
             flag(priceOf(rule, COST.blockTogether) * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'personal', rule });
           } else if (runs > ideal) {
-            flag(W.blockTogether * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'blockTogether' });
+            flag(W.blockTogether * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'blockTogether',
+              nights: days.filter((d) => cells[`${id}|${d}`] === sh) });
           }
         }
       }
@@ -1290,6 +1364,60 @@ export function auditRoster(cfg, ctx, cells) {
       // A measure the ward has set to Ignore costs nothing; any other is priced as always.
       const weight = key === 'night' ? W.fairNight : key === 'nonOfficial' ? W.fairNonOfficial : W.fair;
       if (hi > lo) cost += weight * (hi - lo);
+    }
+  }
+
+  /* Fair shares over the whole build — a month as one, so each week counts
+     what the earlier weeks already gave. For nights, mornings and
+     afternoons: each person's count against their fair share, squared, so
+     every step towards it pays. A fair share is the ward's rate times the
+     days they can be given that shift — not days their own Must keeps them
+     off — and never above what they may have: their own "at most", or the
+     ward's most a week. Those tied to other shifts, or to one shift, are not
+     counted for it. Light: it settles what is otherwise equal. */
+  /* Who counts, their days and their cap do not change while a rota is
+     rearranged (leave and fixed cells stay put), so they are worked out
+     once per build and kept with it. */
+  const shareOf = ctx.shareOf || (ctx.shareOf = {});
+  for (const sh of SHIFTS) {
+    const weight = sh === 'night' ? W.shareNight : W.shareDay;
+    if (!weight || cov[sh].max === 0) continue;
+    if (!shareOf[sh]) {
+      shareOf[sh] = [];
+      for (const s of present) {
+        const id = String(s.id);
+        const only = cfg.staffShifts?.[id];
+        if (only && only.length && (only.length === 1 || !only.includes(sh))) continue;
+        const most = limitFor(id, 'own')?.[`atMost:${sh}`];
+        if (most && most.count === 0) continue;
+        const dayRules = limitFor(id, 'days');
+        let days = totals[id].daysAvailable;
+        if (dayRules) days -= dates.filter((d) => cells[`${id}|${d}`] != null && isMust(dayRules[dowOf[d]]?.off)).length;
+        const weekly = most ? most.count : limitFor(id, 'cap')[sh];
+        if (days > 0) shareOf[sh].push({ id, days, cap: weekly == null ? Infinity : weekly * days / 7 });
+      }
+    }
+    const people = shareOf[sh];
+    if (people.length < 2) continue;
+    let total = 0;
+    for (const p of people) total += totals[p.id][sh];
+    /* The rate that shares the total out: the whole of it over everyone's
+       days, then again without anyone it would take past their cap. */
+    const capped = new Set();
+    let rate = 0;
+    for (let k = 0; k < people.length; k++) {
+      let left = total, days = 0;
+      for (const p of people) { if (capped.has(p)) left -= p.cap; else days += p.days; }
+      rate = days > 0 ? Math.max(0, left) / days : 0;
+      let more = false;
+      for (const p of people) {
+        if (!capped.has(p) && rate * p.days > p.cap) { capped.add(p); more = true; }
+      }
+      if (!more) break;
+    }
+    for (const p of people) {
+      const d = totals[p.id][sh] - (capped.has(p) ? p.cap : rate * p.days);
+      cost += weight * d * d;
     }
   }
 
@@ -1514,6 +1642,7 @@ const ISSUE_NAMES = {
   partOffMax: 'off days for part-week staff',
   partOffMin: 'off days for part-week staff',
   weeklyCap: 'weekly limit',
+  nightGap: 'gap between night pairs',
 };
 function issuesToRelaxations(issues) {
   return issues.map((i) => (i.kind === 'personal' ? {
@@ -1534,6 +1663,8 @@ function issuesToRelaxations(issues) {
       : i.kind === 'shiftMin' ? `fewest ${i.shift}s a week`
       : i.kind === 'blockTogether' ? `${i.shift}s not kept together`
       : (ISSUE_NAMES[i.kind] || i.kind),
+    // The days of a pair split or left half done, so it can be named.
+    ...(i.nights ? { days: i.nights } : {}),
   }));
 }
 
@@ -1637,7 +1768,10 @@ export function generateRoster(cfg) {
 
   const dates = datesBetween(cfg.from, cfg.to);
   const staff = cfg.staff.filter((s) => !cfg.skipStaff?.includes(s.id));
-  const ctx = rosterContext(cfg, dates, staff);
+  /* Cover first: everything up to the last pass is built and rearranged
+     without fair shares, exactly as before them; the shares come last. */
+  const full = rosterContext(cfg, dates, staff);
+  const ctx = { ...full, W: { ...full.W, shareNight: 0, shareDay: 0 } };
   const weeks = Math.max(1, Math.ceil(dates.length / 7));
   const attempts = Math.max(1, cfg.attempts ?? Math.max(3, Math.round(24 / weeks)));
 
@@ -1671,6 +1805,26 @@ export function generateRoster(cfg) {
     const bent = polish(cfg, ctx, cells, tried, true);
     const bentAudit = auditRoster(cfg, ctx, bent);
     if (gaps(bentAudit) < gaps(audit)) { cells = bent; audit = bentAudit; }
+  }
+  /* Fair shares over the whole build, last: a short pass with them priced,
+     kept only if it gives way to everything above it — no more shifts
+     uncovered or without anyone in charge, none over the most, no Must
+     broken (days off included), and no pair split or run too long that
+     was not already. So fairness never costs cover. */
+  const size = staff.length * dates.length;
+  const fairSteps = Math.round((cfg.polishSteps ?? Math.max(10000, Math.min(90000, Math.round(2400000 / size) + 12000))) / 6);
+  if ((full.W.shareNight || full.W.shareDay) && fairSteps > 0) {
+    const count = (a, test) => a.issues.filter(test).length;
+    const must = (x) => ['restriction', 'absMax', 'dutyMax'].includes(x.kind) || (x.kind === 'personal' && x.rule?.strength === 'hard');
+    const shape = (x) => x.kind === 'blockTogether' || (x.kind === 'block' && x.shift === 'night');
+    const over = (x) => x.kind === 'overMax';
+    const worse = (a, b) => gaps(a) > gaps(b) || count(a, must) > count(b, must) || count(a, shape) > count(b, shape)
+      || count(a, over) > count(b, over);
+    const fairer = polish({ ...cfg, polishSteps: fairSteps }, full, cells, tried + 1);
+    const fairAudit = auditRoster(cfg, ctx, fairer);
+    if (!worse(fairAudit, audit) && auditRoster(cfg, full, fairer).cost < auditRoster(cfg, full, cells).cost) {
+      cells = fairer; audit = fairAudit;
+    }
   }
   mustReasons(cfg, ctx, cells, audit.shortfalls);
 
@@ -1893,6 +2047,15 @@ function buildOnce(cfg, seed, ctx) {
   const maxBlock = (id, sh) =>
     limitFor(id, 'block')[sh] ?? cfg.maxBlock?.[sh] ?? (sh === 'night' ? 2 : 4);
   const ownRule = (id, type, sh) => limitFor(id, 'own')?.[`${type}:${sh}`];
+  /* Starting another block of nights sooner after the last night than the
+     ward's gap. Carrying on a block is never this. Only where a gap is set. */
+  const nightTooSoon = (id, date) => {
+    if (!ctx.nightGap || catAt(id, shiftDate(date, -1)) === 'night') return false;
+    for (let back = 2; back <= ctx.nightGap; back++) {
+      if (catAt(id, shiftDate(date, -back)) === 'night') return true;
+    }
+    return false;
+  };
   // Had this shift within the clear days they asked for between two of it.
   const tooSoon = (id, sh, date) => {
     const gap = limitFor(id, 'apart')[sh];
@@ -2112,6 +2275,8 @@ function buildOnce(cfg, seed, ctx) {
         const legacy = cfg.soft || {};
         const defaultState = (key) => {
           if (key === 'workPattern') return legacy.weeklyCaps ? 'soft' : 'hard';
+          // The gap between night blocks starts at Protect when turned on.
+          if (key === 'nightBlockGap') return 'soft';
           if (key.startsWith('weeklyCaps')) return legacy.weeklyCaps ? 'soft' : 'hard';
           return legacy[key] ? 'soft' : 'hard';
         };
@@ -2128,7 +2293,10 @@ function buildOnce(cfg, seed, ctx) {
         const daysOwn = !!R.daysInRow?.state && (R.daysInRow.state !== stateOf('workPattern')
           || (R.daysInRow.state === 'soft' && prioOf('daysInRow') !== prioOf('workPattern')));
         const daysKey = daysOwn ? 'daysInRow' : 'workPattern';
-        const relaxable = [capKey, 'workPattern', ...(daysOwn ? ['daysInRow'] : []), 'offMin', 'sequence']
+        // The night gap is only among them for a night, and only where the ward sets one.
+        const gapHere = !!ctx.nightGap && shift === 'night';
+        const relaxable = [capKey, 'workPattern', ...(daysOwn ? ['daysInRow'] : []), ...(gapHere ? ['nightBlockGap'] : []),
+          'offMin', 'sequence']
           .filter((k) => stateOf(k) === 'soft')
           .sort((a, b) => prioOf(b) - prioOf(a));      // P4 yields first
         // People's own Try rules give way before any of the ward's.
@@ -2192,6 +2360,10 @@ function buildOnce(cfg, seed, ctx) {
                 && (!lastResort || stateOf(daysKey) === 'hard')) {
               if (workedRun(s.id, date) >= maxDaysOn) return false;
             }
+            // A Must gap holds even at the last resort.
+            if (gapHere && !dropped.has('nightBlockGap') && (!lastResort || stateOf('nightBlockGap') === 'hard')) {
+              if (nightTooSoon(s.id, date)) return false;
+            }
             if (!singleShift && stateOf('offMin') !== 'disabled' && !dropped.has('offMin')
                 && (!lastResort || stateOf('offMin') === 'hard')) {
               const offMin = cfg.weeklyPerStaff?.off;
@@ -2241,11 +2413,30 @@ function buildOnce(cfg, seed, ctx) {
         const near = (a, b) => Math.abs(a - b) < 1e-9;
         /* Blocks come first: real rotas are written in runs of the same
            duty, and nights are worked in pairs. */
+        /* A pair is finished before anybody else is given their first of
+           the week — a pair begun last Saturday on this Sunday too — as long
+           as the week still has a place left for everyone waiting for a
+           first one. Only where the shift is kept together. */
+        const pairOf = () => (ctx.W.pairsFirst || ctx.W.pairsCarried ? cfg.blockTogether?.[shift] : null);
+        let room = null;
+        const roomForFirsts = () => {
+          if (room != null) return room;
+          const week = weekOf(date);
+          const later = dates.filter((d) => weekOf(d) === week && d > date).length;
+          const placesLeft = Math.max(0, min - countToday[shift] - 1) + later * min;
+          const waiting = staff.filter((s) => assignedToday[s.id] === undefined
+            && weekCount(s.id, date, shift) === 0 && (limitFor(s.id, 'min')[shift] || 0) > 0
+            && !(cfg.staffShifts?.[s.id]?.length && !cfg.staffShifts[s.id].includes(shift))).length;
+          room = placesLeft >= waiting;
+          return room;
+        };
         const blockScore = (id) => {
           const run = runOf(id, shift, date);
           const soFar = weekCount(id, date, shift);
           const wantMin = ownRule(id, 'atLeast', shift)?.count ?? limitFor(id, 'min')[shift];
           const pair = ownRule(id, 'together', shift);
+          const n = pairOf(id);
+          if (run > 0 && n > 1 && run < n && (soFar === 0 || (ctx.W.pairsFirst && roomForFirsts()))) return -1100;
           /* Having had none of this shift all week outranks everything,
              including finishing a pair of nights. Pairing is a preference,
              not a requirement: with seven nights and six people, insisting
@@ -2438,6 +2629,8 @@ function buildOnce(cfg, seed, ctx) {
             if (runOf(s.id, sh, date) >= maxBlock(s.id, sh)) return false;
             if (workedRun(s.id, date) >= maxDaysOn) return false;
           }
+          // A spare night never starts a block inside the ward's gap.
+          if (sh === 'night' && nightTooSoon(s.id, date)) return false;
           // Nobody is worked into the ground, whatever the off limit says.
           if (workedRun(s.id, date) >= (cfg.absoluteMaxDaysOn ?? 6)) return false;
           return true;

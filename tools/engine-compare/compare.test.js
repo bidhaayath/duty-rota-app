@@ -9,7 +9,10 @@ import * as oldE from "./old/rosterEngine";
 import * as newE from "../../src/rosterEngine";
 import { weekConfig } from "../../src/rosterConfig";
 import { prepareMonth } from "../../src/monthBuild";
-import { seededWard, SAME, RULES, withRules, fitHistory, addDays, days } from "./wards";
+import {
+  seededWard, SAME, RULES, withRules, fitHistory, addDays, days, erWard, withNightGap, erRealWard, thoiWard, withWeek,
+  withInARowLevel, withoutPairs,
+} from "./wards";
 
 const fs = require("fs");
 const path = require("path");
@@ -79,7 +82,8 @@ function recount(cfg, out) {
   for (const s of staff) {
     for (const date of dates) {
       const cat = cells[`${s.id}|${date}`];
-      if (cat == null || cat === "off") continue;
+      // An approved request that day is the manager's own choice, kept over the rule: not a miss.
+      if (cat == null || cat === "off" || asked.has(`${s.id}|${date}`)) continue;
       const off = ruleOn(s.id, date, "offOn"), few = ruleOn(s.id, date, "onlyOn");
       if (off) misses.push(`${s.id}|${date}|offOn|${off.strength === "hard" ? "hard" : "soft"}`);
       else if (few && !few.shifts.includes(cat)) misses.push(`${s.id}|${date}|onlyOn|${few.strength === "hard" ? "hard" : "soft"}`);
@@ -136,9 +140,11 @@ function recount(cfg, out) {
 }
 
 // What the engine's own report says about the same things.
-function reported(out) {
+function reported(out, cfg) {
+  // As counted: a day with an approved request is not a miss.
+  const asked = new Set((cfg.requests || []).map((r) => `${r.staffId}|${r.date}`));
   const misses = out.report.relaxations
-    .filter((r) => r.personal && DAY_TYPES.includes(r.ruleType))
+    .filter((r) => r.personal && DAY_TYPES.includes(r.ruleType) && !asked.has(`${r.staffId}|${r.date}`))
     .map((r) => `${r.staffId}|${r.date}|${r.ruleType}|${r.strength}`).sort();
   const names = out.report.shortfalls.flatMap((g) => (g.because || [])
     .filter((b) => DAY_TYPES.includes(b.rule.type))
@@ -208,23 +214,26 @@ only("rules")("weeks with rules set: old and new, counted from the finished rota
     if (seed % OF !== PART) continue;
     const { data, start } = seededWard(seed);
     for (const [name, list] of Object.entries(RULES(seed, data.staff))) {
+      // EC_RULE_LISTS=offMust,everything runs only those lists.
+      if (process.env.EC_RULE_LISTS && !process.env.EC_RULE_LISTS.split(",").includes(name)) continue;
       const cfg = steady(weekConfig(fitHistory(withRules(data, list)), start));
       const a = timed(oldE, cfg), b = timed(newE, cfg);
       const t = tally[name] || (tally[name] = {
         weeks: 0, refused: 0, sameText: 0, old: { uncovered: 0, aboveMost: 0, ms: 0, weekMs: [] },
         new: { uncovered: 0, aboveMost: 0, ms: 0, weekMs: [], tryMissed: 0, mustMissed: 0, gapsNamed: 0 },
         fixed: { weeks: 0, fixedDaysWorked: 0, weeksWithExtraOff: 0, weeksShortOfDuties: 0 },
-        reportDisagrees: [],
+        reportDisagrees: [], mustSeeds: [],
       });
       t.weeks += 1;
       if (!b.out.ok || !a.out.ok) { t.refused += 1; continue; }
       if (JSON.stringify(a.out) === JSON.stringify(b.out)) t.sameText += 1;
-      const ca = recount(cfg, a.out), cb = recount(cfg, b.out), said = reported(b.out);
+      const ca = recount(cfg, a.out), cb = recount(cfg, b.out), said = reported(b.out, cfg);
       t.old.uncovered += ca.uncovered; t.old.aboveMost += ca.aboveMost; t.old.ms += a.ms;
       t.new.uncovered += cb.uncovered; t.new.aboveMost += cb.aboveMost; t.new.ms += b.ms;
       t.old.weekMs.push(a.ms); t.new.weekMs.push(b.ms);
       t.new.tryMissed += cb.misses.filter((m) => m.endsWith("soft")).length;
       t.new.mustMissed += cb.misses.filter((m) => m.endsWith("hard")).length;
+      if (cb.misses.some((m) => m.endsWith("hard"))) t.mustSeeds.push(seed);
       t.new.gapsNamed += cb.names.length;
       Object.keys(t.fixed).forEach((k) => { t.fixed[k] += cb.fixed[k]; });
       if (said.uncovered !== cb.uncovered || said.misses.join() !== cb.misses.join()
@@ -355,4 +364,177 @@ only("keys")("strength keys: each at a level of its own, against the same week w
     }
   }
   save("keys", tally);
+}, 7200000);
+
+/* ── Whole months, measured ──
+   Each month ward (wards.js) built by both engines and counted from the
+   finished cells, with the duties before the month read from its history:
+     longRuns    runs of nights longer than the ward's "In a row" allows
+                 (crossWeek: those running over the start of a week)
+     dayRuns     the same for other shifts, leaving out anyone kept to one shift
+     pairsSplit  whole weeks where someone's nights came in more separate runs
+                 than pairs needed (a run running on past either end of the
+                 build is left open: it may carry on there)
+     halfPairs   half a pair not finished where it crosses into the next week:
+                 a lone night on a week's last day, the next day here and not a
+                 night — including a lone night just before the build
+     shortGaps   night blocks starting fewer clear days after the last night
+                 than the ward's gap (3 where the ward sets none, to show it)
+     spread      per person over the month (or the weeks built), for nights,
+                 mornings, afternoons: most less fewest, and the standard
+                 deviation — counted over people here every day with no shift
+                 ticks and no rule of their own about that shift
+     uncovered, aboveMost, and the milliseconds the builds took.
+   Two wards are also built week after week, as Smart Roster builds them,
+   each week on the rota the last one left. */
+const monthWards = () => {
+  const list = MONTHS.map((month, i) => {
+    const { data } = seededWard(700 + i, { from: `${month}-01`, historyDays: 35, span: 28 });
+    data.rosterRules.blockTogether = { night: 2 };
+    return { name: `seeded ${month}`, month, data };
+  });
+  list.push({ name: "ER 2026-12", month: "2026-12", data: erWard() });
+  list.push({ name: "ER real 2026-12", month: "2026-12", data: erRealWard() });
+  const level = ["", "Protect most", "Protect", "Bend if needed", "Bend first"];
+  return [
+    ...list, ...list.map((w) => ({ ...w, name: `${w.name} gap 3`, data: withNightGap(w.data, 3) })),
+    // In a row at each level: what pairs cost in cover, level by level.
+    ...[2, 3, 4].map((p) => ({ name: `ER real ${level[p]}`, month: "2026-12", data: withInARowLevel(erRealWard(), p) })),
+    // Wards without pairs, which must build exactly as before.
+    { name: "ER real no pairs", month: "2026-12", data: withoutPairs(erRealWard()) },
+    ...list.filter((w) => w.name.startsWith("seeded")).slice(0, 2)
+      .map((w) => ({ ...w, name: `${w.name} no pairs`, data: withoutPairs(w.data) })),
+    { name: "ER real weeks x4", weeks: { from: "2026-12-06", n: 4 }, data: erRealWard() },
+    { name: "thoi weeks x4", weeks: { from: "2026-11-15", n: 4 }, data: thoiWard() },
+    { name: "thoi weeks x4 Protect", weeks: { from: "2026-11-15", n: 4 }, data: withInARowLevel(thoiWard(), 2) },
+    { name: "thoi 2026-12 Protect", month: "2026-12", data: withInARowLevel(thoiWard(), 2) },
+  ];
+};
+
+function measureMonth(cfg, cells, month, range = { from: cfg.from, to: cfg.to }) {
+  const cats = catOfCode(cfg);
+  const histOf = (id, date) => cats[cfg.history?.cells?.[`${id}|${date}`]];
+  const catAt = (id, date) => cells[`${id}|${date}`] ?? histOf(id, date);
+  const length = Math.round((new Date(range.to) - new Date(range.from)) / 86400000) + 1;
+  const span = days(addDays(range.from, -21), length + 21);
+  const builtList = days(range.from, length);
+  const built = new Set(builtList);
+  const inMonth = month ? builtList.filter((d) => d.startsWith(month)) : builtList;
+  const staff = cfg.staff.filter((s) => !(cfg.skipStaff || []).includes(s.id));
+  const isWeekStart = (date) => {
+    const [y, m, d] = date.split("-").map(Number);
+    return new Date(y, m - 1, d).getDay() === (cfg.weekStartsOn ?? 0);
+  };
+  const gapWanted = cfg.nightBlockGap || 3;
+  const pairN = cfg.blockTogether?.night;
+  let longRuns = 0, crossWeek = 0, shortGaps = 0, dayRuns = 0, pairsSplit = 0, halfPairs = 0;
+  for (const s of staff) {
+    for (const sh of SHIFTS) {
+      const most = cfg.maxBlock?.[sh] ?? (sh === "night" ? 2 : 4);
+      let run = 0, crossed = false, touchesBuilt = false;
+      // Somebody kept to one shift has nothing else to break a run with: not counted.
+      const single = (cfg.staffShifts?.[s.id] || []).length === 1;
+      const close = () => {
+        if (run <= most || !touchesBuilt) return;
+        if (sh !== "night") { if (!single) dayRuns += 1; return; }
+        longRuns += 1; if (crossed) crossWeek += 1;
+      };
+      for (const date of span) {
+        if (catAt(s.id, date) === sh) {
+          if (run > 0 && isWeekStart(date)) crossed = true;
+          run += 1;
+          if (built.has(date)) touchesBuilt = true;
+        } else { close(); run = 0; crossed = false; touchesBuilt = false; }
+      }
+      close();
+    }
+    // Night blocks starting in the build, against the last night before them.
+    let lastNight = null;
+    span.forEach((date, i) => {
+      const night = catAt(s.id, date) === "night";
+      const startsBlock = night && catAt(s.id, span[i - 1]) !== "night";
+      if (startsBlock && built.has(date) && lastNight != null && i - lastNight - 1 < gapWanted) shortGaps += 1;
+      if (night) lastNight = i;
+    });
+    if (pairN > 1) {
+      const N = (d) => catAt(s.id, d) === "night";
+      // Whole weeks inside the build.
+      builtList.filter(isWeekStart).forEach((wk) => {
+        const week = days(wk, 7);
+        if (!week.every((d) => built.has(d))) return;
+        let count = 0, runs = 0;
+        for (let i = 0; i < 7; i++) {
+          if (!N(week[i])) continue;
+          let j = i;
+          while (j < 6 && N(week[j + 1])) j += 1;
+          const next = addDays(week[6], 1);
+          const open = (i === 0 && N(addDays(week[0], -1))) || (j === 6 && (!built.has(next) || N(next)));
+          if (!open) { count += j - i + 1; runs += 1; }
+          i = j;
+        }
+        if (runs > Math.ceil(count / pairN)) pairsSplit += runs - Math.ceil(count / pairN);
+      });
+      // A lone night on a week's last day (or just before the build), not carried on the next day although they are here.
+      span.forEach((d) => {
+        const next = addDays(d, 1);
+        if (!isWeekStart(next) || !built.has(next) || cells[`${s.id}|${next}`] == null) return;
+        if (N(d) && !N(addDays(d, -1)) && !N(next)) halfPairs += 1;
+      });
+    }
+  }
+
+  const own = new Set((cfg.personRules || []).filter(Boolean).map((r) => `${r.staffId}|${r.shift || "days"}`));
+  const spread = {};
+  for (const sh of ["night", "morning", "afternoon"]) {
+    const counts = staff.filter((s) => !(cfg.staffShifts?.[s.id] || []).length
+      && !own.has(`${s.id}|${sh}`) && !own.has(`${s.id}|days`)
+      && inMonth.every((d) => cells[`${s.id}|${d}`] != null))
+      .map((s) => inMonth.filter((d) => cells[`${s.id}|${d}`] === sh).length);
+    if (counts.length < 2) { spread[sh] = { range: 0, sd: 0, people: counts.length }; continue; }
+    const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+    const sd = Math.sqrt(counts.reduce((a, b) => a + (b - mean) ** 2, 0) / counts.length);
+    spread[sh] = { range: Math.max(...counts) - Math.min(...counts), sd: Math.round(sd * 100) / 100, people: counts.length };
+  }
+  const { uncovered, aboveMost } = recount({ ...cfg, from: range.from, to: range.to }, { cells });
+  return { longRuns, crossWeek, dayRuns, pairsSplit, halfPairs, shortGaps, spread, uncovered, aboveMost };
+}
+
+/* Weeks one after another, each built on the rota the last one left — as
+   "Use this roster" leaves it. The first week's config holds the history. */
+function buildWeeks(E, data, { from, n }) {
+  let d = data, ms = 0;
+  const cells = {};
+  const first = steady(weekConfig(data, from));
+  for (let k = 0; k < n; k++) {
+    const cfg = steady(weekConfig(d, addDays(from, 7 * k)));
+    const began = Date.now();
+    const out = E.generateRoster(cfg);
+    ms += Date.now() - began;
+    if (!out.ok) return { refused: true, ms };
+    Object.assign(cells, out.cells);
+    d = withWeek(d, out.cells);
+  }
+  return { ...measureMonth(first, cells, null, { from, to: addDays(from, 7 * n - 1) }), ms, text: JSON.stringify(cells) };
+}
+
+only("month")("whole months: runs, pairs, gaps between night pairs, fairness, cover and time", () => {
+  const rows = [];
+  monthWards().forEach((w, i) => {
+    if (i % OF !== PART) return;
+    if (w.weeks) {
+      const o = buildWeeks(oldE, w.data, w.weeks), n = buildWeeks(newE, w.data, w.weeks);
+      rows.push({ name: w.name, same: o.text === n.text ? 1 : 0, old: { ...o, text: undefined }, new: { ...n, text: undefined } });
+      return;
+    }
+    const cfg = steady(prepareMonth({ data: w.data, month: w.month, lookFrom: addDays(`${w.month}-01`, -28) }).config);
+    const side = (E) => {
+      const began = Date.now();
+      const out = E.generateRoster(cfg);
+      const ms = Date.now() - began;
+      return out.ok ? { ...measureMonth(cfg, out.cells, w.month), ms, text: JSON.stringify(out.cells) } : { refused: true, ms };
+    };
+    const o = side(oldE), n = side(newE);
+    rows.push({ name: w.name, same: o.text === n.text ? 1 : 0, old: { ...o, text: undefined }, new: { ...n, text: undefined } });
+  });
+  save("month", { rows });
 }, 7200000);

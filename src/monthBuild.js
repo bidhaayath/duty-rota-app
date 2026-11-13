@@ -379,7 +379,10 @@ export function finishMonth(prep, result, data) {
     }
     const weekly = r.staffId != null;
     if (weekly ? !weekTouches(r.date) : !inPeriod(r.date)) return;
-    const where = weekly
+    // A pair split or left half done names its nights.
+    const where = weekly && r.days
+      ? `${nameOf[r.staffId] || "someone"} (${r.days.map(prettyWeekday).join(", ")})`
+      : weekly
       ? `${nameOf[r.staffId] || "someone"} (week of ${prettyDay(r.date)})`
       : `${prettyWeekday(r.date)}${r.shift && r.shift !== "off" ? ` ${r.shift}` : ""}`;
     (groups[r.rule] = groups[r.rule] || []).push(where);

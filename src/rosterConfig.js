@@ -292,6 +292,9 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     blockTogether: rules.blockTogether,
     // Off days "Together is fine": only said when chosen, so a ward that never chose is given exactly what it was.
     ...(rules.singleOffDays === false ? { singleOffDays: false } : {}),
+    // Clear days between one block of nights and the next: only said when set.
+    ...(Number.isInteger(rules.nightBlockGap) && rules.nightBlockGap >= 1 && rules.nightBlockGap <= 14
+      ? { nightBlockGap: rules.nightBlockGap } : {}),
     // One person's own limits, laid over the ward's; absent = everyone follows the ward.
     personRules: rules.personRules,
     maxConsecutiveDays: rules.maxDaysOn ?? 5,

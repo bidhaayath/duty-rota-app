@@ -99,7 +99,11 @@ export const ABSENT = {
   seniors: { state: "soft", priority: 1 },
   fairNights: { state: "soft", priority: 2 },
   fairNonOfficial: { state: "soft", priority: 2 },
+  // The gap between night pairs, once turned on, starts at Protect.
+  nightBlockGap: { state: "soft", priority: 2 },
 };
+// The gap between night pairs is set only once turned on; until then nothing is saved.
+export const hasNightGap = (rules) => Number.isInteger(rules.nightBlockGap);
 // Strengths with no Must: a saved Must counts as Protect most.
 const NO_MUST = ["fairNights", "fairNonOfficial"];
 
@@ -120,6 +124,7 @@ export function givesWay(rules, { termMany = "Seniors" } = {}) {
       : [["In a row, and working days in a row", "workPattern"]]),
     ...((rules.sequenceRules || []).length ? [["What may follow what", "sequence"]] : []),
     ...(asksSenior ? [[`${termMany} on every shift`, "seniors"]] : []),
+    ...(run.includes("night") && hasNightGap(rules) ? [["Gap between night pairs", "nightBlockGap"]] : []),
     ...(run.includes("night") ? [["Sharing nights fairly", "fairNights"]] : []),
     ["Sharing non-official days fairly", "fairNonOfficial"],
   ];
@@ -440,6 +445,44 @@ export function PersonWeek({ rules, setRules, dropRule, editable, T, Card, codes
     </div>
   );
 
+  /* Under Night: the clear days between one block of nights and the next —
+     a rest between blocks, apart from how many nights in a row. Off until
+     turned on, and nothing is saved until then; turned on, it starts at 3
+     days and at Protect. Turned off, the gap goes, as one Undo step. */
+  const gapOn = hasNightGap(rules);
+  const gapState = rules.ruleStates?.nightBlockGap ?? ABSENT.nightBlockGap;
+  const smallBtn = {
+    fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, minHeight: 44, padding: "0 14px", borderRadius: 10,
+    border: `1px solid ${T.line}`, background: "#fff", color: T.lagoon, cursor: editable ? "pointer" : "not-allowed",
+  };
+  const nightGap = (
+    <div style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "10px 14px",
+                  borderTop: "1px solid rgba(20,43,51,0.1)", paddingTop: 10, minWidth: 0 }}>
+      <span style={{ display: "grid", gap: 2, flex: "1 1 220px", minWidth: 0, alignSelf: "center" }}>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>Gap between night pairs{gapOn ? "" : ": off"}</span>
+        <span style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.45 }}>
+          Clear days after a block of nights before the next block starts. Separate from how many nights in a row.
+        </span>
+      </span>
+      {gapOn ? (<>
+        {cell("At least (days)", <Stepper label="Gap between night pairs: days" value={rules.nightBlockGap} min={1} max={14}
+          editable={editable} T={T} onChange={(n) => setRules({ nightBlockGap: n })} />)}
+        {cell("If it can't all fit", <>
+          {strength("nightBlockGap", "Gap between night pairs: if it can't all fit", ABSENT.nightBlockGap)}
+          {gapState.state === "hard" && (
+            <MustCost>Must can leave a night uncovered rather than start the next block sooner.</MustCost>
+          )}
+        </>, "170px")}
+        <button type="button" disabled={!editable} style={smallBtn} onClick={() => dropRule("nightBlockGap")}>Turn off</button>
+      </>) : (
+        <button type="button" disabled={!editable} style={smallBtn}
+          onClick={() => setRules({ nightBlockGap: 3, ruleStates: { ...rules.ruleStates, nightBlockGap: ABSENT.nightBlockGap } })}>
+          Turn on
+        </button>
+      )}
+    </div>
+  );
+
   const work = rules.weeklyDuties || {};
   const oneNumber = work.min != null && work.min === work.max;
   return (
@@ -459,6 +502,7 @@ export function PersonWeek({ rules, setRules, dropRule, editable, T, Card, codes
           max={7} none={most} editable={editable} T={T} onChange={(n) => setIn("weeklyMax", sh, n)} />)}
         {cell("In a row", inRow(sh), "180px")}
         {cell("If it can't all fit", strength(`weeklyCaps:${sh}`, `${LABEL[sh]}: if it can't all fit`), "170px")}
+        {sh === "night" && nightGap}
       </>))}
       {personRow("off", "Off days", colourFor(rules, codes, "off"), <>
         {cell("At least", <Stepper label="Each person: off days, at least" value={rules.weeklyMin?.off}

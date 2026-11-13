@@ -844,6 +844,16 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
             {Object.entries(wardBent.reduce((m, r) => { m[r.rule] = (m[r.rule] || 0) + 1; return m; }, {}))
               .sort((a, b) => b[1] - a[1])
               .map(([r, n]) => `${r} (${n})`).join(", ")}.
+            {/* Each pair split or left half done, by name and night. */}
+            {wardBent.some((r) => r.days) && (
+              <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                {wardBent.filter((r) => r.days).map((r) => (
+                  <li key={`${r.staffId}|${r.days.join()}`}>
+                    {r.rule.charAt(0).toUpperCase() + r.rule.slice(1)}: {nameOf(r.staffId)} ({r.days.map((d) => prettyWeekday(d)).join(", ")})
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </Card>
