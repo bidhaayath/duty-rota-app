@@ -704,6 +704,12 @@ function costWeights(cfg) {
   if (offMax === 'hard') w.offMax = HARD;
   else if (offMax === 'disabled') w.offMax = 0;
 
+  /* The gap between night blocks, where the ward sets one: a Must as a Must,
+     Protect and weaker below a rest rule broken (it is a rest preference). A
+     strength never saved is Protect. Priced only where the gap is set. */
+  const gap = R.nightBlockGap?.state || 'soft';
+  w.nightGap = gap === 'hard' ? HARD : gap === 'disabled' ? 0 : 150;
+
   w.caps = {};
   SHIFTS.forEach((sh) => {
     const st = stateOf(`weeklyCaps:${sh}`);
@@ -949,6 +955,22 @@ export function rosterContext(cfg, dates, staff) {
     }
   });
 
+  /* The ward's gap between night blocks: at least this many clear days
+     after the last night before another block starts. Read from the days
+     before the range as well, so it holds into a new week and a new month.
+     Unset, or set to Ignore: nothing here, and nothing anywhere looks. */
+  const gapOn = Number.isInteger(cfg.nightBlockGap) && cfg.nightBlockGap >= 1
+    && cfg.ruleStates?.nightBlockGap?.state !== 'disabled';
+  const nightGap = gapOn ? cfg.nightBlockGap : 0;
+  const lastNight = {};          // staffId -> days before the range of their last night
+  if (nightGap) {
+    staff.forEach((s) => {
+      for (let back = 1; back <= nightGap + 1; back++) {
+        if (histCats[`${String(s.id)}|${shiftDate(dates[0], -back)}`] === 'night') { lastNight[String(s.id)] = back; break; }
+      }
+    });
+  }
+
   /* Anyone whose own rule keeps them off on Fridays. Sharing Friday offs and
      non-official duty evenly is about the people who can be given either. */
   const fridayOffIds = new Set(staff.map((s) => String(s.id))
@@ -961,6 +983,7 @@ export function rosterContext(cfg, dates, staff) {
     W: costWeights(cfg),
     staff, dates, keep, histCats, requested, prevOf, nextOf, weekOf, weekDays, datesOfWeek, fridayOf,
     dowOf, fridayOffIds, dayTry, nonOff, banned, allowed, forced, cov, seniorNeed, blockMax, seed, limitFor, lastSeen,
+    nightGap, lastNight,
     seniorIds: new Set(staff.filter((s) => isSenior(cfg, s)).map((s) => String(s.id))),
     maxDaysOn: cfg.maxConsecutiveDays ?? 4,
     absMax: cfg.absoluteMaxDaysOn ?? 6,
@@ -990,6 +1013,7 @@ export function auditRoster(cfg, ctx, cells) {
     staff, dates, weekOf, weekDays, fridayOf, nonOff, requested,
     banned, allowed, forced, cov, seniorNeed, seed, seniorIds,
     maxDaysOn, absMax, W, prevOf, nextOf, datesOfWeek, limitFor, lastSeen, dowOf, fridayOffIds,
+    nightGap, lastNight,
   } = ctx;
 
   const shortfalls = [], seniorGaps = [], issues = [];
@@ -1047,6 +1071,8 @@ export function auditRoster(cfg, ctx, cells) {
     const apart = limitFor(id, 'apart');
     const lastAt = {};
     if (lastSeen[id]) Object.entries(lastSeen[id]).forEach(([sh, back]) => { lastAt[sh] = -back; });
+    // Their last night, for the ward's gap between night blocks (only when one is set).
+    let lastNightAt = nightGap && lastNight[id] != null ? -lastNight[id] : null;
     // Their rules for each day of the week; nothing for most people.
     const days = limitFor(id, 'days');
     const t = totals[id] = {
@@ -1085,6 +1111,14 @@ export function auditRoster(cfg, ctx, cells) {
       }
 
       const yesterday = runCat;
+      /* A block of nights starting sooner after the last night than the
+         ward's gap. Finishing a block is never this: yesterday was a night. */
+      if (nightGap && cat === 'night') {
+        if (yesterday !== 'night' && lastNightAt != null && day - lastNightAt - 1 < nightGap) {
+          flag(W.nightGap, { date, shift: cat, kind: 'nightGap' });
+        }
+        lastNightAt = day;
+      }
       if (yesterday) {
         if (banned[yesterday]?.has(cat) && !allowed[yesterday]?.has(cat)) {
           flag(W.sequence, { date, shift: cat, kind: 'sequence' });
@@ -1514,6 +1548,7 @@ const ISSUE_NAMES = {
   partOffMax: 'off days for part-week staff',
   partOffMin: 'off days for part-week staff',
   weeklyCap: 'weekly limit',
+  nightGap: 'gap between night pairs',
 };
 function issuesToRelaxations(issues) {
   return issues.map((i) => (i.kind === 'personal' ? {
@@ -1893,6 +1928,15 @@ function buildOnce(cfg, seed, ctx) {
   const maxBlock = (id, sh) =>
     limitFor(id, 'block')[sh] ?? cfg.maxBlock?.[sh] ?? (sh === 'night' ? 2 : 4);
   const ownRule = (id, type, sh) => limitFor(id, 'own')?.[`${type}:${sh}`];
+  /* Starting another block of nights sooner after the last night than the
+     ward's gap. Carrying on a block is never this. Only where a gap is set. */
+  const nightTooSoon = (id, date) => {
+    if (!ctx.nightGap || catAt(id, shiftDate(date, -1)) === 'night') return false;
+    for (let back = 2; back <= ctx.nightGap; back++) {
+      if (catAt(id, shiftDate(date, -back)) === 'night') return true;
+    }
+    return false;
+  };
   // Had this shift within the clear days they asked for between two of it.
   const tooSoon = (id, sh, date) => {
     const gap = limitFor(id, 'apart')[sh];
@@ -2112,6 +2156,8 @@ function buildOnce(cfg, seed, ctx) {
         const legacy = cfg.soft || {};
         const defaultState = (key) => {
           if (key === 'workPattern') return legacy.weeklyCaps ? 'soft' : 'hard';
+          // The gap between night blocks starts at Protect when turned on.
+          if (key === 'nightBlockGap') return 'soft';
           if (key.startsWith('weeklyCaps')) return legacy.weeklyCaps ? 'soft' : 'hard';
           return legacy[key] ? 'soft' : 'hard';
         };
@@ -2128,7 +2174,10 @@ function buildOnce(cfg, seed, ctx) {
         const daysOwn = !!R.daysInRow?.state && (R.daysInRow.state !== stateOf('workPattern')
           || (R.daysInRow.state === 'soft' && prioOf('daysInRow') !== prioOf('workPattern')));
         const daysKey = daysOwn ? 'daysInRow' : 'workPattern';
-        const relaxable = [capKey, 'workPattern', ...(daysOwn ? ['daysInRow'] : []), 'offMin', 'sequence']
+        // The night gap is only among them for a night, and only where the ward sets one.
+        const gapHere = !!ctx.nightGap && shift === 'night';
+        const relaxable = [capKey, 'workPattern', ...(daysOwn ? ['daysInRow'] : []), ...(gapHere ? ['nightBlockGap'] : []),
+          'offMin', 'sequence']
           .filter((k) => stateOf(k) === 'soft')
           .sort((a, b) => prioOf(b) - prioOf(a));      // P4 yields first
         // People's own Try rules give way before any of the ward's.
@@ -2191,6 +2240,10 @@ function buildOnce(cfg, seed, ctx) {
             if (stateOf(daysKey) !== 'disabled' && !dropped.has(daysKey)
                 && (!lastResort || stateOf(daysKey) === 'hard')) {
               if (workedRun(s.id, date) >= maxDaysOn) return false;
+            }
+            // A Must gap holds even at the last resort.
+            if (gapHere && !dropped.has('nightBlockGap') && (!lastResort || stateOf('nightBlockGap') === 'hard')) {
+              if (nightTooSoon(s.id, date)) return false;
             }
             if (!singleShift && stateOf('offMin') !== 'disabled' && !dropped.has('offMin')
                 && (!lastResort || stateOf('offMin') === 'hard')) {
@@ -2438,6 +2491,8 @@ function buildOnce(cfg, seed, ctx) {
             if (runOf(s.id, sh, date) >= maxBlock(s.id, sh)) return false;
             if (workedRun(s.id, date) >= maxDaysOn) return false;
           }
+          // A spare night never starts a block inside the ward's gap.
+          if (sh === 'night' && nightTooSoon(s.id, date)) return false;
           // Nobody is worked into the ground, whatever the off limit says.
           if (workedRun(s.id, date) >= (cfg.absoluteMaxDaysOn ?? 6)) return false;
           return true;
