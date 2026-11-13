@@ -691,6 +691,26 @@ function costWeights(cfg) {
   const pattern = stateOf('workPattern');
   if (pattern === 'hard') w.block = HARD;
   else if (pattern === 'disabled') { w.block = 0; w.doubleOff = 0; }
+  /* Keeping a shift together (nights in pairs): a pair split, or half a
+     pair left unfinished where it crosses into the next week, is priced by
+     In a row's level — high enough that only covering a shift, or a rule
+     above it, ever splits one. And a run longer than In a row allows is
+     priced a little above that, so a third night is never the way to mend
+     a pair: In a row holds across the start of a week as anywhere. Below
+     an uncovered shift, always. A Must is a Must; Ignore costs nothing. */
+  /* Only on a ward that keeps a shift in pairs; anywhere else, and at Bend
+     first, nothing changes: a manager can choose cover over pairs by
+     lowering the level. */
+  const TOGETHER = { 1: 600, 2: 450, 3: 300 };
+  const pairsOn = SHIFTS.some((sh) => (cfg.blockTogether?.[sh] ?? 0) > 1);
+  const level = Math.min(4, Math.max(1, R.workPattern?.priority ?? 4));
+  w.unfinished = 0;
+  w.pairsFirst = false;
+  if (pairsOn && pattern === 'hard') {
+    w.blockTogether = HARD; w.unfinished = HARD; w.pairsFirst = true;
+  } else if (pairsOn && pattern === 'soft' && TOGETHER[level]) {
+    w.blockTogether = TOGETHER[level]; w.unfinished = w.blockTogether; w.block = w.blockTogether + 50; w.pairsFirst = true;
+  }
   // Working days in a row: its own strength where one is saved, else the working pattern's.
   const days = R.daysInRow?.state || pattern;
   if (days === 'hard') w.consecutive = HARD;
@@ -1265,6 +1285,19 @@ export function auditRoster(cfg, ctx, cells) {
         const nx = nextOf[days[6]];
         const after = nx ? cells[`${id}|${nx}`] : null;
         for (const { sh, n, rule } of together) {
+          /* Half of the ward's pair left unfinished where it crosses into
+             the next week: begun on the last day of a week and not carried
+             on the next day although they are here — or begun before the
+             range (last Saturday, say) and not carried on into its first
+             day. Priced as a pair split, and reported as one. */
+          // `nights`: the lone night, named with the person where it is reported.
+          const unfinished = (date, nights) => {
+            if (!rule && W.unfinished) flag(W.unfinished, { date, staffId: id, shift: sh, kind: 'blockTogether', nights });
+          };
+          if (weekOf[pv] === undefined && seed[id].runCat === sh && seed[id].runLen < n) {
+            const first = cells[`${id}|${days[0]}`];
+            if (first != null && first !== sh) unfinished(days[0], [shiftDate(days[0], -1)]);
+          }
           let count = 0, runs = 0;
           for (let i = 0; i < 7; i++) {
             if (cells[`${id}|${days[i]}`] !== sh) continue;
@@ -1273,13 +1306,15 @@ export function auditRoster(cfg, ctx, cells) {
             const open = (i === 0 && (before == null || before === sh))
               || (j === 6 && (after == null || after === sh));
             if (!open) { count += j - i + 1; runs += 1; }
+            if (j === 6 && j - i + 1 < n && after != null && after !== sh && !(i === 0 && before === sh)) unfinished(nx, [days[6]]);
             i = j;
           }
           const ideal = Math.ceil(count / n);
           if (runs > ideal && rule) {
             flag(priceOf(rule, COST.blockTogether) * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'personal', rule });
           } else if (runs > ideal) {
-            flag(W.blockTogether * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'blockTogether' });
+            flag(W.blockTogether * (runs - ideal), { date: wk, staffId: id, shift: sh, kind: 'blockTogether',
+              nights: days.filter((d) => cells[`${id}|${d}`] === sh) });
           }
         }
       }
@@ -1569,6 +1604,8 @@ function issuesToRelaxations(issues) {
       : i.kind === 'shiftMin' ? `fewest ${i.shift}s a week`
       : i.kind === 'blockTogether' ? `${i.shift}s not kept together`
       : (ISSUE_NAMES[i.kind] || i.kind),
+    // The days of a pair split or left half done, so it can be named.
+    ...(i.nights ? { days: i.nights } : {}),
   }));
 }
 
@@ -2294,11 +2331,30 @@ function buildOnce(cfg, seed, ctx) {
         const near = (a, b) => Math.abs(a - b) < 1e-9;
         /* Blocks come first: real rotas are written in runs of the same
            duty, and nights are worked in pairs. */
+        /* A pair is finished before anybody else is given their first of
+           the week — a pair begun last Saturday on this Sunday too — as long
+           as the week still has a place left for everyone waiting for a
+           first one. Only where the shift is kept together. */
+        const pairOf = () => (ctx.W.pairsFirst ? cfg.blockTogether?.[shift] : null);
+        let room = null;
+        const roomForFirsts = () => {
+          if (room != null) return room;
+          const week = weekOf(date);
+          const later = dates.filter((d) => weekOf(d) === week && d > date).length;
+          const placesLeft = Math.max(0, min - countToday[shift] - 1) + later * min;
+          const waiting = staff.filter((s) => assignedToday[s.id] === undefined
+            && weekCount(s.id, date, shift) === 0 && (limitFor(s.id, 'min')[shift] || 0) > 0
+            && !(cfg.staffShifts?.[s.id]?.length && !cfg.staffShifts[s.id].includes(shift))).length;
+          room = placesLeft >= waiting;
+          return room;
+        };
         const blockScore = (id) => {
           const run = runOf(id, shift, date);
           const soFar = weekCount(id, date, shift);
           const wantMin = ownRule(id, 'atLeast', shift)?.count ?? limitFor(id, 'min')[shift];
           const pair = ownRule(id, 'together', shift);
+          const n = pairOf(id);
+          if (run > 0 && n > 1 && run < n && (soFar === 0 || roomForFirsts())) return -1100;
           /* Having had none of this shift all week outranks everything,
              including finishing a pair of nights. Pairing is a preference,
              not a requirement: with seven nights and six people, insisting
