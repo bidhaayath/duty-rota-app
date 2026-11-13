@@ -31,6 +31,7 @@ import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
 import YourStaff from "./YourStaff";
 import { StepNav, StepFoot, ReadyList, readyLines, loadStep, saveStep, weekSummary } from "./RosterSteps";
 import { AskIniBar, reducedMotion } from "./IniBuddy";
+import { tell, weekMoment, firstOfMonth } from "./iniMoments";
 
 const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
 
@@ -51,7 +52,7 @@ export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
   onApplied, deptId,
   // The "Ask Ini" bar: where its note goes, and whether the Ini panel is busy with one.
-  onAskIni, iniWorking = false,
+  onAskIni, iniWorking = false, userId,
 }) {
   const rules = mergeRules(data.rosterRules || {});
 
@@ -190,6 +191,7 @@ export default function SmartRosterTab({
     setFixNote({ text, key: settingsKey({ ...rules, coverage }) });
     setRules({ coverage });
     setCelebrate(Date.now());
+    tell("fixed");
   };
   const fixed = fixNote && fixNote.key === rulesKey && (
     <span><strong>Changed — {fixNote.text}.</strong> Undo puts it back.</span>
@@ -221,6 +223,9 @@ export default function SmartRosterTab({
           from: weekStart, to: weekEnd,
         });
         setCelebrate(Date.now());
+        // Ini says how it went: a little dance for every shift covered, plain help for gaps.
+        const m = weekMoment(res.report);
+        if (m) tell(m.moment, { n: m.n });
       } catch (e) {
         console.error("Roster generation failed:", e);
         setProposal({ failed: true, problems: ["Something went wrong. Nothing has been changed."], deptId });
@@ -283,6 +288,10 @@ export default function SmartRosterTab({
          without this the manager arrives at a different seven days and
          reasonably concludes the wrong rota was applied. */
       if (onApplied) onApplied(verify.week);
+      /* The first week of a month used. Said a moment later, by the Ini
+         still on screen: the page has moved to the Weekly Rota by then. */
+      const month = firstOfMonth(deptId, verify.week);
+      if (month) setTimeout(() => tell("firstOfMonth", { month }), 400);
     }
     return undefined;
   }, [data, verify, codeById, onApplied, deptId]);
@@ -414,7 +423,7 @@ export default function SmartRosterTab({
       {/* ── Ask Ini, on every step ── */}
       {onAskIni && (
         <AskIniBar onAsk={onAskIni} thinking={busy || iniWorking} celebrating={!!celebrate}
-          editable={staffEditable} T={T} />
+          editable={staffEditable} T={T} userId={userId} />
       )}
 
       <div ref={stepsRef} style={{ scrollMarginTop: 12 }}>

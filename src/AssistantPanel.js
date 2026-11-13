@@ -40,12 +40,15 @@ import { startMonthBuild } from "./monthBuildRunner";
 import MonthPreview from "./MonthPreview";
 import IniMascot from "./IniMascot";
 import { useLook } from "./IniBuddy";
+import { useIniMoments } from "./iniMoments";
 import { mergeRules, seniorTermsOf } from "./rosterConfig";
 import { SHIFTS } from "./rosterEngine";
 import { GROUPS, LEAVE_TYPES, entryFor, readReply, checkLines, applyLines, savedWords } from "./iniActions";
 import { DAY_LABEL, weekOrderOf } from "./personRuleChecks";
 
 const MAX_TEXT = 1000;
+// Played once each time the panel opens (the header's Ini is new each time).
+const PEEK = { name: "peek", n: 1 };
 
 const MSG = {
   retry: "The assistant couldn't read your note just now. Please try again in a minute.",
@@ -147,6 +150,8 @@ export default function AssistantPanel({
      note. Read at once, as "Read my note" reads it. And told whether Ini is
      busy reading or building, so the bar's Ini can look it. */
   ask, onWorking,
+  // Who is signed in: Ini's moments and Quiet Ini are kept per person.
+  userId,
 }) {
   const [open, setOpen] = useState(false);
   // null while checking; { ok: true, cap, used, remaining } or { ok: false, reason }
@@ -222,6 +227,9 @@ export default function AssistantPanel({
   // The button's Ini watches the pointer too.
   const fabRef = useRef(null);
   const fabLook = useLook(fabRef);
+  /* The button's Ini speaks at moments when the Ask Ini bar's is not on
+     screen (iniMoments.js) — on another tab, say, after "Use this roster". */
+  const fabMoment = useIniMoments({ userId, priority: 1, enabled: !!visible && !!deptId && !open && !preview });
   useEffect(() => {
     if (!ask || ask.n === askSeen.current) return;
     askSeen.current = ask.n;
@@ -1031,8 +1039,19 @@ export default function AssistantPanel({
             boxShadow: "0 6px 18px rgba(20,43,51,0.18)",
           }}
         >
-          <IniMascot mood={iniMood({ ...face, open: false })} size={44} look={fabLook} />
+          <IniMascot mood={iniMood({ ...face, open: false })} size={44} look={fabLook} act={fabMoment.act} />
         </button>
+      )}
+      {/* What the button's Ini says, just above it. Read out; never in the way of a tap. */}
+      {!open && !preview && (
+        <span aria-live="polite"
+          style={fabMoment.bubble ? {
+            position: "fixed", right: 16, bottom: 74, zIndex: 900, maxWidth: "min(240px, calc(100vw - 32px))",
+            background: "#142B33", color: "#fff", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4, padding: "7px 10px",
+            borderRadius: "12px 12px 4px 12px", boxShadow: "0 6px 18px rgba(20,43,51,0.18)", pointerEvents: "none",
+          } : { position: "fixed", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
+          {fabMoment.bubble || ""}
+        </span>
       )}
 
       {open && (
@@ -1059,7 +1078,8 @@ export default function AssistantPanel({
               padding: "16px 18px 12px", borderBottom: `1px solid ${T.line}`,
             }}>
               <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
-                <IniMascot mood={iniMood({ ...face, open: true })} size={44} style={{ flexShrink: 0 }} />
+                {/* Ini peeks in as the panel opens. */}
+                <IniMascot mood={iniMood({ ...face, open: true })} size={44} style={{ flexShrink: 0 }} act={PEEK} />
                 <div style={{ minWidth: 0 }}>
                   <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>
                     Ini · your rota assistant

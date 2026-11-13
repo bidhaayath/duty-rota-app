@@ -11,14 +11,17 @@
    look:   { x, y }, each -1 to 1: where Ini's eyes turn, on top of the face
            (the pointer, say). Default straight ahead.
    morph:  true lets Ini's body gently change shape as it bobs. Default false.
+   act:    { name, n }: a little move, played once each time n changes —
+           'hop', 'dance', 'wave' (a small arm pops out), 'peek' (rises into
+           view) or 'yawn' (the yawning face, and a stretch).
 
    Ini blinks now and then and bobs gently. All of it — the bob, the blink,
-   the eyes following, the change of shape — stops for anyone who has
-   "reduce motion" turned on. Everything is drawn with inline SVG attributes,
+   the eyes following, the change of shape, the moves — stops for anyone who
+   has "reduce motion" turned on. Everything is drawn with inline SVG attributes,
    so nothing depends on CSS classes. Ini's colours are fixed in both themes.
    No libraries, no network. */
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const C = { body: '#9ED066', lid: '#8DBF55', eye: '#FFFFFF', pupil: '#945600' };
 const SHADOW = 'rgba(29, 43, 38, 0.14)';
@@ -81,6 +84,13 @@ export const INI_MOODS = {
     eyes: [eye(78, 96, 17, { pr: 6 }), eye(114, 90, 19, { pr: 6.4 })],
     mouth: { x: 97, y: 122, w: 0, curve: 0, o: 4 },
   },
+  // A big yawn: lids heavy, mouth a tall O, the body stretched up.
+  yawning: {
+    name: 'yawning',
+    body: blob({ cx: 100, cy: 86, wl: 60, wr: 60, ht: 60, hb: 54, k: [0.78, 0.8, 0.8, 0.78] }),
+    eyes: [eye(80, 84, 17, { sy: 0.85, lid: 0.78, pr: 4 }), eye(120, 84, 17, { sy: 0.85, lid: 0.78, pr: 4 })],
+    mouth: { x: 100, y: 116, w: 0, curve: 0, o: 9 },
+  },
   done: {
     name: 'all done',
     body: blob({ cx: 100, cy: 98, wl: 56, wr: 54, ht: 58, hb: 44, tx: 14, ry: 6, ly: 10, k: [0.5, 0.78, 0.78, 0.6] }),
@@ -120,9 +130,29 @@ function ensureKeyframes() {
     '@keyframes iniMascotBob{0%,100%{transform:translateY(0) scale(1,1)}50%{transform:translateY(-4px) scale(1.012,0.99)}}' +
     '@keyframes iniMascotShade{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(0.9);opacity:0.75}}' +
     // A slower, uneven change of shape, so it never quite lines up with the bob.
-    '@keyframes iniMascotMorph{0%,100%{transform:scale(1,1)}33%{transform:scale(1.03,0.97)}66%{transform:scale(0.975,1.025)}}';
+    '@keyframes iniMascotMorph{0%,100%{transform:scale(1,1)}33%{transform:scale(1.03,0.97)}66%{transform:scale(0.975,1.025)}}' +
+    // The moves, each played once.
+    '@keyframes iniActHop{0%,100%{transform:translateY(0) scale(1,1)}20%{transform:translateY(0) scale(1.06,0.92)}' +
+    '50%{transform:translateY(-14px) scale(0.96,1.05)}80%{transform:translateY(0) scale(1.04,0.95)}}' +
+    '@keyframes iniActDance{0%,25%,50%,75%,100%{transform:translateY(0) rotate(0)}12.5%,62.5%{transform:translateY(-7px) rotate(-9deg)}' +
+    '37.5%,87.5%{transform:translateY(-7px) rotate(9deg)}}' +
+    '@keyframes iniActWave{0%,100%{transform:rotate(0)}30%,70%{transform:rotate(-5deg)}}' +
+    '@keyframes iniActArm{0%,100%{transform:rotate(0) scale(0)}15%{transform:rotate(-25deg) scale(1)}35%,75%{transform:rotate(22deg) scale(1)}' +
+    '55%{transform:rotate(-25deg) scale(1)}90%{transform:rotate(0) scale(1)}}' +
+    '@keyframes iniActPeek{0%{transform:translateY(36px) rotate(-8deg);opacity:0}60%{transform:translateY(-4px) rotate(3deg);opacity:1}' +
+    '100%{transform:translateY(0) rotate(0);opacity:1}}' +
+    '@keyframes iniActStretch{0%,100%{transform:scale(1,1)}40%,70%{transform:scale(0.96,1.06)}}';
   document.head.appendChild(s);
 }
+
+// Each move: its keyframes on the whole of Ini, and how long it lasts.
+const ACTS = {
+  hop: { anim: 'iniActHop 650ms cubic-bezier(0.34, 1.3, 0.64, 1)', ms: 650 },
+  dance: { anim: 'iniActDance 1700ms ease-in-out', ms: 1700 },
+  wave: { anim: 'iniActWave 1500ms ease-in-out', ms: 1500 },
+  peek: { anim: 'iniActPeek 700ms cubic-bezier(0.22, 1, 0.36, 1)', ms: 700 },
+  yawn: { anim: 'iniActStretch 1600ms ease-in-out', ms: 1600 },
+};
 
 let idCounter = 0;
 
@@ -177,8 +207,20 @@ function paint(n, s, blinkAmt, look = { x: 0, y: 0 }) {
   n.o.setAttribute('opacity', m.o > 0.4 ? 1 : 0);
 }
 
-export default function IniMascot({ mood = 'listening', size = 48, shadow = false, label = 'Ini', style, className, look, morph = false }) {
-  const target = INI_MOODS[mood] ? mood : 'listening';
+export default function IniMascot({ mood = 'listening', size = 48, shadow = false, label = 'Ini', style, className, look, morph = false, act }) {
+  // The move playing now, if any. None at all with reduced motion.
+  const [playing, setPlaying] = useState(null);
+  const actName = act && ACTS[act.name] ? act.name : null;
+  const actN = act ? act.n : null;
+  useEffect(() => {
+    if (!actName || prefersReducedMotion()) return undefined;
+    setPlaying(actName);
+    const t = setTimeout(() => setPlaying(null), ACTS[actName].ms);
+    return () => clearTimeout(t);
+  }, [actName, actN]);
+  // A yawn is a face too.
+  const asked = playing === 'yawn' ? 'yawning' : mood;
+  const target = INI_MOODS[asked] ? asked : 'listening';
   const idRef = useRef(null);
   if (idRef.current === null) { idCounter += 1; idRef.current = `ini-mascot-${idCounter}`; }
   const id = idRef.current;
@@ -290,7 +332,13 @@ export default function IniMascot({ mood = 'listening', size = 48, shadow = fals
           style={motion ? { animation: 'iniMascotShade 3.4s ease-in-out infinite', transformBox: 'fill-box', transformOrigin: '50% 50%' } : undefined}
         />
       )}
+      <g style={motion && playing ? { animation: ACTS[playing].anim, transformBox: 'fill-box', transformOrigin: '50% 100%' } : undefined}>
       <g style={motion ? { animation: 'iniMascotBob 3.4s ease-in-out infinite', transformBox: 'fill-box', transformOrigin: '50% 100%' } : undefined}>
+        {/* A small arm, only while waving: behind the body, rising from its side. */}
+        {motion && playing === 'wave' && (
+          <ellipse cx="172" cy="84" rx="8" ry="15" fill={C.body}
+            style={{ animation: 'iniActArm 1500ms ease-in-out', transformBox: 'fill-box', transformOrigin: '30% 100%' }} />
+        )}
         <path ref={set(['body'])} fill={C.body}
           style={motion && morph ? { animation: 'iniMascotMorph 5.3s ease-in-out infinite', transformBox: 'fill-box', transformOrigin: '50% 60%' } : undefined} />
         {[0, 1].map((i) => (
@@ -305,6 +353,7 @@ export default function IniMascot({ mood = 'listening', size = 48, shadow = fals
         ))}
         <path ref={set(['smile'])} fill="none" stroke={C.pupil} strokeWidth="2.6" strokeLinecap="round" />
         <ellipse ref={set(['o'])} fill={C.pupil} />
+      </g>
       </g>
     </svg>
   );

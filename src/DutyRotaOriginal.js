@@ -1356,6 +1356,15 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   const [iniAsk, setIniAsk] = useState(null);
   const [iniWorking, setIniWorking] = useState(false);
   const iniShown = !!deptId && !viewOnlyRole && !editBlocked && !currentDeptLocked;
+  // Who is signed in, read once: Ini's greetings and "Quiet Ini" are kept per person.
+  const [iniUser, setIniUser] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    supabase.auth.getSession().then(({ data: s }) => {
+      if (alive) setIniUser((s && s.session && s.session.user && s.session.user.id) || null);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   if (tab === "dashboard") {
     return (
@@ -2213,7 +2222,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
               onApplied={(sunday) => { setWeekStart(sunday); setRotaView("weekly"); setTab("rota"); }}
               onAskIni={iniShown ? (text) => setIniAsk((a) => ({ text, n: (a ? a.n : 0) + 1 })) : undefined}
-              iniWorking={iniWorking}
+              iniWorking={iniWorking} userId={iniUser}
             />
           )
         )}
@@ -2227,7 +2236,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
           the same three checks that switch Undo off. */}
       <AssistantPanel
         visible={iniShown}
-        ask={iniAsk} onWorking={setIniWorking}
+        ask={iniAsk} onWorking={setIniWorking} userId={iniUser}
         deptId={deptId} data={data} update={update} staffEditable={staffEditable}
         currentTab={tab} onOpenBilling={onOpenBilling} onOpenRequests={() => setTab("requests")}
         T={T} uid={uid} dstr={dstr}
