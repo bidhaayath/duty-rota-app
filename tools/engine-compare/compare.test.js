@@ -11,6 +11,7 @@ import { weekConfig } from "../../src/rosterConfig";
 import { prepareMonth } from "../../src/monthBuild";
 import {
   seededWard, SAME, RULES, withRules, fitHistory, addDays, days, erWard, withNightGap, erRealWard, thoiWard, withWeek,
+  withInARowLevel, withoutPairs,
 } from "./wards";
 
 const fs = require("fs");
@@ -388,10 +389,19 @@ const monthWards = () => {
   });
   list.push({ name: "ER 2026-12", month: "2026-12", data: erWard() });
   list.push({ name: "ER real 2026-12", month: "2026-12", data: erRealWard() });
+  const level = ["", "Protect most", "Protect", "Bend if needed", "Bend first"];
   return [
     ...list, ...list.map((w) => ({ ...w, name: `${w.name} gap 3`, data: withNightGap(w.data, 3) })),
+    // In a row at each level: what pairs cost in cover, level by level.
+    ...[2, 3, 4].map((p) => ({ name: `ER real ${level[p]}`, month: "2026-12", data: withInARowLevel(erRealWard(), p) })),
+    // Wards without pairs, which must build exactly as before.
+    { name: "ER real no pairs", month: "2026-12", data: withoutPairs(erRealWard()) },
+    ...list.filter((w) => w.name.startsWith("seeded")).slice(0, 2)
+      .map((w) => ({ ...w, name: `${w.name} no pairs`, data: withoutPairs(w.data) })),
     { name: "ER real weeks x4", weeks: { from: "2026-12-06", n: 4 }, data: erRealWard() },
     { name: "thoi weeks x4", weeks: { from: "2026-11-15", n: 4 }, data: thoiWard() },
+    { name: "thoi weeks x4 Protect", weeks: { from: "2026-11-15", n: 4 }, data: withInARowLevel(thoiWard(), 2) },
+    { name: "thoi 2026-12 Protect", month: "2026-12", data: withInARowLevel(thoiWard(), 2) },
   ];
 };
 
@@ -498,7 +508,7 @@ function buildWeeks(E, data, { from, n }) {
     Object.assign(cells, out.cells);
     d = withWeek(d, out.cells);
   }
-  return { ...measureMonth(first, cells, null, { from, to: addDays(from, 7 * n - 1) }), ms };
+  return { ...measureMonth(first, cells, null, { from, to: addDays(from, 7 * n - 1) }), ms, text: JSON.stringify(cells) };
 }
 
 only("month")("whole months: runs, pairs, gaps between night pairs, fairness, cover and time", () => {
@@ -506,7 +516,8 @@ only("month")("whole months: runs, pairs, gaps between night pairs, fairness, co
   monthWards().forEach((w, i) => {
     if (i % OF !== PART) return;
     if (w.weeks) {
-      rows.push({ name: w.name, old: buildWeeks(oldE, w.data, w.weeks), new: buildWeeks(newE, w.data, w.weeks) });
+      const o = buildWeeks(oldE, w.data, w.weeks), n = buildWeeks(newE, w.data, w.weeks);
+      rows.push({ name: w.name, same: o.text === n.text ? 1 : 0, old: { ...o, text: undefined }, new: { ...n, text: undefined } });
       return;
     }
     const cfg = steady(prepareMonth({ data: w.data, month: w.month, lookFrom: addDays(`${w.month}-01`, -28) }).config);
@@ -514,9 +525,10 @@ only("month")("whole months: runs, pairs, gaps between night pairs, fairness, co
       const began = Date.now();
       const out = E.generateRoster(cfg);
       const ms = Date.now() - began;
-      return out.ok ? { ...measureMonth(cfg, out.cells, w.month), ms } : { refused: true, ms };
+      return out.ok ? { ...measureMonth(cfg, out.cells, w.month), ms, text: JSON.stringify(out.cells) } : { refused: true, ms };
     };
-    rows.push({ name: w.name, old: side(oldE), new: side(newE) });
+    const o = side(oldE), n = side(newE);
+    rows.push({ name: w.name, same: o.text === n.text ? 1 : 0, old: { ...o, text: undefined }, new: { ...n, text: undefined } });
   });
   save("month", { rows });
 }, 7200000);

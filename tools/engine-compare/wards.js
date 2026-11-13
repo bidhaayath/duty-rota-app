@@ -269,37 +269,39 @@ export const withNightGap = (data, n) => ({
    screenshots; no live data): seventeen staff, nine Shift Managers, 3 to 5
    on mornings and afternoons, 3 on every night with a Shift Manager on each
    shift; nights at least 1 and at most 2 a week, in pairs; In a row and the
-   night most at Protect most; working days 5 (Must), at most 4 in a row
-   (Protect); sharing fairly at Bend if needed; look back 30 days. SRN MISA
+   night most at Protect most; working days 5 (Must), at most 5 in a row
+   (following In a row); off days 2 to 2 (Must); the five usual rules of what
+   may follow what at Protect most; sharing fairly at Protect; no look-back
+   (as on the later screenshots). SRN MISA
    does mornings only and is always off on Friday and Saturday (Must); RN
-   RAHEEMA mornings and afternoons only. Off days and what may follow what
-   were not shown, so they are the app's own defaults. The duties before
-   December are a plain rotation. */
+   RAHEEMA mornings and afternoons only. The duties before December are a
+   plain rotation. */
 const ER_NAMES = ["SRN MISA", "RN ANA", "SRN SAI", "SRN FATHUN", "SRN AMINATH", "RN RAHEEMA", "RN SHAU", "SRN NAJU",
   "RN RASHEE", "RN MARIYAM", "RN MISA", "RN MAI", "RN ZEENA", "RN FIRU", "RN MIRU", "RN SADHA", "HAMDHA"];
 export function erRealWard() {
   const first = "2026-12-01";
   const staff = ER_NAMES.map((name, i) => ({ id: `r${i}`, name, leavePeriods: [] }));
   const rosterRules = {
-    lookbackDays: 30,
+    lookbackDays: 0,
     coverage: { morning: { min: 3, max: 5 }, afternoon: { min: 3, max: 5 }, evening: { min: 0, max: 0 }, night: { min: 3, max: 3 } },
     seniorTerm: "Shift Manager",
     seniorStaff: staff.slice(0, 9).map((s) => s.id),
     seniorCover: { morning: 1, afternoon: 1, evening: 0, night: 1 },
-    weeklyMin: { morning: 1, afternoon: 1, evening: 1, night: 1, off: 1 },
+    weeklyMin: { morning: 1, afternoon: 1, evening: 1, night: 1, off: 2 },
     weeklyMax: { morning: 4, afternoon: 4, evening: null, night: 2, off: 2 },
     blockDays: { morning: 99, afternoon: 99, evening: 3, night: 2 },
     blockTogether: { night: 2 },
     weeklyDuties: { min: 5, max: 5 },
-    maxDaysOn: 4,
+    maxDaysOn: 5,
     ruleStates: {
       "weeklyCaps:morning": { state: "soft", priority: 2 },
       "weeklyCaps:afternoon": { state: "soft", priority: 2 },
       "weeklyCaps:night": { state: "soft", priority: 1 },
       workPattern: { state: "soft", priority: 1 },
-      daysInRow: { state: "soft", priority: 2 },
-      fairNights: { state: "soft", priority: 3 },
-      fairNonOfficial: { state: "soft", priority: 3 },
+      fairNights: { state: "soft", priority: 2 },
+      fairNonOfficial: { state: "soft", priority: 2 },
+      offMin: { state: "hard", priority: 1 },
+      sequence: { state: "soft", priority: 1 },
     },
     staffShifts: { r0: ["morning"], r5: ["morning", "afternoon"] },
     personRules: [{ id: "m1", staffId: "r0", type: "offOn", days: [5, 6], strength: "hard" }],
@@ -360,3 +362,16 @@ export function withWeek(data, cells) {
   });
   return { ...data, cells: next };
 }
+
+
+// The same ward with In a row (every shift) at another level: 1 Protect most … 4 Bend first.
+export const withInARowLevel = (data, priority) => ({
+  ...data,
+  rosterRules: { ...data.rosterRules, ruleStates: { ...(data.rosterRules.ruleStates || {}), workPattern: { state: "soft", priority } } },
+});
+// The same ward without pairs: nights In a row "Up to 2" instead of "In pairs".
+export const withoutPairs = (data) => {
+  const rosterRules = { ...data.rosterRules };
+  delete rosterRules.blockTogether;
+  return { ...data, rosterRules };
+};
