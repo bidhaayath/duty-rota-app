@@ -50,7 +50,7 @@ const PARAGRAPH_ANSWER = {
     { type: "set_shifts", staff: "s2", shifts: ["morning", "afternoon"] },
     rule("s3", "atMost", { shift: "night", count: 1 }),
     rule("s4", "apart", { shift: "night" }),
-    { type: "add_leave", staff: "s5", leaveType: "annual", start: "2026-12-28", end: null },
+    { type: "add_leave", staff: "s5", leaveType: null, start: "2026-12-28", end: null },
     { type: "fixed_duty", staff: "s5", date: "2026-12-27", duty: "night" },
   ],
   unclear: [],
@@ -68,7 +68,7 @@ describe("the paragraph", () => {
       ["Shifts · RAHEEMA · any shift → morning and afternoon only", true, null],
       ["Rule · SHAU · At most 1 night a week — starts as Try", true, null],
       ["Rule · MARIYAM · At least ? days between nights — starts as Try", false, "How many days between MARIYAM's nights?"],
-      ["Annual leave · RASHEE · from Mon 28 Dec until ?", false, "Until when is RASHEE on leave?"],
+      ["Leave · RASHEE · from Mon 28 Dec until ?", false, "What kind of leave is RASHEE on?"],
       ["Fixed duty · RASHEE · Night on Sun 27 Dec 2026, fixed by you — always kept", true, null],
     ]);
     expect(reply.unclear).toEqual([]);
@@ -79,7 +79,7 @@ describe("the paragraph", () => {
     const { check } = linesFor(PARAGRAPH_ANSWER, data);
     let lines = check();
     lines = answer(lines, 4, { rule: { ...lines[4].rule, count: 3 }, checked: true });
-    lines = answer(lines, 5, { end: "2027-01-05", checked: true });
+    lines = answer(lines, 5, { leaveType: "annual", end: "2027-01-05", checked: true });
     lines = check(lines);
     expect(lines.every((l) => l.on)).toBe(true);
     expect(title(lines[4])).toBe("Change MARIYAM's gap between nights from 4 to 3 days");
@@ -151,11 +151,21 @@ describe("leave with no last day", () => {
   test("is asked for on the line; a last day before the first is not an answer", () => {
     const { check } = linesFor({ actions: [{ type: "add_leave", staff: "s6", leaveType: "annual", start: "2026-12-10", end: null }], unclear: [] });
     let [l] = check();
-    expect([l.ask, l.on, l.waiting]).toEqual([{ kind: "date", question: "Until when is ALI on leave?", min: "2026-12-10" }, false, true]);
+    expect([l.ask, l.on, l.waiting]).toEqual([{ kind: "leave", min: "2026-12-10", type: false, end: true,
+      question: "Until when is ALI on leave?", endQuestion: "Until when is ALI on leave?" }, false, true]);
     [l] = check([{ ...l, end: "2026-12-09", checked: true }]);
     expect(l.waiting).toBe(true);
     [l] = check([{ ...l, end: "2026-12-12", checked: true }]);
     expect([l.on, title(l)]).toEqual([true, "Annual leave · ALI · 10–12 Dec"]);
+  });
+
+  test("the kind of leave is never assumed: not named, it is asked for too", () => {
+    const { check } = linesFor({ actions: [{ type: "add_leave", staff: "s6", leaveType: "holiday", start: "2026-12-10", end: "2026-12-12" }], unclear: [] });
+    let [l] = check();
+    expect([l.leaveType, l.ask.type, l.ask.end, l.ask.question, l.on]).toEqual([null, true, false, "What kind of leave is ALI on?", false]);
+    expect(title(l)).toBe("Leave · ALI · 10–12 Dec");
+    [l] = check([{ ...l, leaveType: "emergency", checked: true }]);
+    expect([l.on, title(l)]).toEqual([true, "Emergency leave · ALI · 10–12 Dec"]);
   });
 
   test("with no first day either, the server keeps it as a note, not a line", () => {
@@ -291,6 +301,37 @@ describe("the server", () => {
     expect(out.unclear).toEqual(Array(3).fill("A rule for SHAU did not make sense, so it was left out."));
   });
 
+  test("Not added only lists what is not saved: notes describing a line in the checklist are dropped", () => {
+    const actions = [
+      { type: "add_leave", staff: "s5", leaveType: null, start: "2026-12-28", end: null },
+      rule("s4", "apart", { shift: "night" }),
+    ];
+    const out = parse.checkAnswer({ actions, unclear: [
+      // As the real model wrote it, and others like it.
+      "Rashee's leave type was not given in the note, so it is recorded as annual leave; the end date is left for the app to ask.",
+      "Rashee is going on leave on 28 December, but the last day was not given.",
+      "The number of days between Mariyam's nights was not given, so the app will ask you.",
+      "I assumed Ana's mornings start this week.",
+      // Real "not added" notes stay.
+      "Shau at most 2 nights in a row can only be set for the whole ward, in Smart Roster.",
+      "Hawwa's leave was not recorded because no first day was given. You can record it in the Staff tab.",
+      "Zuha is not on this rota's staff list, so nothing was added for her.",
+    ] }, input, TODAY);
+    expect(out.unclear).toEqual([
+      "Shau at most 2 nights in a row can only be set for the whole ward, in Smart Roster.",
+      "Hawwa's leave was not recorded because no first day was given. You can record it in the Staff tab.",
+      "Zuha is not on this rota's staff list, so nothing was added for her.",
+    ]);
+    // The server's own notes are not filtered.
+    expect(parse.checkAnswer({ actions: [rule("s3", "atMost", { shift: "night", count: 9 })], unclear: [] }, input, TODAY).unclear)
+      .toEqual(["A rule for SHAU did not make sense, so it was left out."]);
+  });
+
+  test("leave with no kind named reaches the app with none; the server never picks one", () => {
+    const out = parse.checkAnswer({ actions: [{ type: "add_leave", staff: "s5", leaveType: null, start: "2026-12-28", end: null }], unclear: [] }, input, TODAY);
+    expect(out.actions[0]).toMatchObject({ leaveType: null, start: "2026-12-28", end: null });
+  });
+
   test("the prompt: one person never changes the ward, leave is never a rule, and staff are refs only", () => {
     const { system, user } = parse.buildPrompt(input, TODAY);
     expect(system).toMatch(/Never use set_offs_per_week,\s+set_senior_cover or set_max_in_a_row for one person/);
@@ -298,9 +339,12 @@ describe("the server", () => {
     expect(system).toMatch(/recorded in the\s+Staff tab/);
     expect(system).toMatch(/"Shau gets only 1\s+night a week" gives atMost night 1/);
     expect(system).toMatch(/must is true only when the note says must or has to/);
+    expect(system).toMatch(/"Ana gets all morning duty" -> \["morning"\]; "Ana only does mornings" -> \["morning"\]/);
+    expect(system).toMatch(/Never assume annual leave/);
+    expect(system).toMatch(/ONLY what is not done: never mention anything that is\s+in actions/);
     expect(user).toMatch(/s1: RN ANA/);
     STAFF.forEach(([id]) => expect(user).not.toMatch(new RegExp(`\\b${id}\\b`)));
-    // What each request costs: the instructions stay under 12,000 characters.
-    expect(system.length).toBeLessThan(12000);
+    // What each request costs: the instructions stay under 12,500 characters (11,996 on 13 Nov 2026).
+    expect(system.length).toBeLessThan(12500);
   });
 });

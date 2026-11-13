@@ -288,8 +288,10 @@ function buildPrompt(input, today) {
     '',
     'Actions you can propose:',
     '- add_leave: one person away for a longer period of the kinds in "Leave types"',
-    '  (annual leave, maternity, pre-maternity, emergency leave, other extended leave). Use',
-    '  the leave type that fits best. One day of leave has the same start and end.',
+    '  (annual leave, maternity, pre-maternity, emergency leave, other extended leave).',
+    '  leaveType only when the note names the kind ("annual leave", "maternity leave");',
+    '  "on leave" alone gives leaveType null, and the app asks. Never assume annual leave.',
+    '  One day of leave has the same start and end.',
     '  Sick leave, family related leave (FRL), medical leave and release duty are NOT leave',
     '  types here: they are duty codes written in the person\'s days, so use set_code with',
     '  the department\'s code for them (for example SL, FRL, ML, RD) when it is in the list.',
@@ -314,8 +316,11 @@ function buildPrompt(input, today) {
     '- set_non_official: mark days as non-official (public holidays and similar, which',
     '  count for payment), or unmark them with nonOfficial false.',
     '- set_shifts: a standing Smart Roster setting: the only shifts this person may be',
-    '  given ("Mariyam only does nights"). An empty list removes the restriction ("Mariyam',
-    '  can do any shift").',
+    '  given. It needs no dates and no number. Worked examples, each set_shifts alone:',
+    '  "Ana gets all morning duty" -> ["morning"]; "Ana only does mornings" -> ["morning"];',
+    '  "Ana is on mornings" -> ["morning"]; "Mariyam only does nights" -> ["night"];',
+    '  "Raheema is doing only morning and afternoon duty, no night" -> ["morning",',
+    '  "afternoon"]. An empty list removes the restriction ("Mariyam can do any shift").',
     '- set_offs_per_week: a standing Smart Roster setting for the whole ward: the fewest',
     '  (min) and most (max) off days each person gets per week. Use null for a side the',
     '  note does not mention ("at least 2 offs" gives min 2, max null; "2 offs a week"',
@@ -364,7 +369,8 @@ function buildPrompt(input, today) {
     '  planning period), otherwise null. At most one build. You never build it yourself:',
     '  the app does that after the manager confirms.',
     '- unclear: short plain-English notes to the manager about anything you could not turn',
-    '  into an action with confidence, written with people\'s names and dates written the',
+    '  into an action with confidence. ONLY what is not done: never mention anything that is',
+    '  in actions, what the app will ask, or a choice you made. Write people\'s names and dates the',
     '  way people say them ("11 January", not "2027-01-11"). The manager cannot',
     '  reply to you, so never ask them to confirm or offer to do it later. Say what was not',
     '  done and why, and that they can do it by hand or write the note again.',
@@ -375,7 +381,7 @@ function buildPrompt(input, today) {
     '{"actions": [ ... ], "unclear": [ "..." ]}',
     'Each action is one of these objects (every field shown is required; use null where',
     'the description says so; staff are refs like "s1"; dates are "YYYY-MM-DD"):',
-    '{"type":"add_leave","staff":"s1","leaveType":"<one of Leave types>","start":"<date>","end":"<date or null>"}',
+    '{"type":"add_leave","staff":"s1","leaveType":"<one of Leave types, or null>","start":"<date>","end":"<date or null>"}',
     '{"type":"add_request","staff":"s1","date":"<date>","duty":"morning|afternoon|evening|night|off"}',
     '{"type":"set_code","staff":"s1","start":"<date>","end":"<date>","code":"<a duty code exactly as listed>"}',
     '{"type":"clear_days","staff":"s1","start":"<date>","end":"<date>"}',
@@ -589,7 +595,8 @@ function checkAnswer(answer, input, today) {
         if (!datesOk) { note(`Leave for ${who.name} had dates that did not make sense, so it was left out.`); break; }
         actions.push({
           type: 'add_leave', staffId: who.id, staffName: who.name,
-          leaveType: leaveTypes.has(raw.leaveType) ? raw.leaveType : (leaveTypes.has('other') ? 'other' : input.leaveTypes[0]),
+          // Never a guess: a kind the note did not name is asked for in the app.
+          leaveType: leaveTypes.has(raw.leaveType) ? raw.leaveType : null,
           start: raw.start, end: raw.end == null ? null : raw.end,
         });
         break;
@@ -745,14 +752,33 @@ function checkAnswer(answer, input, today) {
 
   // The refs (s1, s2...) mean nothing to the manager, so any that slip into
   // a note are swapped back for the person's name.
-  for (const u of (Array.isArray(a.unclear) ? a.unclear : []).slice(0, 30)) {
-    const text = String(u || '')
-      .replace(/\bs(\d{1,3})\b/g, (m) => (byRef.has(m) ? byRef.get(m).name : m))
-      .trim().slice(0, 300);
-    if (text) unclear.push(text);
-  }
+  const notes = (Array.isArray(a.unclear) ? a.unclear : []).slice(0, 30).map((u) => String(u || '')
+    .replace(/\bs(\d{1,3})\b/g, (m) => (byRef.has(m) ? byRef.get(m).name : m))
+    .trim().slice(0, 300)).filter(Boolean);
+  unclear.push(...notDone(notes, actions, input.staff));
 
   return { actions, unclear };
+}
+
+/* The app shows Claude's notes under "Not added", so a note may only be
+   about something that is NOT being saved. Claude sometimes describes what
+   it did instead ("…so it is recorded as annual leave", "…left for the app
+   to ask"); such a note is dropped, and so is a note about the leave of
+   someone whose leave is already a line in the checklist. */
+const SAYS_DONE = new RegExp([
+  'recorded as', '(is|are|was|were|will be) recorded(?! because)', '(has|have) been (added|recorded|set|made)',
+  '(is|was|are|were) set (to|as)', 'left for the app', 'the app (will )?asks?', 'app (will )?ask',
+  'asked (on|in) the (app|line|checklist)', 'assum(e|ed|es|ing)', 'defaults? to', 'by default', 'treated as',
+].map((p) => `\\b${p}`).join('|'), 'i');
+const TITLES = new Set(['rn', 'mr', 'ms', 'mrs', 'dr', 'sn', 'en']);
+function notDone(notes, actions, staff) {
+  const leaveFor = new Set(actions.filter((x) => x.type === 'add_leave').map((x) => x.staffId));
+  // Someone is named in a note when a word of their listed name is (Ana for "RN ANA").
+  const names = staff.filter((s) => leaveFor.has(s.id)).map((s) => s.name.toLowerCase().split(/[^a-zÀ-ɏ']+/)
+    .filter((w) => w.length >= 3 && !TITLES.has(w)));
+  const aboutLeaveInList = (t) => /\bleave\b/i.test(t)
+    && names.some((words) => words.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(t)));
+  return notes.filter((t) => !SAYS_DONE.test(t) && !aboutLeaveInList(t));
 }
 
 /* The older reply fields, worked out from the actions, so a version of the
@@ -820,4 +846,7 @@ module.exports = async (req, res) => {
 };
 
 // Exposed for testing only; Vercel uses the default export above.
-module.exports._test = { readInput, buildSchema, buildPrompt, checkAnswer, legacyFields, isRealDate, todayMaldives, weekdayOf, WEEKDAY_NAMES };
+module.exports._test = {
+  readInput, buildSchema, buildPrompt, checkAnswer, legacyFields, isRealDate, todayMaldives, weekdayOf, WEEKDAY_NAMES,
+  notDone, askClaude,
+};

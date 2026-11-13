@@ -666,12 +666,34 @@ export default function AssistantPanel({
             })}
           </span>
         );
-      } else if (a.kind === "date") {
-        control = (
-          <input type="date" aria-label="Last day of leave" min={a.min} value={l.end || ""}
-            onChange={(e) => setLine(l.key, { end: e.target.value || null, checked: !!e.target.value && e.target.value >= a.min })}
-            style={{ fontFamily: "inherit", fontSize: 14, minHeight: 44, boxSizing: "border-box", padding: "0 10px", borderRadius: 9,
-              border: `1px solid ${T.line}`, background: "#fff", color: T.ink, maxWidth: "100%", justifySelf: "start" }} />
+      } else if (a.kind === "leave") {
+        // Up to two questions on one line: the kind of leave, and the last day.
+        const done = (type, end) => !!type && !!end && end >= a.min;
+        return (
+          <>
+            {a.type && (
+              <div role="group" aria-label={a.question} style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{a.question}</span>
+                <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {LEAVE_TYPES.map(([id, label]) => (
+                    <button key={id} type="button" aria-pressed={l.leaveType === id} style={choice(l.leaveType === id)}
+                      onClick={() => setLine(l.key, { leaveType: id, checked: done(id, l.end) })}>
+                      {l.leaveType === id ? "✓ " : ""}{label}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            )}
+            {a.end && (
+              <div role="group" aria-label={a.endQuestion} style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{a.endQuestion}</span>
+                <input type="date" aria-label="Last day of leave" min={a.min} value={l.end || ""}
+                  onChange={(e) => setLine(l.key, { end: e.target.value || null, checked: done(l.leaveType, e.target.value) })}
+                  style={{ fontFamily: "inherit", fontSize: 14, minHeight: 44, boxSizing: "border-box", padding: "0 10px", borderRadius: 9,
+                    border: `1px solid ${T.line}`, background: "#fff", color: T.ink, maxWidth: "100%", justifySelf: "start" }} />
+              </div>
+            )}
+          </>
         );
       } else if (a.kind === "year") {
         control = (

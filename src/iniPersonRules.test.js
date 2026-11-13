@@ -41,7 +41,7 @@ test("Ini asks on the line, the answers tick it, and the whole note saves in one
     { type: "person_rule", staff: "s4", rule: "apart", shift: "night", count: null, days: null, shifts: null, weekend: false, must: false },
     { type: "fixed_duty", staff: "s5", date: gone, duty: "night" },
     // Leave from a day, with no last day: Ini asks until when.
-    { type: "add_leave", staff: "s2", leaveType: "annual", start: daysOn(20), end: null },
+    { type: "add_leave", staff: "s2", leaveType: null, start: daysOn(20), end: null },
   ], unclear: [] };
   global.fetch = jest.fn((url, req) => {
     const { input } = parse.readInput(JSON.parse(req.body));
@@ -74,6 +74,8 @@ test("Ini asks on the line, the answers tick it, and the whole note saves in one
 
   const year = Number(gone.slice(0, 4)) + 1;
   fireEvent.click(screen.getByRole("button", { name: String(year) }));
+  // The kind of leave was not in the note: asked, never assumed.
+  fireEvent.click(within(screen.getByRole("group", { name: "What kind of leave is RAHEEMA on?" })).getByRole("button", { name: "Annual leave" }));
   fireEvent.change(within(screen.getByRole("group", { name: "Until when is RAHEEMA on leave?" })).getByLabelText("Last day of leave"), { target: { value: daysOn(24) } });
   expect(screen.queryByText("Answer Ini's question to add this.")).toBeNull();
 

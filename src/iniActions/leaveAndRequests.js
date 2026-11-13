@@ -1,5 +1,5 @@
 /* ─────────────── Ini's actions: leave and duty requests ───────────────
-   add_leave   { staffId, leaveType, start, end }   end null: asked on the line
+   add_leave   { staffId, leaveType, start, end }   leaveType or end null: asked on the line
    add_request { staffId, date, duty }     saved approved
    weekly_off  { staffId, weekdays, start, end }
                one line; saved as an approved off request on every matching
@@ -33,13 +33,18 @@ export const addLeave = {
   },
   saved: (n) => plural(n, "leave period"),
 
-  // A note that gives the first day only: the last is asked for on the line.
+  /* What the note did not say is asked for on the line, never guessed: the
+     kind of leave, and the last day when it gave the first only. */
   fromServer: (a) => {
     if (!isISO(a.start) || (a.end != null && (!isISO(a.end) || a.end < a.start))) return null;
-    return { staffId: a.staffId, leaveType: LEAVE_LABEL[a.leaveType] ? a.leaveType : "other", start: a.start, end: a.end || null };
+    return { staffId: a.staffId, leaveType: LEAVE_LABEL[a.leaveType] ? a.leaveType : null, start: a.start, end: a.end || null };
   },
-  asks: (l) => (l.end ? null : { kind: "date", question: `Until when is ${l.named || "this person"} on leave?`, min: l.start }),
-  missing: (l) => !l.end || l.end < l.start,
+  asks: (l) => (l.end && l.leaveType ? null : {
+    kind: "leave", min: l.start, type: !l.leaveType, end: !l.end,
+    question: !l.leaveType ? `What kind of leave is ${l.named || "this person"} on?` : `Until when is ${l.named || "this person"} on leave?`,
+    endQuestion: `Until when is ${l.named || "this person"} on leave?`,
+  }),
+  missing: (l) => !l.leaveType || !l.end || l.end < l.start,
   span: (l) => [l.start, l.end || l.start],
   describe: (l) => ({
     what: LEAVE_LABEL[l.leaveType] || "Leave",
