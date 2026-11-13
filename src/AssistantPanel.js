@@ -40,11 +40,15 @@ import { startMonthBuild } from "./monthBuildRunner";
 import MonthPreview from "./MonthPreview";
 import IniMascot from "./IniMascot";
 import { useLook } from "./IniBuddy";
+import { useIniMoments } from "./iniMoments";
 import { mergeRules, seniorTermsOf } from "./rosterConfig";
 import { SHIFTS } from "./rosterEngine";
 import { GROUPS, LEAVE_TYPES, entryFor, readReply, checkLines, applyLines, savedWords } from "./iniActions";
+import { DAY_LABEL, weekOrderOf } from "./personRuleChecks";
 
 const MAX_TEXT = 1000;
+// Played once each time the panel opens (the header's Ini is new each time).
+const PEEK = { name: "peek", n: 1 };
 
 const MSG = {
   retry: "The assistant couldn't read your note just now. Please try again in a minute.",
@@ -146,6 +150,8 @@ export default function AssistantPanel({
      note. Read at once, as "Read my note" reads it. And told whether Ini is
      busy reading or building, so the bar's Ini can look it. */
   ask, onWorking,
+  // Who is signed in: Ini's moments and Quiet Ini are kept per person.
+  userId,
 }) {
   const [open, setOpen] = useState(false);
   // null while checking; { ok: true, cap, used, remaining } or { ok: false, reason }
@@ -221,6 +227,9 @@ export default function AssistantPanel({
   // The button's Ini watches the pointer too.
   const fabRef = useRef(null);
   const fabLook = useLook(fabRef);
+  /* The button's Ini speaks at moments when the Ask Ini bar's is not on
+     screen (iniMoments.js) — on another tab, say, after "Use this roster". */
+  const fabMoment = useIniMoments({ userId, priority: 1, enabled: !!visible && !!deptId && !open && !preview });
   useEffect(() => {
     if (!ask || ask.n === askSeen.current) return;
     askSeen.current = ask.n;
@@ -617,6 +626,97 @@ export default function AssistantPanel({
     );
   } else if (result) {
     const staffOptions = result.staff;
+    const weekOrder = weekOrderOf((data && data.weekStartsOn) ?? 0);
+    const choice = (on) => ({
+      fontFamily: "inherit", fontSize: 13, fontWeight: 600, borderRadius: 999, minHeight: 44, minWidth: 44,
+      padding: "0 12px", cursor: "pointer", border: `1px solid ${on ? T.lagoon : T.line}`,
+      background: on ? "#D8EEE9" : "#fff", color: on ? T.lagoon : T.inkSoft,
+    });
+
+    /* Ini's question on a line it could not finish, and the control to
+       answer it. The line is ticked once it is answered. A person to pick
+       is asked in the person picker itself. */
+    const askControl = (l) => {
+      const a = l.ask;
+      if (!a || a.kind === "person") return null;
+      let control = null;
+      if (a.kind === "count") {
+        const n = l.rule.count;
+        const set = (v) => setLine(l.key, { rule: { ...l.rule, count: Math.min(a.max, Math.max(a.min, v)) }, checked: true });
+        control = (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <button type="button" aria-label="One fewer" style={choice(false)} onClick={() => set(n == null ? a.min : n - 1)}>−</button>
+            <span aria-live="polite" style={{ minWidth: 28, textAlign: "center", fontSize: 15, fontWeight: 700 }}>{n == null ? "?" : n}</span>
+            <button type="button" aria-label="One more" style={choice(false)} onClick={() => set(n == null ? Math.max(a.min, 2) : n + 1)}>+</button>
+          </span>
+        );
+      } else if (a.kind === "days") {
+        const days = l.rule.days || [];
+        control = (
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {weekOrder.map((d) => {
+              const on = days.includes(d);
+              const next = on ? days.filter((x) => x !== d) : [...days, d];
+              return (
+                <button key={d} type="button" aria-pressed={on} aria-label={DAY_LABEL[d]} style={choice(on)}
+                  onClick={() => setLine(l.key, { rule: { ...l.rule, days: next.length ? next : null }, checked: next.length > 0 })}>
+                  {on ? "✓ " : ""}{DAY_LABEL[d].slice(0, 3)}
+                </button>
+              );
+            })}
+          </span>
+        );
+      } else if (a.kind === "leave") {
+        // Up to two questions on one line: the kind of leave, and the last day.
+        const done = (type, end) => !!type && !!end && end >= a.min;
+        return (
+          <>
+            {a.type && (
+              <div role="group" aria-label={a.question} style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{a.question}</span>
+                <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {LEAVE_TYPES.map(([id, label]) => (
+                    <button key={id} type="button" aria-pressed={l.leaveType === id} style={choice(l.leaveType === id)}
+                      onClick={() => setLine(l.key, { leaveType: id, checked: done(id, l.end) })}>
+                      {l.leaveType === id ? "✓ " : ""}{label}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            )}
+            {a.end && (
+              <div role="group" aria-label={a.endQuestion} style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{a.endQuestion}</span>
+                <input type="date" aria-label="Last day of leave" min={a.min} value={l.end || ""}
+                  onChange={(e) => setLine(l.key, { end: e.target.value || null, checked: done(l.leaveType, e.target.value) })}
+                  style={{ fontFamily: "inherit", fontSize: 14, minHeight: 44, boxSizing: "border-box", padding: "0 10px", borderRadius: 9,
+                    border: `1px solid ${T.line}`, background: "#fff", color: T.ink, maxWidth: "100%", justifySelf: "start" }} />
+              </div>
+            )}
+          </>
+        );
+      } else if (a.kind === "year") {
+        control = (
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {a.options.map((date) => {
+              const on = !!l.yearChosen && l.date === date;
+              return (
+                <button key={date} type="button" aria-pressed={on} style={choice(on)}
+                  onClick={() => setLine(l.key, { date, yearChosen: true, checked: true })}>
+                  {on ? "✓ " : ""}{date.slice(0, 4)}
+                </button>
+              );
+            })}
+          </span>
+        );
+      }
+      return (
+        <div role="group" aria-label={a.question} style={{ display: "grid", gap: 6, marginTop: 8 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{a.question}</span>
+          {control}
+        </div>
+      );
+    };
 
     // One checklist line, whatever the action: its words from the catalogue,
     // a person picker for each person in it, its problems and warnings.
@@ -625,7 +725,10 @@ export default function AssistantPanel({
       const fields = entry.people || [];
       const { what, when, details, detailsLabel } = l.words;
       const names = fields.map((f) => (l.people[f] ? l.people[f].name : "Unknown"));
-      const title = [what, names.join(" & "), when].filter(Boolean).join(" · ");
+      // A line may say itself whole ("Change RN MARIYAM's gap between nights from 4 to 3 days").
+      const title = l.words.title || [what, names.join(" & "), when].filter(Boolean).join(" · ");
+      // Two or more people could be meant: only they are offered, and nobody is picked yet.
+      const pickFrom = l.choices ? l.choices.map((c) => ({ id: c.staffId, name: c.staffName })) : staffOptions;
       return (
         <div key={l.key} style={{
           border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 12px",
@@ -635,29 +738,37 @@ export default function AssistantPanel({
             <input
               type="checkbox"
               checked={l.on}
-              disabled={!!l.blocked}
+              disabled={!!l.blocked || l.waiting}
               onChange={(e) => setLine(l.key, { checked: e.target.checked })}
               aria-label={title}
               style={{ width: 17, height: 17, marginTop: 2, accentColor: T.lagoon, flexShrink: 0,
-                cursor: l.blocked ? "not-allowed" : "pointer" }}
+                cursor: l.blocked || l.waiting ? "not-allowed" : "pointer" }}
             />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 600, color: l.blocked ? T.inkSoft : T.ink, lineHeight: 1.45 }}>
                 {title}
               </div>
+              {l.ask && l.ask.kind === "person" && (
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginTop: 8 }}>{l.ask.question}</div>
+              )}
               {fields.map((f, i) => (
                 <label key={f} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12, color: T.inkSoft }}>
                   {fields.length > 1 ? `Person ${i + 1}` : "Person"}
                   <select
-                    value={l[f]}
-                    onChange={(e) => setLine(l.key, { [f]: e.target.value })}
-                    style={{ fontFamily: "inherit", fontSize: 12.5, padding: "4px 6px", borderRadius: 7,
+                    value={l[f] || ""}
+                    onChange={(e) => setLine(l.key, l.choices ? { [f]: e.target.value, checked: !!e.target.value } : { [f]: e.target.value })}
+                    style={{ fontFamily: "inherit", fontSize: 12.5, padding: "4px 6px", borderRadius: 7, minHeight: l.choices ? 44 : undefined,
                       border: `1px solid ${T.line}`, background: "#fff", color: T.ink, maxWidth: "100%", minWidth: 0 }}
                   >
-                    {staffOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {!l[f] && <option value="">Choose who…</option>}
+                    {pickFrom.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </label>
               ))}
+              {askControl(l)}
+              {l.waiting && (
+                <div style={{ fontSize: 12, color: T.inkSoft, lineHeight: 1.5, marginTop: 6 }}>Answer Ini's question to add this.</div>
+              )}
               {details && details.length > 0 && (
                 <details style={{ marginTop: 6, fontSize: 12, color: T.inkSoft, lineHeight: 1.5 }}>
                   <summary style={{ cursor: "pointer", fontWeight: 600 }}>{detailsLabel || `Show ${plural(details.length, "date")}`}</summary>
@@ -714,8 +825,9 @@ export default function AssistantPanel({
       : (willBuild ? `Build ${words.name}` : "Add 0 items");
     const canConfirm = picked.length > 0 || willBuild;
 
+    // One column no wider than the panel: a long name in a picker shrinks, not the page.
     body = (
-      <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
         {!lines.length && !result.build && (
           <div style={note(T.mist, T.line, T.inkSoft)}>
             Ini didn't find anything to add from your note.
@@ -729,7 +841,7 @@ export default function AssistantPanel({
             <section key={g.id}>
               <h3 style={sectionTitle}>{g.title}</h3>
               {g.note && <p style={{ fontSize: 12, color: T.inkSoft, margin: "-4px 0 8px", lineHeight: 1.5 }}>{g.note}</p>}
-              <div style={{ display: "grid", gap: 8 }}>{inGroup.map(renderLine)}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>{inGroup.map(renderLine)}</div>
               {footnotes.map((f) => (
                 <p key={f} style={{ fontSize: 12, color: T.inkSoft, margin: "8px 0 0", lineHeight: 1.5 }}>{f}</p>
               ))}
@@ -949,8 +1061,19 @@ export default function AssistantPanel({
             boxShadow: "0 6px 18px rgba(20,43,51,0.18)",
           }}
         >
-          <IniMascot mood={iniMood({ ...face, open: false })} size={44} look={fabLook} />
+          <IniMascot mood={iniMood({ ...face, open: false })} size={44} look={fabLook} act={fabMoment.act} />
         </button>
+      )}
+      {/* What the button's Ini says, just above it. Read out; never in the way of a tap. */}
+      {!open && !preview && (
+        <span aria-live="polite"
+          style={fabMoment.bubble ? {
+            position: "fixed", right: 16, bottom: 74, zIndex: 900, maxWidth: "min(240px, calc(100vw - 32px))",
+            background: "#142B33", color: "#fff", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4, padding: "7px 10px",
+            borderRadius: "12px 12px 4px 12px", boxShadow: "0 6px 18px rgba(20,43,51,0.18)", pointerEvents: "none",
+          } : { position: "fixed", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
+          {fabMoment.bubble || ""}
+        </span>
       )}
 
       {open && (
@@ -977,7 +1100,8 @@ export default function AssistantPanel({
               padding: "16px 18px 12px", borderBottom: `1px solid ${T.line}`,
             }}>
               <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
-                <IniMascot mood={iniMood({ ...face, open: true })} size={44} style={{ flexShrink: 0 }} />
+                {/* Ini peeks in as the panel opens. */}
+                <IniMascot mood={iniMood({ ...face, open: true })} size={44} style={{ flexShrink: 0 }} act={PEEK} />
                 <div style={{ minWidth: 0 }}>
                   <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>
                     Ini · your rota assistant

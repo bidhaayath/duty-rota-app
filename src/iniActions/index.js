@@ -13,8 +13,9 @@
      fromServer  (item, period) -> the line's own fields, or null to drop it
      span        (line) -> [first, last] date it touches, or none; lines
                  outside the period start unticked
-     describe    (line, ctx) -> { what, when, details? }   plain words;
-                 details is an optional list shown under "Show"
+     describe    (line, ctx) -> { what, when, details?, title? }   plain words;
+                 details is an optional list shown under "Show"; title, when
+                 given, is the whole line ("Change …'s gap … from 4 to 3 days")
      check       (line, ctx) -> { blocked?, warnings? }
      apply       (draft, line, { uid, today }) -> draft
      saved       (count) -> "2 leave periods", for the message after saving
@@ -22,13 +23,22 @@
      footnote    optional sentence shown under the group
      tabNote     optional { tabName: sentence } shown while on that tab
      opensRequests  offer "Open Duty Requests" after saving
+     applyOrder  optional: applied at this point instead of its group's
+     asks        optional (line, { today }) -> { kind, question, ... } when
+                 Ini could not finish the line and asks the manager instead
+     missing     optional (line) -> true while that question is unanswered;
+                 such a line cannot be ticked, checked or saved
      together    optional (final, ctx) -> warnings, for a check that only
                  makes sense on the result of several lines at once. Entries
                  sharing the same function are one family: it runs once, on
                  the rota as it will be after every ticked line, and its
                  warnings go on the family's last line that will be saved.
 
-   check gets ctx = { data, sim, staffEditable }: `data` is the rota as it
+   A name in the note that could be two people arrives with no person and
+   `choices` (and `named`, the name as written): the panel asks which, from
+   those people only, and the line waits for the answer.
+
+   check gets ctx = { data, sim, staffEditable, today }: `data` is the rota as it
    is now, `sim` the rota as it will be once every ticked line above this
    one is saved. So a request sees leave added a line earlier, and two
    lines that touch the same day know about each other. apply gets
@@ -48,26 +58,29 @@
 import { addLeave, addRequest, weeklyOff } from "./leaveAndRequests";
 import { setCode, clearDays, swapDuties, setNonOfficial } from "./rotaEdits";
 import { setShifts, setOffsPerWeek, setMaxInARow, setSeniorCover, setSeniors } from "./settings";
+import { setSkip, personRule, fixedDuty } from "./people";
 import { build } from "./build";
 import { plural, listWords, staffOf } from "./shared";
 
 export { LEAVE_TYPES } from "./shared";
 
-/* Shown in this order. Applied: standing settings first, then leave and
-   requests, then changes to the rota — so a duty written on a day sees
-   leave added in the same note and skips it, rather than being written
-   and then hidden under the leave. The build always comes last, after
-   saving. Within a group, lines are applied in the order the note gave
-   them unless an entry says otherwise. */
+/* Shown in this order. Applied: the ward's settings first, then each
+   person's, then leave and requests, then changes to the rota — so a duty
+   written on a day sees leave added in the same note and skips it, rather
+   than being written and then hidden under the leave. The build always
+   comes last, after saving. Within a group, lines are applied in the
+   order the note gave them unless an entry says otherwise. */
 export const GROUPS = [
   { id: "rota", title: "Changes to the rota", applyOrder: 3 },
   { id: "leave", title: "Leave & requests", applyOrder: 2 },
+  { id: "people", title: "Your staff", note: "Each person's own, from now on: as in Smart Roster → Your staff", applyOrder: 1.5 },
   { id: "settings", title: "Standing settings", note: "Standing setting: applies from now on", applyOrder: 1 },
 ];
 
 const CATALOGUE = Object.fromEntries(
   [addLeave, addRequest, weeklyOff, setCode, clearDays, swapDuties, setNonOfficial,
-    setShifts, setOffsPerWeek, setMaxInARow, setSeniorCover, setSeniors, build].map((e) => [e.type, e]),
+    setShifts, setOffsPerWeek, setMaxInARow, setSeniorCover, setSeniors,
+    setSkip, personRule, fixedDuty, build].map((e) => [e.type, e]),
 );
 export const entryFor = (type) => CATALOGUE[type] || null;
 
@@ -98,7 +111,7 @@ export function actionsOf(body) {
    people the note was read against; a line naming anyone else is dropped.
    Anything outside the period (or the dates the note asks to build) is
    kept but starts unticked, so it is never added by accident. */
-export function readReply(body, { staffIds, from, to }) {
+export function readReply(body, { staffIds, from, to, today = todayISO() }) {
   const actions = actionsOf(body || {});
   const known = new Set(staffIds);
   const b = actions.find((a) => a.type === "build");
@@ -114,10 +127,21 @@ export function readReply(body, { staffIds, from, to }) {
     if (entry.afterSave) return;
     const fields = entry.fromServer(a, { from, to });
     if (!fields) return;
-    if ((entry.people || []).some((p) => !known.has(fields[p]))) return;
+    const people = entry.people || [];
+    // A name that could be two or more people: ask which, from those only.
+    const choices = (Array.isArray(a.choices) ? a.choices : []).filter((c) => c && known.has(c.staffId));
+    const ask = people.length === 1 && !fields[people[0]] && choices.length > 1;
+    if (!ask && people.some((p) => !known.has(fields[p]))) return;
+    if ((ask || entry.asks) && (a.staffName || a.named)) fields.named = String(a.named || a.staffName);
+    if (ask) fields.choices = choices.map((c) => ({ staffId: c.staffId, staffName: String(c.staffName || "") }));
+    const question = ask ? { kind: "person", question: `Who is "${fields.named || "this"}"?` }
+      : entry.asks ? entry.asks(fields, { today }) : null;
     const span = entry.span ? entry.span(fields) : null;
     const outside = !!span && (span[1] < pFrom || span[0] > pTo);
-    lines.push({ key: `${a.type}-${i}`, type: a.type, ...fields, outside, checked: !outside });
+    lines.push({
+      key: `${a.type}-${i}`, type: a.type, ...fields, ...(question ? { ask: question } : {}),
+      outside, checked: !outside && !question,
+    });
   });
 
   const unclear = (Array.isArray(body?.unclear) ? body.unclear : [])
@@ -133,8 +157,12 @@ const byApplyOrder = (lines) => {
   return lines
     .map((l, i) => ({ l, i, e: CATALOGUE[l.type] }))
     .filter((x) => x.e && x.e.apply)
-    .sort((a, b) => (g[a.e.group] - g[b.e.group]) || ((a.e.order || 0) - (b.e.order || 0)) || (a.i - b.i));
+    .sort((a, b) => ((a.e.applyOrder ?? g[a.e.group]) - (b.e.applyOrder ?? g[b.e.group]))
+      || ((a.e.order || 0) - (b.e.order || 0)) || (a.i - b.i));
 };
+
+// A line still waiting for the manager's answer: a person to pick, or the entry's own question.
+const waiting = (e, l) => (e.people || []).some((p) => !l[p]) || (!!e.missing && e.missing(l));
 
 // The checks every line gets, then the entry's own.
 function checkOne(entry, l, ctx, staffEditable) {
@@ -163,9 +191,16 @@ export function checkLines(lines, { data, staffEditable = () => true, today = to
   const lastOf = new Map();      // together-check -> key of its last saved line
   let sim = data;
   byApplyOrder(lines).forEach(({ l, e }) => {
-    const res = checkOne(e, l, { data, sim }, staffEditable);
+    const words = e.describe(l, { data, sim, staffEditable });
+    if (waiting(e, l)) {
+      // Nothing to check until it is answered; the person is named as the note named them.
+      const people = Object.fromEntries((e.people || []).map((p) => [p, staffOf(sim, l[p]) || { name: l.named || "?" }]));
+      out[l.key] = { people, blocked: "", warnings: [], on: false, waiting: true, words };
+      return;
+    }
+    const res = checkOne(e, l, { data, sim, today }, staffEditable);
     const on = !!l.checked && !res.blocked;
-    out[l.key] = { ...res, on, words: e.describe(l, { data, sim, staffEditable }) };
+    out[l.key] = { ...res, on, waiting: false, words };
     if (on) sim = e.apply({ ...sim }, l, { ...PREVIEW, staffEditable });
     if (on && e.together) lastOf.set(e.together, l.key);
   });
@@ -187,7 +222,8 @@ export function applyLines(d, lines, { staffEditable = () => true, uid, today })
   const data = { ...d };
   let draft = d;
   byApplyOrder(lines.filter((l) => l.checked)).forEach(({ l, e }) => {
-    if (checkOne(e, l, { data, sim: draft }, staffEditable).blocked) return;
+    if (waiting(e, l)) return;
+    if (checkOne(e, l, { data, sim: draft, today }, staffEditable).blocked) return;
     draft = e.apply(draft, l, { uid, today, staffEditable });
   });
   return draft;

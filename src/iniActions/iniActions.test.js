@@ -49,7 +49,8 @@ describe("reading the server's answer", () => {
       unclear: ["Fathimath could be two people."],
     }, period);
     expect(r.lines).toHaveLength(2);
-    expect(lineOf(r.lines, "add_leave")).toMatchObject({ leaveType: "other", checked: true, outside: false });
+    // A kind of leave Ini does not know is never guessed: the line asks for it.
+    expect(lineOf(r.lines, "add_leave")).toMatchObject({ leaveType: null, checked: false, outside: false, ask: { kind: "leave", type: true } });
     expect(lineOf(r.lines, "add_request")).toMatchObject({ checked: false, outside: true });
     expect(r.unclear).toEqual(["Fathimath could be two people."]);
   });

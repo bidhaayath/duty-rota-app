@@ -25,7 +25,10 @@
      rosterRules.blockDays.night        most nights in a row (1–7, or 99 = no limit)
    Written as Smart Roster's "Days in a row (most)" box and the Night box
    of its "In a row" row write them. Above what those boxes allow is
-   blocked, so Ini never saves a value the screen could not. */
+   blocked, so Ini never saves a value the screen could not.
+
+   set_shifts and set_seniors are about named people, so the checklist
+   shows them under "Your staff" (people.js), not with the ward's settings. */
 
 import { mergeRules, seniorTermsOf, seniorNeedOf } from "../rosterConfig";
 import { SHIFTS } from "../rosterEngine";
@@ -47,7 +50,7 @@ const planShifts = (l, data) => {
 
 export const setShifts = {
   type: "set_shifts",
-  group: "settings",
+  group: "people",
   people: ["staffId"],
   savedAs: "settings",
   saved: (n) => plural(n, "standing setting"),
@@ -336,7 +339,7 @@ const isAre = (list) => (list.length === 1 ? "is" : "are");
 
 export const setSeniors = {
   type: "set_seniors",
-  group: "settings",
+  group: "people",
   savedAs: "settings",
   saved: setShifts.saved,
   together: seniorsTogether,

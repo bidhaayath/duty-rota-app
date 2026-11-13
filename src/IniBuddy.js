@@ -11,11 +11,17 @@
    The eyes follow the pointer and the body gently changes shape. A hover
    lifts and tilts Ini and says hello, once; a tap makes Ini jump and say a
    tip; five quick taps, a spin. With "reduce motion" none of it moves: Ini
-   is awake at once, looks ahead, and still says what it has to say.     */
+   is awake at once, looks ahead, and still says what it has to say.
+
+   It is also the Ini that speaks at real moments (iniMoments.js) while
+   Smart Roster is open — a dance for a week with every shift covered,
+   plain help when something has gone wrong — and the bar has the "Quiet
+   Ini" switch, remembered per person on this device.                    */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Send } from "lucide-react";
+import { Send, Bell, BellOff } from "lucide-react";
 import IniMascot from "./IniMascot";
+import { useIniMoments, isQuiet, setQuiet } from "./iniMoments";
 
 export const reducedMotion = () => {
   try {
@@ -88,7 +94,9 @@ const HELLO = "Hi! Need a hand?";
 const WHEE = "Wheee! That tickles!";
 const QUICK_MS = 1600;     // five taps inside this is a spin
 
-export function IniBuddy({ mood, look, size = 52 }) {
+/* `moment` is what iniMoments has Ini saying and doing: { bubble, act,
+   hush }. One bubble at a time: the newest of a tip and a moment shows. */
+export function IniBuddy({ mood, look, size = 52, moment = null, quiet = false }) {
   const [reduce] = useState(reducedMotion);
   const [hover, setHover] = useState(false);
   const [bubble, setBubble] = useState(null);
@@ -104,10 +112,17 @@ export function IniBuddy({ mood, look, size = 52 }) {
   useEffect(() => { if (!reduce) ensureKeyframes(); }, [reduce]);
   useEffect(() => () => Object.values(timers.current).forEach(clearTimeout), []);
 
-  const say = (text, ms) => { setBubble(text); later("bubble", ms, () => setBubble(null)); };
+  const momentText = moment && moment.bubble;
+  // A moment arriving takes the place of a tip still showing.
+  useEffect(() => { if (momentText) { clearTimeout(timers.current.bubble); setBubble(null); } }, [momentText]);
+  const say = (text, ms) => {
+    if (moment && moment.hush) moment.hush();
+    setBubble(text); later("bubble", ms, () => setBubble(null));
+  };
   const hello = () => {
     setHover(true);
-    if (said.current.hello) return;
+    // Quiet Ini says nothing unasked; a hover is not asking.
+    if (said.current.hello || quiet) return;
     said.current.hello = true;
     say(HELLO, 2600);
   };
@@ -130,6 +145,7 @@ export function IniBuddy({ mood, look, size = 52 }) {
   };
 
   const lifted = !reduce && hover && !move;
+  const shown = bubble || momentText || null;
   return (
     <span style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
       <button type="button" aria-label="Ini: tap for a tip" onClick={tap}
@@ -142,24 +158,35 @@ export function IniBuddy({ mood, look, size = 52 }) {
           animation: reduce || !move ? undefined
             : move === "spin" ? "iniBuddySpin 900ms cubic-bezier(0.34, 1.4, 0.64, 1)" : "iniBuddyHop 620ms ease-out",
         }}>
-        <IniMascot mood={surprised ? "spotted" : mood} look={reduce ? undefined : look} morph={!reduce} size={size} />
+        <IniMascot mood={surprised ? "spotted" : mood} look={reduce ? undefined : look} morph={!reduce} size={size}
+          act={moment ? moment.act : undefined} />
       </button>
       {/* Read out when Ini says something; empty otherwise. */}
       <span aria-live="polite"
-        style={bubble ? {
+        style={shown ? {
           position: "absolute", left: "calc(100% + 6px)", bottom: "calc(100% - 14px)", zIndex: 2, width: "max-content", maxWidth: 230,
           background: "#142B33", color: "#fff", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4, padding: "7px 10px",
           borderRadius: "12px 12px 12px 4px", boxShadow: "0 6px 18px rgba(20,43,51,0.18)", pointerEvents: "none",
         } : { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
-        {bubble || ""}
+        {shown || ""}
       </span>
     </span>
   );
 }
 
 /* The bar: Ini, the box, and Send. Enter sends too. */
-export function AskIniBar({ onAsk, thinking = false, celebrating = false, editable = true, T }) {
+export function AskIniBar({ onAsk, thinking = false, celebrating = false, editable = true, T, userId }) {
   const [text, setText] = useState("");
+  // The Ini that speaks at moments while Smart Roster is open (before the floating one).
+  const moment = useIniMoments({ userId, priority: 2 });
+  const [quiet, setQuietState] = useState(() => isQuiet(userId));
+  useEffect(() => { setQuietState(isQuiet(userId)); }, [userId]);
+  const toggleQuiet = () => {
+    const on = !quiet;
+    setQuiet(userId, on);
+    setQuietState(on);
+    if (on) moment.hush();
+  };
   const [focused, setFocused] = useState(false);
   const [phase, setPhase] = useState(() => (reducedMotion() ? "awake" : "asleep"));
   useEffect(() => {
@@ -182,7 +209,7 @@ export function AskIniBar({ onAsk, thinking = false, celebrating = false, editab
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "8px 10px", flexWrap: "wrap", background: "#fff",
                   border: `1px solid ${T.line}`, borderRadius: 14, padding: "6px 10px" }}>
-      <span ref={here} style={{ display: "inline-flex" }}><IniBuddy mood={mood} look={look} /></span>
+      <span ref={here} style={{ display: "inline-flex" }}><IniBuddy mood={mood} look={look} moment={moment} quiet={quiet} /></span>
       <input aria-label="Ask Ini a question" value={text} disabled={!editable}
         placeholder="Ask Ini — e.g. Mariyam is on leave 10th to 15th"
         onChange={(e) => setText(e.target.value)}
@@ -196,6 +223,14 @@ export function AskIniBar({ onAsk, thinking = false, celebrating = false, editab
                  display: "inline-flex", alignItems: "center", gap: 6, background: T.lagoon, color: "#fff",
                  opacity: !editable || !text.trim() ? 0.5 : 1, cursor: !editable || !text.trim() ? "not-allowed" : "pointer" }}>
         <Send size={15} /> Send
+      </button>
+      {/* Quiet Ini: no unasked bubbles or dancing. Taps are still answered. */}
+      <button type="button" aria-pressed={quiet} onClick={toggleQuiet}
+        title={quiet ? "Ini stays quiet until you tap it" : "Ini says a word at good moments"}
+        style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, minHeight: 44, padding: "0 12px", borderRadius: 10,
+                 border: `1px solid ${quiet ? T.lagoon : T.line}`, background: quiet ? "#D8EEE9" : "#fff",
+                 color: quiet ? T.lagoon : T.inkSoft, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+        {quiet ? <BellOff size={14} /> : <Bell size={14} />} Quiet Ini
       </button>
     </div>
   );
