@@ -152,17 +152,17 @@ const row = (cells, widths) => cells.map((c, i) => String(c).padEnd(widths[i])).
   }
   if (jobs.includes("month")) {
     const rows = (merge("month").rows || []).sort((a, b) => a.name.localeCompare(b.name));
-    const w = [20, 11, 11, 10, 11, 13, 13, 13, 9, 9, 15];
+    const w = [20, 11, 11, 10, 11, 11, 11, 13, 13, 13, 9, 9, 15];
     const pair = (a, b) => `${a} → ${b}`;
     const sd = (m, sh) => (m.refused ? "refused" : `${m.spread[sh].range}/${m.spread[sh].sd}`);
     console.log("\nmonth: whole months, old → new, counted from the finished rota");
-    console.log(row(["ward", "night runs", "cross-week", "day runs", "short gaps", "nights", "mornings", "afternoons",
+    console.log(row(["ward", "night runs", "cross-week", "day runs", "pairs split", "half pairs", "short gaps", "nights", "mornings", "afternoons",
       "uncov", "above", "seconds"], w));
     const sum = { old: {}, new: {} };
     rows.forEach((r) => {
       ["old", "new"].forEach((k) => {
         const m = r[k];
-        ["longRuns", "crossWeek", "dayRuns", "shortGaps", "uncovered", "aboveMost", "ms"].forEach((x) => {
+        ["longRuns", "crossWeek", "dayRuns", "pairsSplit", "halfPairs", "shortGaps", "uncovered", "aboveMost", "ms"].forEach((x) => {
           sum[k][x] = (sum[k][x] || 0) + (m[x] || 0);
         });
         ["night", "morning", "afternoon"].forEach((sh) => {
@@ -174,6 +174,7 @@ const row = (cells, widths) => cells.map((c, i) => String(c).padEnd(widths[i])).
       const o = r.old, n = r.new;
       const pct = o.ms ? Math.round(((n.ms - o.ms) / o.ms) * 100) : 0;
       console.log(row([r.name, pair(o.longRuns ?? "-", n.longRuns ?? "-"), pair(o.crossWeek ?? "-", n.crossWeek ?? "-"), pair(o.dayRuns ?? "-", n.dayRuns ?? "-"),
+        pair(o.pairsSplit ?? "-", n.pairsSplit ?? "-"), pair(o.halfPairs ?? "-", n.halfPairs ?? "-"),
         pair(o.shortGaps ?? "-", n.shortGaps ?? "-"), pair(sd(o, "night"), sd(n, "night")),
         pair(sd(o, "morning"), sd(n, "morning")), pair(sd(o, "afternoon"), sd(n, "afternoon")),
         pair(o.uncovered ?? "-", n.uncovered ?? "-"), pair(o.aboveMost ?? "-", n.aboveMost ?? "-"),
@@ -182,6 +183,7 @@ const row = (cells, widths) => cells.map((c, i) => String(c).padEnd(widths[i])).
     const f = (x) => (Math.round(x * 100) / 100);
     const pct = sum.old.ms ? Math.round(((sum.new.ms - sum.old.ms) / sum.old.ms) * 100) : 0;
     console.log(row(["all months", pair(sum.old.longRuns, sum.new.longRuns), pair(sum.old.crossWeek, sum.new.crossWeek), pair(sum.old.dayRuns, sum.new.dayRuns),
+      pair(sum.old.pairsSplit, sum.new.pairsSplit), pair(sum.old.halfPairs, sum.new.halfPairs),
       pair(sum.old.shortGaps, sum.new.shortGaps),
       pair(`${sum.old.nightRange}/${f(sum.old.nightSd)}`, `${sum.new.nightRange}/${f(sum.new.nightSd)}`),
       pair(`${sum.old.morningRange}/${f(sum.old.morningSd)}`, `${sum.new.morningRange}/${f(sum.new.morningSd)}`),
@@ -190,6 +192,8 @@ const row = (cells, widths) => cells.map((c, i) => String(c).padEnd(widths[i])).
       `${(sum.old.ms / 1000).toFixed(0)} → ${(sum.new.ms / 1000).toFixed(0)} (${pct >= 0 ? "+" : ""}${pct}%)`], w));
     console.log("\n(night runs = runs of nights longer than In a row allows, cross-week = of those, over a week's start;");
     console.log(" day runs = the same for other shifts, leaving out anyone kept to one shift;");
+    console.log(" pairs split = nights in more runs in a week than pairs needed; half pairs = a lone night on a");
+    console.log(" week's last day not carried on the next day although they are here;");
     console.log(" short gaps = night blocks starting sooner after the last night than the ward's gap, or 3 where");
     console.log(" it sets none; nights/mornings/afternoons = most less fewest / standard deviation per person over");
     console.log(" the month; uncov = shifts below minimum; above = shift-days above Most; seconds = one build each,");

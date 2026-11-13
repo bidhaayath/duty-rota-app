@@ -9,7 +9,9 @@ import * as oldE from "./old/rosterEngine";
 import * as newE from "../../src/rosterEngine";
 import { weekConfig } from "../../src/rosterConfig";
 import { prepareMonth } from "../../src/monthBuild";
-import { seededWard, SAME, RULES, withRules, fitHistory, addDays, days, erWard, withNightGap } from "./wards";
+import {
+  seededWard, SAME, RULES, withRules, fitHistory, addDays, days, erWard, withNightGap, erRealWard, thoiWard, withWeek,
+} from "./wards";
 
 const fs = require("fs");
 const path = require("path");
@@ -363,13 +365,21 @@ only("keys")("strength keys: each at a level of its own, against the same week w
      longRuns    runs of nights longer than the ward's "In a row" allows
                  (crossWeek: those running over the start of a week)
      dayRuns     the same for other shifts, leaving out anyone kept to one shift
+     pairsSplit  whole weeks where someone's nights came in more separate runs
+                 than pairs needed (a run running on past either end of the
+                 build is left open: it may carry on there)
+     halfPairs   half a pair not finished where it crosses into the next week:
+                 a lone night on a week's last day, the next day here and not a
+                 night — including a lone night just before the build
      shortGaps   night blocks starting fewer clear days after the last night
                  than the ward's gap (3 where the ward sets none, to show it)
-     spread      per person over the month, for nights, mornings, afternoons:
-                 most less fewest, and the standard deviation — counted over
-                 people here every day of the month with no shift ticks and
-                 no rule of their own about that shift
-     uncovered, aboveMost, and the milliseconds each build took.        */
+     spread      per person over the month (or the weeks built), for nights,
+                 mornings, afternoons: most less fewest, and the standard
+                 deviation — counted over people here every day with no shift
+                 ticks and no rule of their own about that shift
+     uncovered, aboveMost, and the milliseconds the builds took.
+   Two wards are also built week after week, as Smart Roster builds them,
+   each week on the rota the last one left. */
 const monthWards = () => {
   const list = MONTHS.map((month, i) => {
     const { data } = seededWard(700 + i, { from: `${month}-01`, historyDays: 35, span: 28 });
@@ -377,23 +387,31 @@ const monthWards = () => {
     return { name: `seeded ${month}`, month, data };
   });
   list.push({ name: "ER 2026-12", month: "2026-12", data: erWard() });
-  return [...list, ...list.map((w) => ({ ...w, name: `${w.name} gap 3`, data: withNightGap(w.data, 3) }))];
+  list.push({ name: "ER real 2026-12", month: "2026-12", data: erRealWard() });
+  return [
+    ...list, ...list.map((w) => ({ ...w, name: `${w.name} gap 3`, data: withNightGap(w.data, 3) })),
+    { name: "ER real weeks x4", weeks: { from: "2026-12-06", n: 4 }, data: erRealWard() },
+    { name: "thoi weeks x4", weeks: { from: "2026-11-15", n: 4 }, data: thoiWard() },
+  ];
 };
 
-function measureMonth(cfg, cells, month) {
+function measureMonth(cfg, cells, month, range = { from: cfg.from, to: cfg.to }) {
   const cats = catOfCode(cfg);
   const histOf = (id, date) => cats[cfg.history?.cells?.[`${id}|${date}`]];
   const catAt = (id, date) => cells[`${id}|${date}`] ?? histOf(id, date);
-  const span = days(addDays(cfg.from, -21), Math.round((new Date(cfg.to) - new Date(cfg.from)) / 86400000) + 22);
-  const built = new Set(days(cfg.from, Math.round((new Date(cfg.to) - new Date(cfg.from)) / 86400000) + 1));
-  const inMonth = [...built].filter((d) => d.startsWith(month));
+  const length = Math.round((new Date(range.to) - new Date(range.from)) / 86400000) + 1;
+  const span = days(addDays(range.from, -21), length + 21);
+  const builtList = days(range.from, length);
+  const built = new Set(builtList);
+  const inMonth = month ? builtList.filter((d) => d.startsWith(month)) : builtList;
   const staff = cfg.staff.filter((s) => !(cfg.skipStaff || []).includes(s.id));
   const isWeekStart = (date) => {
     const [y, m, d] = date.split("-").map(Number);
     return new Date(y, m - 1, d).getDay() === (cfg.weekStartsOn ?? 0);
   };
   const gapWanted = cfg.nightBlockGap || 3;
-  let longRuns = 0, crossWeek = 0, shortGaps = 0, dayRuns = 0;
+  const pairN = cfg.blockTogether?.night;
+  let longRuns = 0, crossWeek = 0, shortGaps = 0, dayRuns = 0, pairsSplit = 0, halfPairs = 0;
   for (const s of staff) {
     for (const sh of SHIFTS) {
       const most = cfg.maxBlock?.[sh] ?? (sh === "night" ? 2 : 4);
@@ -422,6 +440,31 @@ function measureMonth(cfg, cells, month) {
       if (startsBlock && built.has(date) && lastNight != null && i - lastNight - 1 < gapWanted) shortGaps += 1;
       if (night) lastNight = i;
     });
+    if (pairN > 1) {
+      const N = (d) => catAt(s.id, d) === "night";
+      // Whole weeks inside the build.
+      builtList.filter(isWeekStart).forEach((wk) => {
+        const week = days(wk, 7);
+        if (!week.every((d) => built.has(d))) return;
+        let count = 0, runs = 0;
+        for (let i = 0; i < 7; i++) {
+          if (!N(week[i])) continue;
+          let j = i;
+          while (j < 6 && N(week[j + 1])) j += 1;
+          const next = addDays(week[6], 1);
+          const open = (i === 0 && N(addDays(week[0], -1))) || (j === 6 && (!built.has(next) || N(next)));
+          if (!open) { count += j - i + 1; runs += 1; }
+          i = j;
+        }
+        if (runs > Math.ceil(count / pairN)) pairsSplit += runs - Math.ceil(count / pairN);
+      });
+      // A lone night on a week's last day (or just before the build), not carried on the next day although they are here.
+      span.forEach((d) => {
+        const next = addDays(d, 1);
+        if (!isWeekStart(next) || !built.has(next) || cells[`${s.id}|${next}`] == null) return;
+        if (N(d) && !N(addDays(d, -1)) && !N(next)) halfPairs += 1;
+      });
+    }
   }
 
   const own = new Set((cfg.personRules || []).filter(Boolean).map((r) => `${r.staffId}|${r.shift || "days"}`));
@@ -436,14 +479,36 @@ function measureMonth(cfg, cells, month) {
     const sd = Math.sqrt(counts.reduce((a, b) => a + (b - mean) ** 2, 0) / counts.length);
     spread[sh] = { range: Math.max(...counts) - Math.min(...counts), sd: Math.round(sd * 100) / 100, people: counts.length };
   }
-  const { uncovered, aboveMost } = recount(cfg, { cells });
-  return { longRuns, crossWeek, dayRuns, shortGaps, spread, uncovered, aboveMost };
+  const { uncovered, aboveMost } = recount({ ...cfg, from: range.from, to: range.to }, { cells });
+  return { longRuns, crossWeek, dayRuns, pairsSplit, halfPairs, shortGaps, spread, uncovered, aboveMost };
 }
 
-only("month")("whole months: runs, gaps between night pairs, fairness, cover and time", () => {
+/* Weeks one after another, each built on the rota the last one left — as
+   "Use this roster" leaves it. The first week's config holds the history. */
+function buildWeeks(E, data, { from, n }) {
+  let d = data, ms = 0;
+  const cells = {};
+  const first = steady(weekConfig(data, from));
+  for (let k = 0; k < n; k++) {
+    const cfg = steady(weekConfig(d, addDays(from, 7 * k)));
+    const began = Date.now();
+    const out = E.generateRoster(cfg);
+    ms += Date.now() - began;
+    if (!out.ok) return { refused: true, ms };
+    Object.assign(cells, out.cells);
+    d = withWeek(d, out.cells);
+  }
+  return { ...measureMonth(first, cells, null, { from, to: addDays(from, 7 * n - 1) }), ms };
+}
+
+only("month")("whole months: runs, pairs, gaps between night pairs, fairness, cover and time", () => {
   const rows = [];
   monthWards().forEach((w, i) => {
     if (i % OF !== PART) return;
+    if (w.weeks) {
+      rows.push({ name: w.name, old: buildWeeks(oldE, w.data, w.weeks), new: buildWeeks(newE, w.data, w.weeks) });
+      return;
+    }
     const cfg = steady(prepareMonth({ data: w.data, month: w.month, lookFrom: addDays(`${w.month}-01`, -28) }).config);
     const side = (E) => {
       const began = Date.now();

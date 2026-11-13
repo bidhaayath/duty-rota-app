@@ -264,3 +264,99 @@ export const withNightGap = (data, n) => ({
     ruleStates: { ...(data.rosterRules.ruleStates || {}), nightBlockGap: { state: "soft", priority: 2 } },
   },
 });
+
+/* Bidhoo's Emergency Room as its settings were on 13 November 2026 (from
+   screenshots; no live data): seventeen staff, nine Shift Managers, 3 to 5
+   on mornings and afternoons, 3 on every night with a Shift Manager on each
+   shift; nights at least 1 and at most 2 a week, in pairs; In a row and the
+   night most at Protect most; working days 5 (Must), at most 4 in a row
+   (Protect); sharing fairly at Bend if needed; look back 30 days. SRN MISA
+   does mornings only and is always off on Friday and Saturday (Must); RN
+   RAHEEMA mornings and afternoons only. Off days and what may follow what
+   were not shown, so they are the app's own defaults. The duties before
+   December are a plain rotation. */
+const ER_NAMES = ["SRN MISA", "RN ANA", "SRN SAI", "SRN FATHUN", "SRN AMINATH", "RN RAHEEMA", "RN SHAU", "SRN NAJU",
+  "RN RASHEE", "RN MARIYAM", "RN MISA", "RN MAI", "RN ZEENA", "RN FIRU", "RN MIRU", "RN SADHA", "HAMDHA"];
+export function erRealWard() {
+  const first = "2026-12-01";
+  const staff = ER_NAMES.map((name, i) => ({ id: `r${i}`, name, leavePeriods: [] }));
+  const rosterRules = {
+    lookbackDays: 30,
+    coverage: { morning: { min: 3, max: 5 }, afternoon: { min: 3, max: 5 }, evening: { min: 0, max: 0 }, night: { min: 3, max: 3 } },
+    seniorTerm: "Shift Manager",
+    seniorStaff: staff.slice(0, 9).map((s) => s.id),
+    seniorCover: { morning: 1, afternoon: 1, evening: 0, night: 1 },
+    weeklyMin: { morning: 1, afternoon: 1, evening: 1, night: 1, off: 1 },
+    weeklyMax: { morning: 4, afternoon: 4, evening: null, night: 2, off: 2 },
+    blockDays: { morning: 99, afternoon: 99, evening: 3, night: 2 },
+    blockTogether: { night: 2 },
+    weeklyDuties: { min: 5, max: 5 },
+    maxDaysOn: 4,
+    ruleStates: {
+      "weeklyCaps:morning": { state: "soft", priority: 2 },
+      "weeklyCaps:afternoon": { state: "soft", priority: 2 },
+      "weeklyCaps:night": { state: "soft", priority: 1 },
+      workPattern: { state: "soft", priority: 1 },
+      daysInRow: { state: "soft", priority: 2 },
+      fairNights: { state: "soft", priority: 3 },
+      fairNonOfficial: { state: "soft", priority: 3 },
+    },
+    staffShifts: { r0: ["morning"], r5: ["morning", "afternoon"] },
+    personRules: [{ id: "m1", staffId: "r0", type: "offOn", days: [5, 6], strength: "hard" }],
+  };
+  const cells = {};
+  const plain = ["M", "A", "A", "N", "N", "OFF", "OFF"];
+  days(addDays(first, -35), 35).forEach((date, di) => {
+    cells[date] = {};
+    staff.forEach((s, si) => {
+      // This rotation is one that leads the engine to four nights in a row over 3-6 December.
+      const c = plain[(di + si + 3) % 7];
+      cells[date][s.id] = s.id === "r5" && c === "N" ? "M" : c;
+    });
+  });
+  return fitHistory({
+    staff, codes: CODES, cells, cellMeta: {}, dutyRequests: [], rosterRules, weekStartsOn: 0,
+    fridayRule: true, nonOfficial: [],
+  });
+}
+
+/* Shaped like the "thoi resort" ward seen on 15–21 November 2026 (from a
+   screenshot; made up): fifty staff, seven of them on long leave, nights
+   in pairs with 9 a night, 9 to 13 on mornings and afternoons, nights at
+   least 1 and at most 2 a week. Everything else is the app's defaults. */
+export function thoiWard() {
+  const first = "2026-11-15";
+  const staff = [...Array(50)].map((_, i) => ({ id: `t${i}`, name: `Thoi ${i + 1}`, leavePeriods: [] }));
+  [4, 17, 19, 21, 49].forEach((i) => staff[i].leavePeriods.push({ id: `al${i}`, type: "annual", start: "2026-11-08", end: "2026-12-12" }));
+  staff[25].leavePeriods.push({ id: "al25", type: "annual", start: "2026-11-08", end: "2026-12-05" });
+  staff[24].leavePeriods.push({ id: "pm24", type: "prematernity", start: "2026-11-08", end: "2027-03-06" });
+  const rosterRules = {
+    coverage: { morning: { min: 9, max: 13 }, afternoon: { min: 9, max: 13 }, evening: { min: 0, max: 0 }, night: { min: 9, max: 9 } },
+    weeklyMin: { morning: 1, afternoon: 1, evening: 1, night: 1, off: 1 },
+    weeklyMax: { morning: null, afternoon: null, evening: null, night: 2, off: 2 },
+    blockTogether: { night: 2 },
+  };
+  const cells = {};
+  const plain = ["M", "A", "A", "N", "N", "OFF", "OFF"];
+  days(addDays(first, -35), 35).forEach((date, di) => {
+    cells[date] = {};
+    staff.forEach((s, si) => {
+      if (s.leavePeriods.some((lp) => date >= lp.start && date <= lp.end)) return;
+      cells[date][s.id] = plain[(di + si * 2) % 7];
+    });
+  });
+  return { staff, codes: CODES, cells, cellMeta: {}, dutyRequests: [], rosterRules, weekStartsOn: 0, fridayRule: true, nonOfficial: [] };
+}
+
+/* A week's result written back into the rota, as "Use this roster" does,
+   so the next week is built on it: one code per duty. */
+const CODE_FOR = { morning: "M", afternoon: "A", evening: "E", night: "N", off: "OFF" };
+export function withWeek(data, cells) {
+  const next = { ...data.cells };
+  Object.entries(cells).forEach(([key, cat]) => {
+    const [id, date] = key.split("|");
+    if (!CODE_FOR[cat]) return;
+    next[date] = { ...(next[date] || {}), [id]: CODE_FOR[cat] };
+  });
+  return { ...data, cells: next };
+}
