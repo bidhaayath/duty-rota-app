@@ -6,7 +6,13 @@
    days, swap two people, mark non-official days, change a Smart Roster
    setting, say how many seniors each shift needs and who they are, limit
    how many days or nights in a row anyone works, give fixed weekday offs,
-   build a period).
+   skip someone, give one person a rule of their own or a duty fixed by the
+   manager, build a period).
+
+   One person's rules never become a setting of the whole ward. Where Ini
+   cannot finish something (a number left out, "the weekend", a name that
+   could be two people, a date gone by), the app asks the manager on the
+   line itself; no second request is made.
 
    It only SUGGESTS. Nothing is saved here: the manager reviews every action
    in the app and confirms, and the app saves through its normal, permission-
@@ -48,6 +54,9 @@ const MAX_ACTIONS = 120;    // after Claude answers
 const MAX_RANGE_DAYS = 92;  // the longest date range any one action may cover
 const MAX_SENIOR_COVER = 10; // the most seniors any one shift may ask for
 const MAX_IN_A_ROW = 14;      // the longest run of days or nights a limit may allow
+// One person's own rules, as Smart Roster's Your staff panel keeps them.
+const PERSON_RULES = ['atMost', 'atLeast', 'apart', 'together', 'offOn', 'onlyOn'];
+const DAY_RULES = ['offOn', 'onlyOn'];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -237,6 +246,18 @@ function buildSchema(input) {
       weekdays: { type: 'array', items: { type: 'integer', enum: [0, 1, 2, 3, 4, 5, 6] } },
       start: dateOrNull, end: dateOrNull,
     }),
+    obj('set_skip', { staff: staffRef, skip: { type: 'boolean' } }),
+    obj('person_rule', {
+      staff: staffRef,
+      rule: { type: 'string', enum: PERSON_RULES },
+      shift: { anyOf: [{ type: 'string', enum: SHIFTS }, { type: 'null' }] },
+      count: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+      days: { anyOf: [{ type: 'array', items: { type: 'integer' } }, { type: 'null' }] },
+      shifts: { anyOf: [{ type: 'array', items: { type: 'string', enum: SHIFTS } }, { type: 'null' }] },
+      weekend: { type: 'boolean' },
+      must: { type: 'boolean' },
+    }),
+    obj('fixed_duty', { staff: staffRef, date, duty: { type: 'string', enum: DUTIES } }),
     obj('build', { from: dateOrNull, to: dateOrNull, historyFrom: dateOrNull }),
   ];
   // Only offer exact codes when the department has some to offer.
@@ -314,10 +335,27 @@ function buildPrompt(input, today) {
     '  say it many ways: "everyone gets off after 3 days" or "no more than 3 duties in a row"',
     '  gives kind duty, max 3; "max 2 nights in a row" gives kind night, max 2. Use this, not',
     '  set_offs_per_week, for any rule about runs of days in a row.',
-    '- weekly_off: off on the same weekdays every week ("off every Friday and Saturday"),',
-    '  from start to end. Weekdays are numbers: 0 Sunday, 1 Monday, 2 Tuesday, 3 Wednesday,',
-    '  4 Thursday, 5 Friday, 6 Saturday. Use null for start and end to mean the whole',
-    '  planning period.',
+    '- weekly_off: off on the same weekdays every week for the dates the note gives ("off',
+    '  every Friday and Saturday in December"), from start to end. Weekdays are numbers: 0',
+    '  Sunday, 1 Monday, 2 Tuesday, 3 Wednesday, 4 Thursday, 5 Friday, 6 Saturday. Use null',
+    '  for start and end to mean the whole planning period ("this month").',
+    '- set_skip: leave one person out of Smart Roster (skip true: "skip Ali"), or put them',
+    '  back (skip false). Their duties are then written by hand. Not for leave.',
+    '- person_rule: a standing rule for ONE person, kept every week from now on. rule is:',
+    '  atMost (at most count of that shift a week; count 0 means none of it), atLeast (at',
+    '  least count of that shift a week), apart (at least count days between that person\'s',
+    '  shifts of that kind), together (that shift in pairs; count 2), offOn (always off on',
+    '  these weekdays), onlyOn (on these weekdays, only these shifts). The first four use',
+    '  shift and count; offOn uses days; onlyOn uses days and shifts; null for the rest.',
+    '  "Ana is off on Friday and Saturday" with no dates gives offOn [5,6]; "Shau gets only 1',
+    '  night a week" gives atMost night 1. If the note leaves the number out ("keep Mariyam\'s',
+    '  nights days apart"), use count null. If it says "weekend" or other days it does not',
+    '  name, use days null and weekend true: wards have different weekends. The app asks',
+    '  the manager in both cases. must is true only when the note says must or has to.',
+    '- fixed_duty: one person\'s duty on one date, fixed by the manager and always kept when',
+    '  Smart Roster builds ("give Ali a night on the 27th"). duty is a shift or off. With a',
+    '  day and month but no year, use the year that puts the date nearest to today, before',
+    '  or after; the app asks the manager when it has gone by.',
     '- build: the note asks to build, make, create or generate the roster or rota. from and',
     '  to are the dates to build if the note names them, otherwise null for the planning',
     '  period. historyFrom is the first date to look back from for fairness if the note',
@@ -349,17 +387,37 @@ function buildPrompt(input, today) {
     '{"type":"set_seniors","add":["s1"],"remove":[]}',
     '{"type":"set_max_in_a_row","kind":"duty","max":3}',
     '{"type":"weekly_off","staff":"s1","weekdays":[5,6],"start":null,"end":null}',
+    '{"type":"set_skip","staff":"s1","skip":true}',
+    '{"type":"person_rule","staff":"s1","rule":"apart","shift":"night","count":null,"days":null,"shifts":null,"weekend":false,"must":false}',
+    '{"type":"fixed_duty","staff":"s1","date":"<date>","duty":"night"}',
     '{"type":"build","from":null,"to":null,"historyFrom":null}',
     'If nothing in the note can be turned into an action, reply {"actions": [], "unclear": [...]}.',
     '',
     'Rules:',
     '- Only use the staff listed, by their ref exactly as written (s1, s2...). Never invent a',
     '  person.',
-    '- Maldivian names have many spellings (Aishath / Aisha, Mohamed / Mohammed). Match a',
-    '  different spelling only when it clearly means exactly one listed person. If a name',
-    '  could mean two or more people, or nobody on the list, do not guess: put it in unclear',
-    '  and say which names it could mean. "The ward manager" or a job title is not a name:',
-    '  only match it if the staff list makes it obvious, otherwise put it in unclear.',
+    '- Maldivian names have many spellings (Aishath / Aisha, Mohamed / Mohammed), and the list',
+    '  may add titles or initials ("Ana" for "RN ANA"). Match a different or shorter form',
+    '  only when it clearly means exactly one listed person. If a name could mean two or more',
+    '  people, do not guess: in set_shifts, set_skip, person_rule and fixed_duty use',
+    '  "staff":null, "choices":["s1","s2"] (every person it could mean) and "named":"<the name',
+    '  as written>", and the app asks the manager which; elsewhere put it in unclear and say',
+    '  which names it could mean. If it means nobody on the list, put it in unclear with the',
+    '  closest names. "The ward manager" or a job title is not a name: only match it if the',
+    '  staff list makes it obvious, otherwise put it in unclear.',
+    '- One person or the whole ward: anything about named people uses set_shifts,',
+    '  set_seniors, set_skip, person_rule or fixed_duty. Never use set_offs_per_week,',
+    '  set_senior_cover or set_max_in_a_row for one person: they change the whole ward. If',
+    '  something about one person has no action ("Ali at most 2 nights in a row"), put it in',
+    '  unclear: that can only be set for the whole ward, in Smart Roster.',
+    '- The shifts one person does ("only mornings and afternoons, no nights") are set_shifts',
+    '  alone; do not add a person_rule that says the same again.',
+    '- Weekdays off with no dates or period are person_rule offOn. weekly_off is only for',
+    '  notes that give dates or a period ("off every Friday in December").',
+    '- Leave is never a person_rule or a fixed_duty. Use add_leave only when the note gives',
+    '  both the first and the last day of the leave. If it does not, put in unclear that the',
+    '  leave was not recorded because a date was missing, and that it can be recorded in the',
+    '  Staff tab. Anything else the sentence asks (a duty before the leave) is still done.',
     '- Fairness wishes ("keep weekends fair", "share the nights fairly") need nothing: Smart',
     '  Roster already shares nights, Friday offs and non-official days fairly. Put them in',
     '  unclear saying exactly that, briefly.',
@@ -490,6 +548,33 @@ function checkAnswer(answer, input, today) {
   const note = (s) => unclear.push(s);
   let builds = 0;
 
+  /* The person an action is about: the one named, or — for the actions the
+     app can ask about — everyone a name could mean, for the manager to pick
+     from. Anything else counts as someone not on the list. */
+  const person = (who) => ({ staffId: who.id, staffName: who.name });
+  const twoOrMore = (raw) => {
+    if (raw.staff != null) return null;
+    const choices = [...new Set((Array.isArray(raw.choices) ? raw.choices : []).map(find).filter(Boolean))];
+    if (choices.length < 2) { unknownPeople += 1; return null; }
+    return { staffId: null, staffName: null, named: cleanText(raw.named, 60), choices: choices.map(person) };
+  };
+  // One person's rule, as Smart Roster keeps it. A number left out is null: the app asks.
+  const readRule = (raw) => {
+    if (!PERSON_RULES.includes(raw.rule)) return null;
+    if (DAY_RULES.includes(raw.rule)) {
+      const days = Array.isArray(raw.days)
+        ? [...new Set(raw.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [];
+      const shifts = SHIFTS.filter((s) => Array.isArray(raw.shifts) && raw.shifts.includes(s));
+      if (raw.rule === 'onlyOn' && !shifts.length) return null;
+      return { type: raw.rule, days: days.length ? days : null, ...(raw.rule === 'onlyOn' ? { shifts } : {}) };
+    }
+    if (!SHIFTS.includes(raw.shift)) return null;
+    if (raw.rule === 'together') return { type: raw.rule, shift: raw.shift, count: 2 };
+    if (raw.count == null) return { type: raw.rule, shift: raw.shift, count: null };
+    if (!Number.isInteger(raw.count) || raw.count < 0 || raw.count > 7) return null;
+    return { type: raw.rule, shift: raw.shift, count: raw.count };
+  };
+
   for (const raw of (Array.isArray(a.actions) ? a.actions : []).slice(0, MAX_ACTIONS)) {
     if (!raw || typeof raw !== 'object') continue;
     const who = find(raw.staff);
@@ -542,9 +627,31 @@ function checkAnswer(answer, input, today) {
         break;
       }
       case 'set_shifts': {
-        if (!who) break;
+        const p = who ? person(who) : twoOrMore(raw);
+        if (!p) break;
         const list = SHIFTS.filter((s) => Array.isArray(raw.shifts) && raw.shifts.includes(s));
-        actions.push({ type: 'set_shifts', staffId: who.id, staffName: who.name, shifts: list });
+        actions.push({ type: 'set_shifts', ...p, shifts: list });
+        break;
+      }
+      case 'set_skip': {
+        const p = who ? person(who) : twoOrMore(raw);
+        if (!p || typeof raw.skip !== 'boolean') break;
+        actions.push({ type: 'set_skip', ...p, skip: raw.skip });
+        break;
+      }
+      case 'person_rule': {
+        const p = who ? person(who) : twoOrMore(raw);
+        if (!p) break;
+        const rule = readRule(raw);
+        if (!rule) { note(`A rule for ${p.staffName || p.named} did not make sense, so it was left out.`); break; }
+        actions.push({ type: 'person_rule', ...p, rule, weekend: raw.weekend === true, must: raw.must === true });
+        break;
+      }
+      case 'fixed_duty': {
+        const p = who ? person(who) : twoOrMore(raw);
+        if (!p || !DUTIES.includes(raw.duty)) break;
+        if (!okDate(raw.date)) { note(`The fixed duty for ${p.staffName || p.named} had a date that did not make sense, so it was left out.`); break; }
+        actions.push({ type: 'fixed_duty', ...p, date: raw.date, duty: raw.duty });
         break;
       }
       case 'set_offs_per_week': {

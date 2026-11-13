@@ -13,22 +13,11 @@ import React, { useState } from "react";
 import { Plus, X, AlertTriangle } from "lucide-react";
 import { SHIFTS, personRuleText } from "./rosterEngine";
 import { prettyWeekday } from "./monthBuild";
-import { employedOn } from "./rosterConfig";
+import {
+  SHIFT_LABELS, CATEGORY_LABELS, DAY_LABEL, DAY_TYPES, RULE_COUNTS, isISO, upperFirst, ampList,
+  fixedText, startsAs, rulePreview, fixedPreview, atLeastMustText, personChecks,
+} from "./personRuleChecks";
 
-const SHIFT_LABELS = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night" };
-const CATEGORY_LABELS = { ...SHIFT_LABELS, off: "Off" };
-const DAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-/* Rules about days of the week: ticked days in place of a shift and a
-   number. Just the seven days — weekends differ from ward to ward, so
-   there is no shortcut for one, and a public holiday is not a day here. */
-const DAY_TYPES = ["offOn", "onlyOn"];
-/* What a new rule starts at, and how far its number can go. */
-const RULE_COUNTS = {
-  atMost: { start: 1, min: 0, max: 7 },
-  atLeast: { start: 1, min: 1, max: 7 },
-  apart: { start: 2, min: 1, max: 6 },
-  together: { start: 2, min: 2, max: 2 },
-};
 const RULE_TYPES = [
   ["atMost", "At most … of a shift a week"],
   ["atLeast", "At least … of a shift a week"],
@@ -38,15 +27,6 @@ const RULE_TYPES = [
   ["onlyOn", "On … (days), only … (shifts)"],
   ["fixed", "Fixed duty on a date (set by you)"],
 ];
-const isISO = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
-const weekdayOf = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).getDay(); };
-// A duty the manager fixed, as the row and the panel say it.
-const fixedText = (f) => `Fixed: ${CATEGORY_LABELS[f.duty] || f.duty} on ${isISO(f.date) ? prettyWeekday(f.date) : f.date}`;
-const upperFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const andList = (words) => (words.length < 2 ? words.join("")
-  : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
-const ampList = (words) => (words.length < 2 ? words.join("")
-  : `${words.slice(0, -1).join(", ")} & ${words[words.length - 1]}`);
 const toggled = (list, x) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
 // Approved requests shown on a row before "+N more".
 const REQUESTS_SHOWN = 3;
@@ -126,13 +106,13 @@ export default function YourStaff({
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const pastFixed = fixedDuties.filter((f) => isISO(f.date) && f.date < today);
 
-  // Only shifts the ward runs can carry a rule.
-  const runShifts = SHIFTS.filter((sh) => rules.coverage[sh]?.max !== 0);
+  /* The checks, shared with Ini (personRuleChecks.js): what may be added,
+     and what it costs. */
+  const checks = personChecks({ rules, data, allStaff, firstDay });
+  const { runShifts, weekOrder, dayRulesOf, fixedOffNote, shortDayText } = checks;
   const draftShift = runShifts.includes(draft.shift) ? draft.shift : runShifts[0];
   const onDays = DAY_TYPES.includes(draft.type);
   const isFixed = draft.type === "fixed";
-  // The week in the ward's own order, so a Monday ward reads Saturday and Sunday.
-  const weekOrder = [...Array(7)].map((_, i) => (firstDay + i) % 7);
   const draftRule = onDays
     ? { type: draft.type, days: weekOrder.filter((d) => draft.days.includes(d)),
         ...(draft.type === "onlyOn" ? { shifts: runShifts.filter((sh) => draft.shifts.includes(sh)) } : {}) }
@@ -143,156 +123,29 @@ export default function YourStaff({
       ? draftRule.days.length > 0 && (draft.type === "offOn" || draftRule.shifts.length > 0)
       : !!draftShift;
   const draftPerson = allStaff.find((s) => String(s.id) === draft.staffId);
+  const shortNow = checks.shortDays(ownRules);
 
-  // Somebody's rules about days, as saved and readable.
-  const dayRulesOf = (staffId, list = ownRules) => list.filter((r) => String(r.staffId) === String(staffId)
-    && DAY_TYPES.includes(r.type) && Array.isArray(r.days) && (r.type === "offOn" || Array.isArray(r.shifts)));
-  // Days of the week those leave open for a shift: not off, and not kept to other shifts.
-  const daysOpenFor = (dayRules, shift) => weekOrder.filter((d) => !dayRules.some((r) => r.days.includes(d)
-    && (r.type === "offOn" || !r.shifts.includes(shift)))).length;
-  const daysWord = (n) => `${n} day${n === 1 ? "" : "s"}`;
-
-  /* More days fixed off than the ward's most: theirs is the number for
-     them, as the engine does it, and the screen says so. */
-  const wardMostOff = rules.weeklyMax?.off;
-  const wardFewest = rules.weeklyDuties?.min;
-  const fixedOffNote = (staffId, list) => {
-    const fixed = new Set(dayRulesOf(staffId, list).filter((r) => r.type === "offOn").flatMap((r) => r.days)).size;
-    if (wardMostOff == null || fixed <= wardMostOff) return null;
-    const name = staffName(staffId) || "this person";
-    return `That is ${daysWord(fixed)} off a week, more than the ward's most of ${wardMostOff}, so for ${name} the most off days is ${fixed}`
-      + (wardFewest != null && wardFewest > 7 - fixed ? ` and the fewest duties ${7 - fixed}.` : ".");
-  };
-  /* Days so many people are always off by a Must that everyone else
-     together could not fill the places the ward needs. Only where the
-     ward could fill them without those rules: a ward short every day is
-     short whatever anyone's rule says. */
-  const placesPerDay = runShifts.reduce((n, sh) => n + (rules.coverage[sh]?.min || 0), 0);
-  const onRota = allStaff.filter((s) => !rules.skipStaff.includes(s.id));
-  const peopleLeftOn = (d, list) => {
-    const off = new Set(list.filter((r) => r.type === "offOn" && r.strength === "hard" && Array.isArray(r.days)
-      && r.days.includes(d)).map((r) => String(r.staffId)));
-    return onRota.filter((s) => !off.has(String(s.id))).length;
-  };
-  const shortDays = (list) => (onRota.length < placesPerDay ? []
-    : weekOrder.filter((d) => peopleLeftOn(d, list) < placesPerDay));
-  // One line per day, said once above the list rather than under each rule.
-  const shortDayText = (d, list) => {
-    const left = peopleLeftOn(d, list);
-    return `On ${DAY_LABEL[d]} only ${left} ${left === 1 ? "person is" : "people are"} left `
-      + `for the ${placesPerDay} places the ward fills each day, so a shift will be left uncovered every week.`;
-  };
-  const shortNow = shortDays(ownRules);
-
-  /* Why the rule as written cannot be added, in the manager's words. Asked
-     before saving, so a list never holds two rules that fight each other. */
-  /* A fixed duty that could never be kept, said before it is saved: the
-     day is someone else's to decide, or the person cannot work it. */
-  const fixedProblem = () => {
-    const who = draftPerson.name, id = draftPerson.id, date = draft.date, duty = draft.duty;
-    const day = prettyWeekday(date);
-    const asked = (data.dutyRequests || []).find((r) => r.approved && String(r.staffId) === String(id) && r.date === date);
-    if (fixedOf(id).some((f) => f.date === date)) return `${who} already has a fixed duty on ${day}. Remove it first to change it.`;
-    if (asked) {
-      return `${who} has an approved duty request on ${day} (${CATEGORY_LABELS[asked.category] || asked.category}). `
-        + `Change it in the Duty requests tab instead.`;
-    }
-    if (!employedOn(draftPerson, date)) return `${who} is not on the rota on ${day}.`;
-    if ((draftPerson.leavePeriods || []).some((lp) => date >= lp.start && date <= lp.end)) return `${who} is on leave on ${day}.`;
-    if (rules.skipStaff.includes(draftPerson.id)) return `${who} is skipped, so Smart Roster does not roster them. Untick Skip first.`;
-    if (duty !== "off") {
-      const ticks = rules.staffShifts?.[id] || [];
-      if (ticks.length && !ticks.includes(duty)) {
-        return `${who} is set up for ${ampList(SHIFTS.filter((sh) => ticks.includes(sh)).map((sh) => SHIFT_LABELS[sh]))} only.`;
-      }
-      const offRule = dayRulesOf(id).find((r) => r.type === "offOn" && r.strength === "hard" && r.days.includes(weekdayOf(date)));
-      if (offRule) return `${who} has "${personRuleText(offRule)}" as a Must, which covers ${day}.`;
-    }
-    return null;
-  };
-  const draftProblem = (() => {
-    if (!draftPerson || !draftComplete) return null;
-    if (isFixed) return fixedProblem();
-    const who = draftPerson.name;
-    const dayRules = dayRulesOf(draftPerson.id);
-    if (onDays) {
-      const clash = dayRules.find((r) => r.days.some((d) => draftRule.days.includes(d)));
-      if (clash) {
-        const day = DAY_LABEL[weekOrder.find((d) => clash.days.includes(d) && draftRule.days.includes(d))];
-        return `${who} already has "${personRuleText(clash)}", which covers ${day}. Remove it first to change it.`;
-      }
-      if (draft.type === "offOn" && draftRule.days.length === 7) {
-        return `That is every day of the week. To leave ${who} off the rota, use Skip above.`;
-      }
-      if (draft.type === "onlyOn") {
-        const ticks = rules.staffShifts?.[draftPerson.id] || [];
-        const works = ticks.length ? runShifts.filter((sh) => ticks.includes(sh)) : runShifts;
-        if (!works.some((sh) => draftRule.shifts.includes(sh))) {
-          return `${who} is set up above for ${andList(works.map((sh) => `${sh}s`))} only, so on those days ${who} `
-            + `could only be off. Use "Always off on" for that.`;
-        }
-        if (works.every((sh) => draftRule.shifts.includes(sh))) {
-          return `Those are all the shifts ${who} works, so this rule would change nothing.`;
-        }
-      }
-      const after = [...dayRules, draftRule];
-      const least = ownRules.find((r) => String(r.staffId) === String(draftPerson.id) && r.type === "atLeast"
-        && r.count > daysOpenFor(after, r.shift));
-      if (least) {
-        return `${who} has "${personRuleText(least)}", and with this rule only ${daysWord(daysOpenFor(after, least.shift))} `
-          + `a week would be left for ${least.shift}s.`;
-      }
-      return null;
-    }
-    const mine = ownRules.filter((r) => String(r.staffId) === String(draftPerson.id) && r.shift === draftShift);
-    const has = (type) => mine.find((r) => r.type === type);
-    if (draftRule.type === "atLeast" && draftRule.count > daysOpenFor(dayRules, draftShift)) {
-      return `${who}'s rules about days leave ${daysWord(daysOpenFor(dayRules, draftShift))} a week for ${draftShift}s, `
-        + `so at least ${draftRule.count} could never be met.`;
-    }
-    if (has(draftRule.type)) {
-      return `${who} already has "${personRuleText(has(draftRule.type))}". Remove it first to change it.`;
-    }
-    const other = draftRule.type === "apart" ? has("together") : draftRule.type === "together" ? has("apart") : null;
-    if (other) {
-      return `${who} already has "${personRuleText(other)}". A gap between shifts and pairs cannot both apply to ${draftShift}s, so remove that one first.`;
-    }
-    const most = draftRule.type === "atLeast" ? has("atMost") : null;
-    const least = draftRule.type === "atMost" ? has("atLeast") : null;
-    if (most && draftRule.count > most.count) {
-      return `${who} has "${personRuleText(most)}", so at least ${draftRule.count} could never be met.`;
-    }
-    if (least && draftRule.count < least.count) {
-      return `${who} has "${personRuleText(least)}", so at most ${draftRule.count} could never be met.`;
-    }
-    return null;
-  })();
+  // Why the rule as written cannot be added, in the manager's words.
+  const draftProblem = !draftPerson || !draftComplete ? null
+    : isFixed ? checks.fixedProblem(draftPerson, { date: draft.date, duty: draft.duty })
+    : checks.ruleProblem(draftPerson, draftRule);
   const addOwnRule = () => {
     if (!draftPerson || !draftComplete || draftProblem) return;
     if (isFixed) {
       setFixedDuties([...fixedDuties, { id: uid(), staffId: draftPerson.id, date: draft.date, duty: draft.duty }]);
       return;
     }
-    /* A fixed day off starts as Must: it is usually a promise made to the
-       person. Every other rule starts as Try: kept whenever the week allows. */
-    setPersonRules([...ownRules, {
-      id: uid(), staffId: draftPerson.id, ...draftRule, strength: draft.type === "offOn" ? "hard" : "soft",
-    }]);
+    setPersonRules([...ownRules, { id: uid(), staffId: draftPerson.id, ...draftRule, strength: startsAs(draft.type) }]);
   };
-  const startsAs = draft.type === "offOn" ? "Must" : "Try";
   // What the rule being written says, before Add.
   const preview = (name) => (isFixed
-    ? `${name}: ${CATEGORY_LABELS[draft.duty]} on ${prettyWeekday(draft.date)}, fixed by you — always kept.`
-    : `${name}: ${personRuleText(draftRule)} — starts as ${startsAs}.`);
+    ? fixedPreview(name, { date: draft.date, duty: draft.duty })
+    : rulePreview(name, draftRule));
   // Said before Add, for a fixed day off as it would be saved.
-  const draftAfter = draftPerson && draftComplete && !draftProblem && draft.type === "offOn"
-    ? [...ownRules, { ...draftRule, staffId: draftPerson.id, strength: "hard" }] : null;
-  const draftFixedNote = draftAfter && fixedOffNote(draftPerson.id, draftAfter);
-  // Only a day this rule would newly leave short; one already short is said above the list.
-  const draftShortNotes = draftAfter
-    ? shortDays(draftAfter).filter((d) => draftRule.days.includes(d) && !shortNow.includes(d))
-      .map((d) => shortDayText(d, draftAfter))
-    : [];
+  const draftNotes = draftPerson && draftComplete && !draftProblem
+    ? checks.offOnNotes(draftPerson, draftRule, startsAs(draft.type)) : { fixedNote: null, shortNotes: [] };
+  const draftFixedNote = draftNotes.fixedNote;
+  const draftShortNotes = draftNotes.shortNotes;
 
   /* Approved duty requests, from today on: read here, changed in the Duty requests tab. */
   const requestsOf = (id) => (data.dutyRequests || [])
@@ -336,9 +189,7 @@ export default function YourStaff({
             onChange={(v) => setOwnStrength(r.id, v)} />
           {removeButton(`Remove: ${text}`, () => setPersonRules(ownRules.filter((x) => x.id !== r.id)))}
         </div>
-        {r.type === "atLeast" && r.strength === "hard" && warn(
-          `A Must here can leave another shift uncovered so that ${staffName(r.staffId) || "they"} gets `
-          + `${r.count} ${r.shift}${r.count === 1 ? "" : "s"}. Try is usually enough: it is met whenever the week allows.`)}
+        {r.type === "atLeast" && r.strength === "hard" && warn(atLeastMustText(staffName(r.staffId), r))}
         {/* Said once per person, under their first fixed day off. */}
         {r.type === "offOn" && dayRulesOf(r.staffId).find((x) => x.type === "offOn") === r
           && fixedOffNote(r.staffId, ownRules) && (
