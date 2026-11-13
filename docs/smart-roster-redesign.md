@@ -169,6 +169,14 @@ Animated Ini in the Ask Ini bar, built from Ini's measured proportions (rounded-
 - **Ini** is the same `IniMascot`, recoloured #9ED066 / #945600, with a new `thinking` mood. Bar moods: resting → waking → listening; thinking while a week is made or the panel is working; "all done" for three seconds after a week is made or Fix it for me worked; surprised ("spotted") on a tap. Eyes follow the pointer, also on the floating Ini button. Hover lifts and tilts and says "Hi! Need a hand?" once; taps say five tips in turn; five taps within 1.6s spin and say "Wheee! That tickles!". What Ini says is read out (`aria-live`).
 - Under prefers-reduced-motion: awake at once, eyes ahead, no morph, lift, hop or spin; the words still appear. Ini, the box and Send are each at least 44px and reachable by keyboard.
 
+### As built: Ini learns personal rules (branch `ini-personal-rules`)
+- A note can give one person what Your staff gives them: shift ticks, the in-charge tick, Skip (`set_skip`), any of the six rules (`person_rule`), and fixed duties (`fixed_duty`). Shown under a new **Your staff** heading in Ini's checklist, in the panel's own sentences; "Standing settings" keeps only the ward's. Saved on "Add N items", one Undo step.
+- **One copy of the checks**: the panel's refusals and warnings live in `src/personRuleChecks.js`, used by both Your staff and Ini. A line sees the lines before it in the same note.
+- **Never ward-wide for one person**: the prompt forbids it; something about one person with no action (e.g. nights in a row) is a note saying it can only be set for the whole ward.
+- **Ini asks on the line** when it cannot finish it, and the line waits until answered: a number left out (stepper), "weekend" (the seven days in the ward's order), a name that could be two people (a picker with only them), a fixed duty on a date gone by (which year). No second request.
+- Decisions (13 Nov 2026): weekdays off with no dates = standing "always off on" (Must); `weekly_off` only with dates. Leave with both dates is recorded as before; otherwise a note pointing to the Staff tab. "Only 1 night a week" = at most 1. Rules start as the panel starts them; only "must" / "has to" makes one Must.
+- **Cost**: nothing new about staff is sent (names under one-time refs). The instructions grew from 8,292 to 11,399 characters (~820 tokens a note, ~34% more input); still one request per note.
+
 ## Fit check against the engine (12 November 2026)
 
 | Control | Stored today | Engine |
