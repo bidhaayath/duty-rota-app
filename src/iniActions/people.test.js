@@ -13,7 +13,7 @@ const parse = require("../../api/ai/parse.js")._test;
 const TODAY = "2026-11-13";
 const PARAGRAPH = "Ana gets all morning duty and is off on Friday and Saturday. Raheema is doing only morning and "
   + "afternoon duty, no night. Shau will get only 1 night duty a week. If Mariyam is having two nights in a week, "
-  + "give them days apart. Rashee is going on leave on 28 October so the day before she leaves give a night duty.";
+  + "give them days apart. Rashee is going on leave on 28 December so the day before she leaves give a night duty.";
 // The order here gives the refs Claude sees: s1 RN ANA, s2 RAHEEMA, … s9 ANA MOOSA.
 const STAFF = [["ana", "RN ANA"], ["rah", "RAHEEMA"], ["sha", "SHAU"], ["mar", "MARIYAM"], ["ras", "RASHEE"],
   ["ali", "ALI"], ["haw", "HAWWA"], ["ais", "AISHATH"], ["ana2", "ANA MOOSA"]];
@@ -27,13 +27,15 @@ const linesFor = (claude, data = makeData(), text = PARAGRAPH) => {
   const { input } = parse.readInput({
     departmentId: "11111111-1111-1111-1111-111111111111", text, from: "2026-12-01", to: "2026-12-31",
     staff: data.staff.map((s) => ({ id: s.id, name: s.name })), shifts: ["morning", "afternoon", "night"],
+    leaveTypes: ["annual", "maternity", "prematernity", "emergency", "other"],
   });
   const body = { ok: true, ...parse.checkAnswer(claude, input, TODAY) };
   const reply = readReply(body, { staffIds: data.staff.map((s) => s.id), from: "2026-12-01", to: "2026-12-31", today: TODAY });
   return { reply, check: (lines = reply.lines) => checkLines(lines, { data, today: TODAY }) };
 };
 // A line as the panel titles it.
-const title = (l) => [l.words.what, Object.values(l.people).map((p) => p.name).join(" & "), l.words.when].filter(Boolean).join(" · ");
+const title = (l) => l.words.title
+  || [l.words.what, Object.values(l.people).map((p) => p.name).join(" & "), l.words.when].filter(Boolean).join(" · ");
 const answer = (lines, i, change) => lines.map((l, j) => (j === i ? { ...l, ...change } : l));
 const save = (data, lines) => applyLines(data, lines, { uid: (() => { let n = 0; return () => `r${++n}`; })(), today: TODAY });
 const rule = (staff, kind, extra = {}) => ({
@@ -48,14 +50,17 @@ const PARAGRAPH_ANSWER = {
     { type: "set_shifts", staff: "s2", shifts: ["morning", "afternoon"] },
     rule("s3", "atMost", { shift: "night", count: 1 }),
     rule("s4", "apart", { shift: "night" }),
-    { type: "fixed_duty", staff: "s5", date: "2026-10-27", duty: "night" },
+    { type: "add_leave", staff: "s5", leaveType: "annual", start: "2026-12-28", end: null },
+    { type: "fixed_duty", staff: "s5", date: "2026-12-27", duty: "night" },
   ],
-  unclear: ["Rashee's leave from 28 October was not recorded because no end date was given. You can record it in the Staff tab."],
+  unclear: [],
 };
+// As on the rota tested: Mariyam already has a gap between nights of 4 days.
+const MARIYAM_HAS = { id: "old", staffId: "mar", type: "apart", shift: "night", count: 4, strength: "soft" };
 
 describe("the paragraph", () => {
-  test("each sentence becomes the lines the plan promised, and two of them ask", () => {
-    const { reply, check } = linesFor(PARAGRAPH_ANSWER);
+  test("each sentence becomes its lines, and two of them ask", () => {
+    const { reply, check } = linesFor(PARAGRAPH_ANSWER, makeData({ personRules: [MARIYAM_HAS] }));
     const lines = check();
     expect(lines.map((l) => [title(l), l.on, l.ask ? l.ask.question : null])).toEqual([
       ["Shifts · RN ANA · any shift → morning only", true, null],
@@ -63,35 +68,37 @@ describe("the paragraph", () => {
       ["Shifts · RAHEEMA · any shift → morning and afternoon only", true, null],
       ["Rule · SHAU · At most 1 night a week — starts as Try", true, null],
       ["Rule · MARIYAM · At least ? days between nights — starts as Try", false, "How many days between MARIYAM's nights?"],
-      ["Fixed duty · RASHEE · Night on Tue 27 Oct 2026, fixed by you — always kept", false,
-        "27 Oct 2026 has gone by. Which year did you mean?"],
+      ["Annual leave · RASHEE · from Mon 28 Dec until ?", false, "Until when is RASHEE on leave?"],
+      ["Fixed duty · RASHEE · Night on Sun 27 Dec 2026, fixed by you — always kept", true, null],
     ]);
-    expect(lines.filter((l) => l.waiting).map((l) => l.words.what)).toEqual(["Rule", "Fixed duty"]);
-    expect(reply.unclear).toEqual([PARAGRAPH_ANSWER.unclear[0]]);
+    expect(reply.unclear).toEqual([]);
   });
 
-  test("answered, everything saves where the Your staff panel keeps it, and nothing of the ward's", () => {
-    const { check } = linesFor(PARAGRAPH_ANSWER);
+  test("answered: Mariyam's rule is changed in place, the leave has both dates, and nothing of the ward's moves", () => {
+    const data = makeData({ personRules: [MARIYAM_HAS] });
+    const { check } = linesFor(PARAGRAPH_ANSWER, data);
     let lines = check();
     lines = answer(lines, 4, { rule: { ...lines[4].rule, count: 3 }, checked: true });
-    lines = answer(lines, 5, { date: "2027-10-27", yearChosen: true, checked: true });
+    lines = answer(lines, 5, { end: "2027-01-05", checked: true });
     lines = check(lines);
     expect(lines.every((l) => l.on)).toBe(true);
-    expect(title(lines[5])).toBe("Fixed duty · RASHEE · Night on Wed 27 Oct 2027, fixed by you — always kept");
+    expect(title(lines[4])).toBe("Change MARIYAM's gap between nights from 4 to 3 days");
+    expect(title(lines[5])).toBe("Annual leave · RASHEE · 28 Dec 2026 – 5 Jan 2027");
 
-    const data = makeData();
-    const saved = save(data, lines).rosterRules;
-    expect(saved).toEqual({
+    const saved = save(data, lines);
+    expect(saved.rosterRules).toEqual({
       staffShifts: { ana: ["morning"], rah: ["morning", "afternoon"] },
       personRules: [
+        { id: "old", staffId: "mar", type: "apart", shift: "night", count: 3, strength: "soft" },
         { id: "r1", staffId: "ana", type: "offOn", days: [5, 6], strength: "hard" },
         { id: "r2", staffId: "sha", type: "atMost", shift: "night", count: 1, strength: "soft" },
-        { id: "r3", staffId: "mar", type: "apart", shift: "night", count: 3, strength: "soft" },
       ],
-      fixedDuties: [{ id: "r4", staffId: "ras", date: "2027-10-27", duty: "night" }],
+      fixedDuties: [{ id: "r4", staffId: "ras", date: "2026-12-27", duty: "night" }],
     });
+    expect(saved.staff.find((s) => s.id === "ras").leavePeriods)
+      .toEqual([{ id: "r3", type: "annual", start: "2026-12-28", end: "2027-01-05" }]);
     // The ward's own settings are exactly as they were.
-    const before = mergeRules({}), after = mergeRules(saved);
+    const before = mergeRules({}), after = mergeRules(saved.rosterRules);
     ["coverage", "weeklyMin", "weeklyMax", "weeklyDuties", "maxDaysOn", "blockDays", "seniorCover", "seniorStaff", "skipStaff"]
       .forEach((k) => expect(after[k]).toEqual(before[k]));
   });
@@ -99,9 +106,62 @@ describe("the paragraph", () => {
   test("a line still asking is never saved, even if it was somehow ticked", () => {
     const { check } = linesFor(PARAGRAPH_ANSWER);
     const lines = check().map((l) => ({ ...l, checked: true }));
-    const saved = save(makeData(), lines).rosterRules;
-    expect(saved.personRules.map((r) => r.staffId)).toEqual(["ana", "sha"]);
-    expect(saved.fixedDuties).toBeUndefined();
+    const saved = save(makeData(), lines);
+    expect(saved.rosterRules.personRules.map((r) => r.staffId)).toEqual(["ana", "sha"]);
+    expect(saved.staff.find((s) => s.id === "ras").leavePeriods).toEqual([]);
+  });
+});
+
+describe("a rule of the same kind already saved", () => {
+  const one = (claude, personRules) => linesFor({ actions: [claude], unclear: [] }, makeData({ personRules })).check()[0];
+
+  test("the same number is refused; a Must stays a Must when changed, and must: true makes it one", () => {
+    expect(one(rule("s4", "apart", { shift: "night", count: 4 }), [MARIYAM_HAS]).blocked)
+      .toBe('MARIYAM already has "at least 4 days between nights".');
+    const must = { ...MARIYAM_HAS, strength: "hard" };
+    const kept = one(rule("s4", "apart", { shift: "night", count: 2 }), [must]);
+    expect([kept.on, title(kept)]).toEqual([true, "Change MARIYAM's gap between nights from 4 to 2 days"]);
+    expect(save(makeData({ personRules: [must] }), [kept]).rosterRules.personRules).toEqual([{ ...must, count: 2 }]);
+    const made = one(rule("s4", "apart", { shift: "night", count: 2, must: true }), [MARIYAM_HAS]);
+    expect(save(makeData({ personRules: [MARIYAM_HAS] }), [made]).rosterRules.personRules)
+      .toEqual([{ ...MARIYAM_HAS, count: 2, strength: "hard" }]);
+  });
+
+  test("at most and at least say what changes; the other checks still apply", () => {
+    const most = { id: "m", staffId: "sha", type: "atMost", shift: "night", count: 2, strength: "soft" };
+    expect(title(one(rule("s3", "atMost", { shift: "night", count: 1 }), [most]))).toBe("Change SHAU's most nights a week from 2 to 1");
+    const least = { id: "l", staffId: "sha", type: "atLeast", shift: "night", count: 2, strength: "soft" };
+    const below = one(rule("s3", "atMost", { shift: "night", count: 1 }), [{ ...most, count: 3 }, least]);
+    expect(below.blocked).toBe('SHAU has "at least 2 nights a week", so at most 1 could never be met.');
+  });
+});
+
+describe("a fixed duty on a date gone by", () => {
+  test("asks which year, and saves the one chosen", () => {
+    const { check } = linesFor({ actions: [{ type: "fixed_duty", staff: "s5", date: "2026-10-27", duty: "night" }], unclear: [] });
+    let [l] = check();
+    expect([l.ask.question, l.ask.options, l.on])
+      .toEqual(["27 Oct 2026 has gone by. Which year did you mean?", ["2026-10-27", "2027-10-27"], false]);
+    [l] = check([{ ...l, date: "2027-10-27", yearChosen: true, checked: true }]);
+    expect([l.on, title(l)]).toEqual([true, "Fixed duty · RASHEE · Night on Wed 27 Oct 2027, fixed by you — always kept"]);
+  });
+});
+
+describe("leave with no last day", () => {
+  test("is asked for on the line; a last day before the first is not an answer", () => {
+    const { check } = linesFor({ actions: [{ type: "add_leave", staff: "s6", leaveType: "annual", start: "2026-12-10", end: null }], unclear: [] });
+    let [l] = check();
+    expect([l.ask, l.on, l.waiting]).toEqual([{ kind: "date", question: "Until when is ALI on leave?", min: "2026-12-10" }, false, true]);
+    [l] = check([{ ...l, end: "2026-12-09", checked: true }]);
+    expect(l.waiting).toBe(true);
+    [l] = check([{ ...l, end: "2026-12-12", checked: true }]);
+    expect([l.on, title(l)]).toEqual([true, "Annual leave · ALI · 10–12 Dec"]);
+  });
+
+  test("with no first day either, the server keeps it as a note, not a line", () => {
+    const { reply } = linesFor({ actions: [{ type: "add_leave", staff: "s6", leaveType: "annual", start: null, end: null }], unclear: [] });
+    expect(reply.lines).toEqual([]);
+    expect(reply.unclear).toEqual(["Leave for ALI had dates that did not make sense, so it was left out."]);
   });
 });
 

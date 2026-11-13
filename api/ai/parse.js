@@ -375,7 +375,7 @@ function buildPrompt(input, today) {
     '{"actions": [ ... ], "unclear": [ "..." ]}',
     'Each action is one of these objects (every field shown is required; use null where',
     'the description says so; staff are refs like "s1"; dates are "YYYY-MM-DD"):',
-    '{"type":"add_leave","staff":"s1","leaveType":"<one of Leave types>","start":"<date>","end":"<date>"}',
+    '{"type":"add_leave","staff":"s1","leaveType":"<one of Leave types>","start":"<date>","end":"<date or null>"}',
     '{"type":"add_request","staff":"s1","date":"<date>","duty":"morning|afternoon|evening|night|off"}',
     '{"type":"set_code","staff":"s1","start":"<date>","end":"<date>","code":"<a duty code exactly as listed>"}',
     '{"type":"clear_days","staff":"s1","start":"<date>","end":"<date>"}',
@@ -414,10 +414,11 @@ function buildPrompt(input, today) {
     '  alone; do not add a person_rule that says the same again.',
     '- Weekdays off with no dates or period are person_rule offOn. weekly_off is only for',
     '  notes that give dates or a period ("off every Friday in December").',
-    '- Leave is never a person_rule or a fixed_duty. Use add_leave only when the note gives',
-    '  both the first and the last day of the leave. If it does not, put in unclear that the',
-    '  leave was not recorded because a date was missing, and that it can be recorded in the',
-    '  Staff tab. Anything else the sentence asks (a duty before the leave) is still done.',
+    '- Leave is never a person_rule or a fixed_duty. If the note gives the first day of the',
+    '  leave but not the last, use add_leave with end null: the app asks the manager. If it',
+    '  gives no first day, put in unclear that the leave was not recorded because a date was',
+    '  missing, and that it can be recorded in the Staff tab. Anything else the sentence asks',
+    '  (a duty before the leave) is still done.',
     '- Fairness wishes ("keep weekends fair", "share the nights fairly") need nothing: Smart',
     '  Roster already shares nights, Friday offs and non-official days fairly. Put them in',
     '  unclear saying exactly that, briefly.',
@@ -583,11 +584,13 @@ function checkAnswer(answer, input, today) {
     switch (raw.type) {
       case 'add_leave': {
         if (!who) break;
-        if (!okRange(raw.start, raw.end)) { note(`Leave for ${who.name} had dates that did not make sense, so it was left out.`); break; }
+        // The last day left out (end null) is asked for in the app.
+        const datesOk = raw.end == null ? okDate(raw.start) : okRange(raw.start, raw.end);
+        if (!datesOk) { note(`Leave for ${who.name} had dates that did not make sense, so it was left out.`); break; }
         actions.push({
           type: 'add_leave', staffId: who.id, staffName: who.name,
           leaveType: leaveTypes.has(raw.leaveType) ? raw.leaveType : (leaveTypes.has('other') ? 'other' : input.leaveTypes[0]),
-          start: raw.start, end: raw.end,
+          start: raw.start, end: raw.end == null ? null : raw.end,
         });
         break;
       }

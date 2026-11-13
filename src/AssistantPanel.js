@@ -658,6 +658,13 @@ export default function AssistantPanel({
             })}
           </span>
         );
+      } else if (a.kind === "date") {
+        control = (
+          <input type="date" aria-label="Last day of leave" min={a.min} value={l.end || ""}
+            onChange={(e) => setLine(l.key, { end: e.target.value || null, checked: !!e.target.value && e.target.value >= a.min })}
+            style={{ fontFamily: "inherit", fontSize: 14, minHeight: 44, boxSizing: "border-box", padding: "0 10px", borderRadius: 9,
+              border: `1px solid ${T.line}`, background: "#fff", color: T.ink, maxWidth: "100%", justifySelf: "start" }} />
+        );
       } else if (a.kind === "year") {
         control = (
           <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -688,7 +695,8 @@ export default function AssistantPanel({
       const fields = entry.people || [];
       const { what, when, details, detailsLabel } = l.words;
       const names = fields.map((f) => (l.people[f] ? l.people[f].name : "Unknown"));
-      const title = [what, names.join(" & "), when].filter(Boolean).join(" · ");
+      // A line may say itself whole ("Change RN MARIYAM's gap between nights from 4 to 3 days").
+      const title = l.words.title || [what, names.join(" & "), when].filter(Boolean).join(" · ");
       // Two or more people could be meant: only they are offered, and nobody is picked yet.
       const pickFrom = l.choices ? l.choices.map((c) => ({ id: c.staffId, name: c.staffName })) : staffOptions;
       return (

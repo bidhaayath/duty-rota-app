@@ -21,6 +21,7 @@ const T = { lagoon: "#0F8B7E", ink: "#142B33", inkSoft: "#4A6570", line: "#DCE8E
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
+const daysOn = (n) => daysAgo(-n);
 
 const STAFF = [["ana", "RN ANA"], ["rah", "RAHEEMA"], ["sha", "SHAU"], ["mar", "MARIYAM"], ["ras", "RASHEE"]];
 const makeData = () => ({
@@ -32,13 +33,15 @@ test("Ini asks on the line, the answers tick it, and the whole note saves in one
   // Rashee's night is on a date that has gone by, so Ini asks which year.
   const gone = daysAgo(17);
   const note = "Ana gets all morning duty and is off on Friday and Saturday. Shau will get only 1 night duty a week. "
-    + "If Mariyam is having two nights in a week, give them days apart. Rashee: night the day before her leave.";
+    + "If Mariyam is having two nights in a week, give them days apart. Rashee: night on the 27th. Raheema is on leave from the 3rd.";
   const claude = { actions: [
     { type: "set_shifts", staff: "s1", shifts: ["morning"] },
     { type: "person_rule", staff: "s1", rule: "offOn", shift: null, count: null, days: [5, 6], shifts: null, weekend: false, must: false },
     { type: "person_rule", staff: "s3", rule: "atMost", shift: "night", count: 1, days: null, shifts: null, weekend: false, must: false },
     { type: "person_rule", staff: "s4", rule: "apart", shift: "night", count: null, days: null, shifts: null, weekend: false, must: false },
     { type: "fixed_duty", staff: "s5", date: gone, duty: "night" },
+    // Leave from a day, with no last day: Ini asks until when.
+    { type: "add_leave", staff: "s2", leaveType: "annual", start: daysOn(20), end: null },
   ], unclear: [] };
   global.fetch = jest.fn((url, req) => {
     const { input } = parse.readInput(JSON.parse(req.body));
@@ -61,7 +64,7 @@ test("Ini asks on the line, the answers tick it, and the whole note saves in one
   // Two lines wait for an answer, and cannot be ticked until then.
   const apart = screen.getByRole("checkbox", { name: "Rule · MARIYAM · At least ? days between nights — starts as Try" });
   expect(apart).toBeDisabled();
-  expect(screen.getAllByText("Answer Ini's question to add this.")).toHaveLength(2);
+  expect(screen.getAllByText("Answer Ini's question to add this.")).toHaveLength(3);
   expect(screen.getByRole("button", { name: "Add 3 items" })).toBeInTheDocument();
 
   const gap = screen.getByRole("group", { name: "How many days between MARIYAM's nights?" });
@@ -71,9 +74,10 @@ test("Ini asks on the line, the answers tick it, and the whole note saves in one
 
   const year = Number(gone.slice(0, 4)) + 1;
   fireEvent.click(screen.getByRole("button", { name: String(year) }));
+  fireEvent.change(within(screen.getByRole("group", { name: "Until when is RAHEEMA on leave?" })).getByLabelText("Last day of leave"), { target: { value: daysOn(24) } });
   expect(screen.queryByText("Answer Ini's question to add this.")).toBeNull();
 
-  fireEvent.click(screen.getByRole("button", { name: "Add 5 items" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add 6 items" }));
   // The panel says Added once the saved rota comes back to it.
   rerender(panel(data));
   await screen.findByText(/^Added /);
@@ -89,6 +93,8 @@ test("Ini asks on the line, the answers tick it, and the whole note saves in one
     ],
     fixedDuties: [{ id: expect.any(String), staffId: "ras", date: `${year}${gone.slice(4)}`, duty: "night" }],
   });
+  expect(data.staff.find((p) => p.id === "rah").leavePeriods)
+    .toEqual([{ id: expect.any(String), type: "annual", start: daysOn(20), end: daysOn(24) }]);
 });
 
 test("a name that could be two people is asked about, offering only them", async () => {

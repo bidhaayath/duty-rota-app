@@ -13,8 +13,9 @@
      fromServer  (item, period) -> the line's own fields, or null to drop it
      span        (line) -> [first, last] date it touches, or none; lines
                  outside the period start unticked
-     describe    (line, ctx) -> { what, when, details? }   plain words;
-                 details is an optional list shown under "Show"
+     describe    (line, ctx) -> { what, when, details?, title? }   plain words;
+                 details is an optional list shown under "Show"; title, when
+                 given, is the whole line ("Change …'s gap … from 4 to 3 days")
      check       (line, ctx) -> { blocked?, warnings? }
      apply       (draft, line, { uid, today }) -> draft
      saved       (count) -> "2 leave periods", for the message after saving

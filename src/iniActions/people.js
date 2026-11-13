@@ -7,8 +7,10 @@
    The same things the Your staff panel makes, saved where it saves them —
      rosterRules.skipStaff, rosterRules.personRules, rosterRules.fixedDuties
    — and checked by the very same code (personRuleChecks.js), so a rule the
-   panel would refuse, Ini refuses with the same words. None of them ever
-   touches a setting of the whole ward.
+   panel would refuse, Ini refuses with the same words. One difference: a
+   rule of the same kind with a different number is changed in place (the
+   panel says "Remove it first"). None of them ever touches a setting of
+   the whole ward.
 
    Asking instead of guessing. The manager cannot answer Ini, so a line Ini
    could not finish carries its question, and the panel shows the question
@@ -80,6 +82,26 @@ const ruleOk = (r) => {
     : Number.isInteger(r.count) && r.count >= min && r.count <= max ? r.count : null;
   return { type: r.type, shift: r.shift, count };
 };
+/* The same kind of rule already saved for that person and shift. With a
+   different number the line changes it, in place, rather than being
+   refused: "Change RN MARIYAM's gap between nights from 4 to 3 days". */
+const sameKind = (data, l) => (DAY_TYPES.includes(l.rule.type) ? null
+  : (data.rosterRules?.personRules || []).find((r) => r && String(r.staffId) === String(l.staffId)
+    && r.type === l.rule.type && r.shift === l.rule.shift) || null);
+const CHANGE_WORDS = {
+  apart: (sh) => [`gap between ${sh}s`, (n) => `${n} day${n === 1 ? "" : "s"}`],
+  atMost: (sh) => [`most ${sh}s a week`, String],
+  atLeast: (sh) => [`fewest ${sh}s a week`, String],
+};
+const changeTitle = (name, old, count) => {
+  const [what, unit] = CHANGE_WORDS[old.type](old.shift);
+  return `Change ${name}'s ${what} from ${old.count} to ${unit(count)}`;
+};
+// The rota as if that rule were not there, so the other checks still run on the change.
+const without = (data, old) => ({
+  ...data, rosterRules: { ...(data.rosterRules || {}), personRules: data.rosterRules.personRules.filter((r) => r !== old) },
+});
+
 // The rule as the panel saves it: days in the ward's week order, shifts in the ward's.
 const savedRule = (rule, checks) => (DAY_TYPES.includes(rule.type)
   ? { type: rule.type, days: checks.weekOrder.filter((d) => rule.days.includes(d)),
@@ -97,7 +119,9 @@ export const personRule = {
     const rule = ruleOk(a.rule);
     if (!rule) return null;
     // As the panel starts it, unless the note itself says Must.
-    return { staffId: a.staffId, rule, strength: a.must === true ? "hard" : startsAs(rule.type), weekend: a.weekend === true };
+    return {
+      staffId: a.staffId, rule, strength: a.must === true ? "hard" : startsAs(rule.type), must: a.must === true, weekend: a.weekend === true,
+    };
   },
   asks: (l) => {
     const r = l.rule;
@@ -117,6 +141,11 @@ export const personRule = {
   missing: (l) => (DAY_TYPES.includes(l.rule.type) ? !(l.rule.days && l.rule.days.length) : l.rule.count == null),
   describe: (l, { sim }) => {
     const r = l.rule;
+    const old = r.count != null && l.staffId ? sameKind(sim, l) : null;
+    if (old && old.count !== r.count) {
+      const strength = l.must ? "hard" : old.strength;
+      return { what: "Change", title: changeTitle(staffOf(sim, l.staffId)?.name, old, r.count), when: strengthWord(strength) };
+    }
     // Days in the ward's week order, as they will be saved.
     const order = weekOrderOf(sim.weekStartsOn ?? 0);
     const text = DAY_TYPES.includes(r.type) && !(r.days && r.days.length)
@@ -126,9 +155,11 @@ export const personRule = {
   },
 
   check: (l, { sim, today }) => {
-    const { rules, checks } = checksFor(sim, today);
     const who = staffOf(sim, l.staffId);
     const r = l.rule;
+    const old = sameKind(sim, l);
+    if (old && old.count === r.count) return { blocked: `${who.name} already has "${personRuleText(old)}".` };
+    const { rules, checks } = checksFor(old ? without(sim, old) : sim, today);
     if (!DAY_TYPES.includes(r.type) && !checks.runShifts.includes(r.shift)) {
       return { blocked: `The ward does not run ${r.shift} shifts, so this rule cannot be added.` };
     }
@@ -147,6 +178,16 @@ export const personRule = {
   },
 
   apply: (d, l, { uid, today }) => {
+    const old = sameKind(d, l);
+    if (old) {
+      // A change: the same rule, in the same place, with the new number.
+      d.rosterRules = {
+        ...d.rosterRules,
+        personRules: d.rosterRules.personRules.map((x) => (x === old
+          ? { ...x, count: l.rule.count, strength: l.must ? "hard" : x.strength } : x)),
+      };
+      return d;
+    }
     const { checks } = checksFor(d, today || "");
     d.rosterRules = {
       ...(d.rosterRules || {}),
