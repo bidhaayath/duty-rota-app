@@ -677,6 +677,9 @@ function costWeights(cfg) {
 
   // Sharing nights, and non-official days, fairly: priced as always at every level but Ignore.
   w.fairNight = R.fairNights?.state === 'disabled' ? 0 : w.fair;
+  // Fair shares over the whole build (auditRoster): nights a little above mornings and afternoons.
+  w.shareNight = R.fairNights?.state === 'disabled' ? 0 : 3;
+  w.shareDay = 1;
   w.fairNonOfficial = R.fairNonOfficial?.state === 'disabled' ? 0 : w.fair;
 
   // A shift with nobody in charge: 400 at every Try level, as always; a Must's price as a Must.
@@ -1359,6 +1362,60 @@ export function auditRoster(cfg, ctx, cells) {
       // A measure the ward has set to Ignore costs nothing; any other is priced as always.
       const weight = key === 'night' ? W.fairNight : key === 'nonOfficial' ? W.fairNonOfficial : W.fair;
       if (hi > lo) cost += weight * (hi - lo);
+    }
+  }
+
+  /* Fair shares over the whole build — a month as one, so each week counts
+     what the earlier weeks already gave. For nights, mornings and
+     afternoons: each person's count against their fair share, squared, so
+     every step towards it pays. A fair share is the ward's rate times the
+     days they can be given that shift — not days their own Must keeps them
+     off — and never above what they may have: their own "at most", or the
+     ward's most a week. Those tied to other shifts, or to one shift, are not
+     counted for it. Light: it settles what is otherwise equal. */
+  /* Who counts, their days and their cap do not change while a rota is
+     rearranged (leave and fixed cells stay put), so they are worked out
+     once per build and kept with it. */
+  const shareOf = ctx.shareOf || (ctx.shareOf = {});
+  for (const sh of SHIFTS) {
+    const weight = sh === 'night' ? W.shareNight : W.shareDay;
+    if (!weight || cov[sh].max === 0) continue;
+    if (!shareOf[sh]) {
+      shareOf[sh] = [];
+      for (const s of present) {
+        const id = String(s.id);
+        const only = cfg.staffShifts?.[id];
+        if (only && only.length && (only.length === 1 || !only.includes(sh))) continue;
+        const most = limitFor(id, 'own')?.[`atMost:${sh}`];
+        if (most && most.count === 0) continue;
+        const dayRules = limitFor(id, 'days');
+        let days = totals[id].daysAvailable;
+        if (dayRules) days -= dates.filter((d) => cells[`${id}|${d}`] != null && isMust(dayRules[dowOf[d]]?.off)).length;
+        const weekly = most ? most.count : limitFor(id, 'cap')[sh];
+        if (days > 0) shareOf[sh].push({ id, days, cap: weekly == null ? Infinity : weekly * days / 7 });
+      }
+    }
+    const people = shareOf[sh];
+    if (people.length < 2) continue;
+    let total = 0;
+    for (const p of people) total += totals[p.id][sh];
+    /* The rate that shares the total out: the whole of it over everyone's
+       days, then again without anyone it would take past their cap. */
+    const capped = new Set();
+    let rate = 0;
+    for (let k = 0; k < people.length; k++) {
+      let left = total, days = 0;
+      for (const p of people) { if (capped.has(p)) left -= p.cap; else days += p.days; }
+      rate = days > 0 ? Math.max(0, left) / days : 0;
+      let more = false;
+      for (const p of people) {
+        if (!capped.has(p) && rate * p.days > p.cap) { capped.add(p); more = true; }
+      }
+      if (!more) break;
+    }
+    for (const p of people) {
+      const d = totals[p.id][sh] - (capped.has(p) ? p.cap : rate * p.days);
+      cost += weight * d * d;
     }
   }
 

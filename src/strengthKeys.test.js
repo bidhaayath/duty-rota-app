@@ -121,6 +121,17 @@ const spreadOf = (data, start, out, isIt) => {
   return Math.max(...counts) - Math.min(...counts);
 };
 
+/* Nights shared out, as the engine now judges it: among people who can be
+   given nights, the squared distance of each one's count from the average. */
+const nightShareOf = (data, start, out) => {
+  const cfg = weekConfig(data, start);
+  const counts = cfg.staff.filter((s) => !(cfg.skipStaff || []).includes(s.id)
+    && !((cfg.staffShifts?.[s.id] || []).length && !cfg.staffShifts[s.id].includes("night")))
+    .map((s) => datesBetween(cfg.from, cfg.to).filter((d) => out.cells[`${s.id}|${d}`] === "night").length);
+  const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+  return counts.reduce((a, b) => a + (b - mean) ** 2, 0);
+};
+
 describe("sharing nights fairly: ruleStates.fairNights", () => {
   const at = (state, priority = 1) => ({ fairNights: { state, priority } });
 
@@ -149,10 +160,9 @@ describe("sharing nights fairly: ruleStates.fairNights", () => {
     let spreadAbsent = 0, spreadIgnored = 0, bendDiffers = false;
     for (const seed of SEEDS) {
       const { start, data } = seededWard(seed);
-      const night = (c) => c === "night";
-      spreadAbsent += spreadOf(data, start, generateRoster(steady(weekConfig(data, start))), night);
+      spreadAbsent += nightShareOf(data, start, generateRoster(steady(weekConfig(data, start))));
       const ignored = withStates(data, at("disabled"));
-      spreadIgnored += spreadOf(ignored, start, generateRoster(steady(weekConfig(ignored, start))), night);
+      spreadIgnored += nightShareOf(ignored, start, generateRoster(steady(weekConfig(ignored, start))));
       if (build(withStates(data, at("soft", 4)), start) !== build(data, start)) bendDiffers = true;
     }
     expect(bendDiffers).toBe(true);
