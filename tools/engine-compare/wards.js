@@ -213,3 +213,54 @@ export function fitHistory(data) {
   }
   return { ...data, cells };
 }
+
+/* ── Whole months ──
+   Measured by the "month" job: seeded wards over a calendar month with
+   nights kept in pairs, and one shaped like an Emergency Room in December
+   2026 (made up — no live data): twenty staff, three on every night, nights
+   in pairs, "In a row" at Protect, and the kinds of rules a manager gives
+   one person. Each is measured again with a gap of 3 days between night
+   pairs. Add, do not edit: these are the month baselines. */
+export function erWard() {
+  const first = "2026-12-01";
+  const staff = [...Array(20)].map((_, i) => ({ id: `e${i}`, name: `ER ${i + 1}`, leavePeriods: [] }));
+  const rosterRules = {
+    lookbackDays: 28,
+    coverage: { morning: { min: 5, max: 6 }, afternoon: { min: 5, max: 6 }, evening: { min: 0, max: 0 }, night: { min: 3, max: 3 } },
+    weeklyMin: { morning: 1, afternoon: 1, evening: 0, night: 1, off: 1 },
+    weeklyMax: { morning: null, afternoon: null, evening: null, night: null, off: 2 },
+    blockTogether: { night: 2 },
+    sequenceRules: [
+      { id: "d1", type: "never", after: "night", then: "morning" },
+      { id: "d2", type: "never", after: "night", then: "afternoon" },
+      { id: "x1", type: "must", after: "night", then: "off" },
+    ],
+    ruleStates: { workPattern: { state: "soft", priority: 2 } },
+    seniorStaff: staff.filter((_, i) => i % 4 === 0).map((s) => s.id),
+    seniorCover: { morning: 0, afternoon: 0, evening: 0, night: 1 },
+    staffShifts: { e6: ["morning"] },
+    personRules: [
+      { id: "r1", staffId: "e3", type: "atMost", shift: "night", count: 1, strength: "soft" },
+      { id: "r2", staffId: "e4", type: "offOn", days: [5, 6], strength: "hard" },
+      { id: "r3", staffId: "e5", type: "apart", shift: "night", count: 4, strength: "soft" },
+    ],
+  };
+  const cells = {};
+  days(addDays(first, -35), 35).forEach((date, di) => {
+    cells[date] = {};
+    staff.forEach((s, si) => { cells[date][s.id] = CYCLE[(di + si * 3) % 7]; });
+  });
+  return fitHistory({
+    staff, codes: CODES, cells, cellMeta: {}, dutyRequests: [], rosterRules, weekStartsOn: 0,
+    fridayRule: true, nonOfficial: [],
+  });
+}
+
+// The same ward with a gap of `n` days between night pairs, at Protect.
+export const withNightGap = (data, n) => ({
+  ...data,
+  rosterRules: {
+    ...data.rosterRules, nightBlockGap: n,
+    ruleStates: { ...(data.rosterRules.ruleStates || {}), nightBlockGap: { state: "soft", priority: 2 } },
+  },
+});

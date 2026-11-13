@@ -9,7 +9,7 @@ import * as oldE from "./old/rosterEngine";
 import * as newE from "../../src/rosterEngine";
 import { weekConfig } from "../../src/rosterConfig";
 import { prepareMonth } from "../../src/monthBuild";
-import { seededWard, SAME, RULES, withRules, fitHistory, addDays, days } from "./wards";
+import { seededWard, SAME, RULES, withRules, fitHistory, addDays, days, erWard, withNightGap } from "./wards";
 
 const fs = require("fs");
 const path = require("path");
@@ -355,4 +355,96 @@ only("keys")("strength keys: each at a level of its own, against the same week w
     }
   }
   save("keys", tally);
+}, 7200000);
+
+/* ── Whole months, measured ──
+   Each month ward (wards.js) built by both engines and counted from the
+   finished cells, with the duties before the month read from its history:
+     longRuns    runs of a shift longer than the ward's "In a row" allows
+                 (crossWeek: those running over the start of a week)
+     shortGaps   night blocks starting fewer clear days after the last night
+                 than the ward's gap (3 where the ward sets none, to show it)
+     spread      per person over the month, for nights, mornings, afternoons:
+                 most less fewest, and the standard deviation — counted over
+                 people here every day of the month with no shift ticks and
+                 no rule of their own about that shift
+     uncovered, aboveMost, and the milliseconds each build took.        */
+const monthWards = () => {
+  const list = MONTHS.map((month, i) => {
+    const { data } = seededWard(700 + i, { from: `${month}-01`, historyDays: 35, span: 28 });
+    data.rosterRules.blockTogether = { night: 2 };
+    return { name: `seeded ${month}`, month, data };
+  });
+  list.push({ name: "ER 2026-12", month: "2026-12", data: erWard() });
+  return [...list, ...list.map((w) => ({ ...w, name: `${w.name} gap 3`, data: withNightGap(w.data, 3) }))];
+};
+
+function measureMonth(cfg, cells, month) {
+  const cats = catOfCode(cfg);
+  const histOf = (id, date) => cats[cfg.history?.cells?.[`${id}|${date}`]];
+  const catAt = (id, date) => cells[`${id}|${date}`] ?? histOf(id, date);
+  const span = days(addDays(cfg.from, -21), Math.round((new Date(cfg.to) - new Date(cfg.from)) / 86400000) + 22);
+  const built = new Set(days(cfg.from, Math.round((new Date(cfg.to) - new Date(cfg.from)) / 86400000) + 1));
+  const inMonth = [...built].filter((d) => d.startsWith(month));
+  const staff = cfg.staff.filter((s) => !(cfg.skipStaff || []).includes(s.id));
+  const isWeekStart = (date) => {
+    const [y, m, d] = date.split("-").map(Number);
+    return new Date(y, m - 1, d).getDay() === (cfg.weekStartsOn ?? 0);
+  };
+  const gapWanted = cfg.nightBlockGap || 3;
+  let longRuns = 0, crossWeek = 0, shortGaps = 0;
+  for (const s of staff) {
+    for (const sh of SHIFTS) {
+      const most = cfg.maxBlock?.[sh] ?? (sh === "night" ? 2 : 4);
+      let run = 0, crossed = false, touchesBuilt = false;
+      const close = () => { if (run > most && touchesBuilt) { longRuns += 1; if (crossed) crossWeek += 1; } };
+      for (const date of span) {
+        if (catAt(s.id, date) === sh) {
+          if (run > 0 && isWeekStart(date)) crossed = true;
+          run += 1;
+          if (built.has(date)) touchesBuilt = true;
+        } else { close(); run = 0; crossed = false; touchesBuilt = false; }
+      }
+      close();
+    }
+    // Night blocks starting in the build, against the last night before them.
+    let lastNight = null;
+    span.forEach((date, i) => {
+      const night = catAt(s.id, date) === "night";
+      const startsBlock = night && catAt(s.id, span[i - 1]) !== "night";
+      if (startsBlock && built.has(date) && lastNight != null && i - lastNight - 1 < gapWanted) shortGaps += 1;
+      if (night) lastNight = i;
+    });
+  }
+
+  const own = new Set((cfg.personRules || []).filter(Boolean).map((r) => `${r.staffId}|${r.shift || "days"}`));
+  const spread = {};
+  for (const sh of ["night", "morning", "afternoon"]) {
+    const counts = staff.filter((s) => !(cfg.staffShifts?.[s.id] || []).length
+      && !own.has(`${s.id}|${sh}`) && !own.has(`${s.id}|days`)
+      && inMonth.every((d) => cells[`${s.id}|${d}`] != null))
+      .map((s) => inMonth.filter((d) => cells[`${s.id}|${d}`] === sh).length);
+    if (counts.length < 2) { spread[sh] = { range: 0, sd: 0, people: counts.length }; continue; }
+    const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+    const sd = Math.sqrt(counts.reduce((a, b) => a + (b - mean) ** 2, 0) / counts.length);
+    spread[sh] = { range: Math.max(...counts) - Math.min(...counts), sd: Math.round(sd * 100) / 100, people: counts.length };
+  }
+  const { uncovered, aboveMost } = recount(cfg, { cells });
+  return { longRuns, crossWeek, shortGaps, spread, uncovered, aboveMost };
+}
+
+only("month")("whole months: runs, gaps between night pairs, fairness, cover and time", () => {
+  const rows = [];
+  monthWards().forEach((w, i) => {
+    if (i % OF !== PART) return;
+    const cfg = steady(prepareMonth({ data: w.data, month: w.month, lookFrom: addDays(`${w.month}-01`, -28) }).config);
+    const side = (E) => {
+      const began = Date.now();
+      const out = E.generateRoster(cfg);
+      const ms = Date.now() - began;
+      return out.ok ? { ...measureMonth(cfg, out.cells, w.month), ms } : { refused: true, ms };
+    };
+    rows.push({ name: w.name, old: side(oldE), new: side(newE) });
+  });
+  save("month", { rows });
 }, 7200000);
