@@ -709,6 +709,8 @@ function costWeights(cfg) {
   const level = Math.min(4, Math.max(1, R.workPattern?.priority ?? 4));
   w.unfinished = 0;
   w.pairsFirst = false;
+  // At every level but Ignore, a half pair from last week is finished on the new week's first day where someone is free to.
+  w.pairsCarried = pairsOn && pattern !== 'disabled';
   if (pairsOn && pattern === 'hard') {
     w.blockTogether = HARD; w.unfinished = HARD; w.pairsFirst = true;
   } else if (pairsOn && pattern === 'soft' && TOGETHER[level]) {
@@ -1766,7 +1768,10 @@ export function generateRoster(cfg) {
 
   const dates = datesBetween(cfg.from, cfg.to);
   const staff = cfg.staff.filter((s) => !cfg.skipStaff?.includes(s.id));
-  const ctx = rosterContext(cfg, dates, staff);
+  /* Cover first: everything up to the last pass is built and rearranged
+     without fair shares, exactly as before them; the shares come last. */
+  const full = rosterContext(cfg, dates, staff);
+  const ctx = { ...full, W: { ...full.W, shareNight: 0, shareDay: 0 } };
   const weeks = Math.max(1, Math.ceil(dates.length / 7));
   const attempts = Math.max(1, cfg.attempts ?? Math.max(3, Math.round(24 / weeks)));
 
@@ -1800,6 +1805,26 @@ export function generateRoster(cfg) {
     const bent = polish(cfg, ctx, cells, tried, true);
     const bentAudit = auditRoster(cfg, ctx, bent);
     if (gaps(bentAudit) < gaps(audit)) { cells = bent; audit = bentAudit; }
+  }
+  /* Fair shares over the whole build, last: a short pass with them priced,
+     kept only if it gives way to everything above it — no more shifts
+     uncovered or without anyone in charge, none over the most, no Must
+     broken (days off included), and no pair split or run too long that
+     was not already. So fairness never costs cover. */
+  const size = staff.length * dates.length;
+  const fairSteps = Math.round((cfg.polishSteps ?? Math.max(10000, Math.min(90000, Math.round(2400000 / size) + 12000))) / 6);
+  if ((full.W.shareNight || full.W.shareDay) && fairSteps > 0) {
+    const count = (a, test) => a.issues.filter(test).length;
+    const must = (x) => ['restriction', 'absMax', 'dutyMax'].includes(x.kind) || (x.kind === 'personal' && x.rule?.strength === 'hard');
+    const shape = (x) => x.kind === 'blockTogether' || (x.kind === 'block' && x.shift === 'night');
+    const over = (x) => x.kind === 'overMax';
+    const worse = (a, b) => gaps(a) > gaps(b) || count(a, must) > count(b, must) || count(a, shape) > count(b, shape)
+      || count(a, over) > count(b, over);
+    const fairer = polish({ ...cfg, polishSteps: fairSteps }, full, cells, tried + 1);
+    const fairAudit = auditRoster(cfg, ctx, fairer);
+    if (!worse(fairAudit, audit) && auditRoster(cfg, full, fairer).cost < auditRoster(cfg, full, cells).cost) {
+      cells = fairer; audit = fairAudit;
+    }
   }
   mustReasons(cfg, ctx, cells, audit.shortfalls);
 
@@ -2392,7 +2417,7 @@ function buildOnce(cfg, seed, ctx) {
            the week — a pair begun last Saturday on this Sunday too — as long
            as the week still has a place left for everyone waiting for a
            first one. Only where the shift is kept together. */
-        const pairOf = () => (ctx.W.pairsFirst ? cfg.blockTogether?.[shift] : null);
+        const pairOf = () => (ctx.W.pairsFirst || ctx.W.pairsCarried ? cfg.blockTogether?.[shift] : null);
         let room = null;
         const roomForFirsts = () => {
           if (room != null) return room;
@@ -2411,7 +2436,7 @@ function buildOnce(cfg, seed, ctx) {
           const wantMin = ownRule(id, 'atLeast', shift)?.count ?? limitFor(id, 'min')[shift];
           const pair = ownRule(id, 'together', shift);
           const n = pairOf(id);
-          if (run > 0 && n > 1 && run < n && (soFar === 0 || roomForFirsts())) return -1100;
+          if (run > 0 && n > 1 && run < n && (soFar === 0 || (ctx.W.pairsFirst && roomForFirsts()))) return -1100;
           /* Having had none of this shift all week outranks everything,
              including finishing a pair of nights. Pairing is a preference,
              not a requirement: with seven nights and six people, insisting

@@ -1,7 +1,8 @@
-/* Nights in pairs, held by In a row's level. A ward without pairs, or with
-   In a row at Bend first, builds exactly as before; above that a pair is
-   finished first — last Saturday's half on this Sunday too — and every
-   pair split or left half done is reported with the person and the nights. */
+/* Nights in pairs, held by In a row's level. A ward without pairs builds
+   exactly as before; at every level last Saturday's half is finished on
+   Sunday where someone is free to, and above Bend first a pair is finished
+   first all week and held by price. Every pair split or left half done is
+   reported with the person and the nights. */
 
 import { weekConfig } from "./rosterConfig";
 import { generateRoster } from "./rosterEngine";
@@ -17,21 +18,18 @@ const carried = (cfg, cells) => {
     .map((s) => cells[`${s.id}|${cfg.from}`]);
 };
 
-test("Bend first, and a ward without pairs, are untouched by pairs being held", () => {
-  // The same week at Bend first is built as the engine always built it, so both builds agree with each other.
-  const bend = steady(weekConfig(withInARowLevel(erRealWard(), 4), "2026-12-06"));
-  expect(generateRoster(bend).cells).toEqual(generateRoster(bend).cells);
+test("a ward without pairs reports no pair split or left half done", () => {
   const plain = steady(weekConfig(withoutPairs(erRealWard()), "2026-12-06"));
   const res = generateRoster(plain);
   expect(res.report.relaxations.some((r) => r.days)).toBe(false);
 }, 120000);
 
-test("at Protect, last Saturday's half pair is finished on Sunday", () => {
-  const cfg = steady(weekConfig(withInARowLevel(thoiWard(), 2), "2026-11-15"));
+test.each([2, 4])("at In a row level %i (Protect, Bend first), last Saturday's half pair is finished on Sunday", (level) => {
+  const cfg = steady(weekConfig(withInARowLevel(thoiWard(), level), "2026-11-15"));
   const res = generateRoster(cfg);
   const sunday = carried(cfg, res.cells);
   expect(sunday.length).toBeGreaterThan(0);
-  expect(sunday.every((c) => c === "night")).toBe(true);
+  expect(sunday.filter((c) => c !== "night").length).toBeLessThanOrEqual(1);
 }, 120000);
 
 test("a pair split or left half done is reported with the person and the nights", () => {

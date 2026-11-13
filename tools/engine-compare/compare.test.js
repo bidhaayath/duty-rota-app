@@ -82,7 +82,8 @@ function recount(cfg, out) {
   for (const s of staff) {
     for (const date of dates) {
       const cat = cells[`${s.id}|${date}`];
-      if (cat == null || cat === "off") continue;
+      // An approved request that day is the manager's own choice, kept over the rule: not a miss.
+      if (cat == null || cat === "off" || asked.has(`${s.id}|${date}`)) continue;
       const off = ruleOn(s.id, date, "offOn"), few = ruleOn(s.id, date, "onlyOn");
       if (off) misses.push(`${s.id}|${date}|offOn|${off.strength === "hard" ? "hard" : "soft"}`);
       else if (few && !few.shifts.includes(cat)) misses.push(`${s.id}|${date}|onlyOn|${few.strength === "hard" ? "hard" : "soft"}`);
@@ -139,9 +140,11 @@ function recount(cfg, out) {
 }
 
 // What the engine's own report says about the same things.
-function reported(out) {
+function reported(out, cfg) {
+  // As counted: a day with an approved request is not a miss.
+  const asked = new Set((cfg.requests || []).map((r) => `${r.staffId}|${r.date}`));
   const misses = out.report.relaxations
-    .filter((r) => r.personal && DAY_TYPES.includes(r.ruleType))
+    .filter((r) => r.personal && DAY_TYPES.includes(r.ruleType) && !asked.has(`${r.staffId}|${r.date}`))
     .map((r) => `${r.staffId}|${r.date}|${r.ruleType}|${r.strength}`).sort();
   const names = out.report.shortfalls.flatMap((g) => (g.because || [])
     .filter((b) => DAY_TYPES.includes(b.rule.type))
@@ -211,23 +214,26 @@ only("rules")("weeks with rules set: old and new, counted from the finished rota
     if (seed % OF !== PART) continue;
     const { data, start } = seededWard(seed);
     for (const [name, list] of Object.entries(RULES(seed, data.staff))) {
+      // EC_RULE_LISTS=offMust,everything runs only those lists.
+      if (process.env.EC_RULE_LISTS && !process.env.EC_RULE_LISTS.split(",").includes(name)) continue;
       const cfg = steady(weekConfig(fitHistory(withRules(data, list)), start));
       const a = timed(oldE, cfg), b = timed(newE, cfg);
       const t = tally[name] || (tally[name] = {
         weeks: 0, refused: 0, sameText: 0, old: { uncovered: 0, aboveMost: 0, ms: 0, weekMs: [] },
         new: { uncovered: 0, aboveMost: 0, ms: 0, weekMs: [], tryMissed: 0, mustMissed: 0, gapsNamed: 0 },
         fixed: { weeks: 0, fixedDaysWorked: 0, weeksWithExtraOff: 0, weeksShortOfDuties: 0 },
-        reportDisagrees: [],
+        reportDisagrees: [], mustSeeds: [],
       });
       t.weeks += 1;
       if (!b.out.ok || !a.out.ok) { t.refused += 1; continue; }
       if (JSON.stringify(a.out) === JSON.stringify(b.out)) t.sameText += 1;
-      const ca = recount(cfg, a.out), cb = recount(cfg, b.out), said = reported(b.out);
+      const ca = recount(cfg, a.out), cb = recount(cfg, b.out), said = reported(b.out, cfg);
       t.old.uncovered += ca.uncovered; t.old.aboveMost += ca.aboveMost; t.old.ms += a.ms;
       t.new.uncovered += cb.uncovered; t.new.aboveMost += cb.aboveMost; t.new.ms += b.ms;
       t.old.weekMs.push(a.ms); t.new.weekMs.push(b.ms);
       t.new.tryMissed += cb.misses.filter((m) => m.endsWith("soft")).length;
       t.new.mustMissed += cb.misses.filter((m) => m.endsWith("hard")).length;
+      if (cb.misses.some((m) => m.endsWith("hard"))) t.mustSeeds.push(seed);
       t.new.gapsNamed += cb.names.length;
       Object.keys(t.fixed).forEach((k) => { t.fixed[k] += cb.fixed[k]; });
       if (said.uncovered !== cb.uncovered || said.misses.join() !== cb.misses.join()
