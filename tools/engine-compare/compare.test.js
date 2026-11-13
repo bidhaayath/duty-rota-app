@@ -360,8 +360,9 @@ only("keys")("strength keys: each at a level of its own, against the same week w
 /* ── Whole months, measured ──
    Each month ward (wards.js) built by both engines and counted from the
    finished cells, with the duties before the month read from its history:
-     longRuns    runs of a shift longer than the ward's "In a row" allows
+     longRuns    runs of nights longer than the ward's "In a row" allows
                  (crossWeek: those running over the start of a week)
+     dayRuns     the same for other shifts, leaving out anyone kept to one shift
      shortGaps   night blocks starting fewer clear days after the last night
                  than the ward's gap (3 where the ward sets none, to show it)
      spread      per person over the month, for nights, mornings, afternoons:
@@ -392,12 +393,18 @@ function measureMonth(cfg, cells, month) {
     return new Date(y, m - 1, d).getDay() === (cfg.weekStartsOn ?? 0);
   };
   const gapWanted = cfg.nightBlockGap || 3;
-  let longRuns = 0, crossWeek = 0, shortGaps = 0;
+  let longRuns = 0, crossWeek = 0, shortGaps = 0, dayRuns = 0;
   for (const s of staff) {
     for (const sh of SHIFTS) {
       const most = cfg.maxBlock?.[sh] ?? (sh === "night" ? 2 : 4);
       let run = 0, crossed = false, touchesBuilt = false;
-      const close = () => { if (run > most && touchesBuilt) { longRuns += 1; if (crossed) crossWeek += 1; } };
+      // Somebody kept to one shift has nothing else to break a run with: not counted.
+      const single = (cfg.staffShifts?.[s.id] || []).length === 1;
+      const close = () => {
+        if (run <= most || !touchesBuilt) return;
+        if (sh !== "night") { if (!single) dayRuns += 1; return; }
+        longRuns += 1; if (crossed) crossWeek += 1;
+      };
       for (const date of span) {
         if (catAt(s.id, date) === sh) {
           if (run > 0 && isWeekStart(date)) crossed = true;
@@ -430,7 +437,7 @@ function measureMonth(cfg, cells, month) {
     spread[sh] = { range: Math.max(...counts) - Math.min(...counts), sd: Math.round(sd * 100) / 100, people: counts.length };
   }
   const { uncovered, aboveMost } = recount(cfg, { cells });
-  return { longRuns, crossWeek, shortGaps, spread, uncovered, aboveMost };
+  return { longRuns, crossWeek, dayRuns, shortGaps, spread, uncovered, aboveMost };
 }
 
 only("month")("whole months: runs, gaps between night pairs, fairness, cover and time", () => {
