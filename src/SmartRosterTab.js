@@ -14,8 +14,8 @@
    Nothing is written to the rota until Apply is pressed.                */
 
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { Wand2, AlertTriangle, Check, X, ChevronDown, ChevronRight } from "lucide-react";
-import { generateRoster, checkFeasible, toRotaCells, SHIFTS, mustCauseText } from "./rosterEngine";
+import { Wand2, AlertTriangle, Check, X, ChevronDown, ChevronLeft, ChevronRight, Shuffle } from "lucide-react";
+import { generateRoster, nextOption, checkFeasible, toRotaCells, SHIFTS, mustCauseText } from "./rosterEngine";
 import { prettyWeekday } from "./monthBuild";
 /* The settings, the engine configuration and the Apply helpers live in
    rosterConfig.js, shared with Ini's month builder so the two never drift
@@ -47,6 +47,8 @@ const DAY_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frid
 
 // People's rules about days of the week; how they are added and changed is in YourStaff.js.
 const DAY_TYPES = ["offOn", "onlyOn"];
+// "Show another option" keeps at most this many weeks to page through.
+const MAX_OPTIONS = 3;
 
 export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
@@ -211,16 +213,19 @@ export default function SmartRosterTab({
     // the last uncovered shifts get resolved.
     setTimeout(() => {
       try {
-        const res = generateRoster(buildConfig());
+        const cfg = buildConfig();
+        const res = generateRoster(cfg);
         if (!res.ok) { setProposal({ failed: true, problems: res.problems, deptId }); return; }
         const yearStart = `${weekStart.slice(0, 4)}-01-01`;
+        const first = optionOf(res);
         setProposal({
           deptId,
-          cells: res.cells, report: res.report,
+          ...first,
           yearToDate: flattenCells(data.cells, codeById, yearStart, weekEnd),
           yearStart,
-          rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes),
           from: weekStart, to: weekEnd,
+          // Other options are built only when asked for, from the same settings.
+          cfg, options: [first], shown: 0, nextTry: 1, noMore: false,
         });
         setCelebrate(Date.now());
         // Ini says how it went: a little dance for every shift covered, plain help for gaps.
@@ -229,6 +234,41 @@ export default function SmartRosterTab({
       } catch (e) {
         console.error("Roster generation failed:", e);
         setProposal({ failed: true, problems: ["Something went wrong. Nothing has been changed."], deptId });
+      } finally { setBusy(false); }
+    }, 30);
+  };
+
+  // What the screen keeps of one build: the week, its report, and the rota codes.
+  const optionOf = (res) => ({
+    cells: res.cells, report: res.report,
+    rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes),
+  });
+
+  /* Option N of the ones found so far. Everything about the week — the
+     grid, What had to give, Use this roster — reads the shown one. */
+  const showOption = (i) => setProposal((p) => ({ ...p, ...p.options[i], shown: i }));
+
+  /* The next option along, or the next one built. Up to three in all, and
+     only so many builds are tried; when none differs enough without being
+     worse, the page says the first is the best fit. */
+  const anotherOption = () => {
+    if (!proposal || proposal.failed) return;
+    if (proposal.shown < proposal.options.length - 1) { showOption(proposal.shown + 1); return; }
+    if (proposal.noMore || proposal.options.length >= MAX_OPTIONS) return;
+    setBusy(true);
+    setTimeout(() => {
+      try {
+        const kept = proposal.options.map((o) => ({ ok: true, cells: o.cells }));
+        const { option, next } = nextOption(proposal.cfg, kept, proposal.nextTry);
+        setProposal((p) => {
+          if (p !== proposal) return p;
+          if (!option) return { ...p, nextTry: next, noMore: true };
+          const o = optionOf(option);
+          return { ...p, ...o, options: [...p.options, o], shown: p.options.length, nextTry: next };
+        });
+      } catch (e) {
+        console.error("Another option failed:", e);
+        setProposal((p) => (p === proposal ? { ...p, noMore: true } : p));
       } finally { setBusy(false); }
     }, 30);
   };
@@ -666,6 +706,7 @@ export default function SmartRosterTab({
         <Week proposal={proposal} data={data} activeStaff={activeStaff} weekLabel={weekLabel}
           codeById={codeById} termOne={termOne} termMany={termMany}
           onApply={apply} onDiscard={() => setProposal(null)}
+          onAnother={anotherOption} onShow={showOption} busy={busy}
           T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle}
           th={th} td={td} dstr={dstr} rules={rules} />
       )}
@@ -695,8 +736,12 @@ export default function SmartRosterTab({
 /* The proposed week, with the counts underneath. Coverage is shown per day
    so a short shift is obvious at a glance, and each person's mix of duties
    is shown so an unfair week cannot hide behind a tidy-looking grid. */
-function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, Card, Btn, Field, inputStyle, th, td, dstr, rules, codeById, termOne, termMany }) {
+function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, onAnother, onShow, busy, T, Card, Btn, Field, inputStyle, th, td, dstr, rules, codeById, termOne, termMany }) {
   const { report, rotaCells, cells, from } = proposal;
+  const count = proposal.options?.length || 1;
+  const shown = proposal.shown || 0;
+  // The button stays while there is a later option to see, or one still to look for.
+  const canAsk = !!proposal.options && (shown < count - 1 || (!proposal.noMore && count < MAX_OPTIONS));
   const dates = useMemo(() => [...Array(7)].map((_, i) => dstr(addDays(new Date(from), i))), [from, dstr]);
   const colorOf = useMemo(() => {
     const m = {}; (data.codes || []).forEach((c) => { m[c.code] = c.color; }); return m;
@@ -761,6 +806,31 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, T, C
             <Btn kind="ghost" onClick={onDiscard} style={{ minHeight: 44 }}><X size={15} /> Discard</Btn>
             <Btn onClick={onApply} style={{ minHeight: 44 }}><Check size={15} /> Use this roster</Btn>
           </div>
+        </div>
+
+        {/* Other ways to fill the same week, built only when asked for. */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+          {count > 1 && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <Btn kind="ghost" onClick={() => onShow(shown - 1)} disabled={busy || shown === 0}
+                aria-label="Previous option" style={{ minHeight: 44, minWidth: 44 }}><ChevronLeft size={16} /></Btn>
+              <span aria-live="polite" style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>Option {shown + 1} of {count}</span>
+              <Btn kind="ghost" onClick={() => onShow(shown + 1)} disabled={busy || shown === count - 1}
+                aria-label="Next option" style={{ minHeight: 44, minWidth: 44 }}><ChevronRight size={16} /></Btn>
+            </div>
+          )}
+          {canAsk && (
+            <Btn kind="ghost" onClick={onAnother} disabled={busy} style={{ minHeight: 44 }}>
+              <Shuffle size={15} /> {busy ? "Looking…" : "Show another option"}
+            </Btn>
+          )}
+          {proposal.noMore && shown === count - 1 && (
+            <span role="status" style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
+              {count === 1
+                ? "This is the best fit I found — other ways to fill this week were no better."
+                : "No more different options as good as these."}
+            </span>
+          )}
         </div>
 
         {/* The week in one line, before anything else. */}

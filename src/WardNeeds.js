@@ -480,6 +480,11 @@ export function PersonWeek({ rules, setRules, dropRule, editable, T, Card, codes
           Turn on
         </button>
       )}
+      {!gapOn && inRowOf(rules.blockTogether?.night, rules.blockDays?.night)?.id === "pairs" && (
+        <span style={{ flex: "1 1 100%", fontSize: 12.5, color: T.inkSoft, lineHeight: 1.45 }}>
+          Tip: turn on Gap between night pairs to keep pairs together.
+        </span>
+      )}
     </div>
   );
 

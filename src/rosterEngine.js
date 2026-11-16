@@ -1761,8 +1761,11 @@ export function mustCauseText(because) {
    of the week gets a second chance instead of becoming the answer.
 
    A week is small, so this costs milliseconds. A long range gets fewer
-   attempts, because the work grows with the number of days.             */
-export function generateRoster(cfg) {
+   attempts, because the work grows with the number of days.
+
+   seedOffset moves every random choice along, for "Show another option".
+   At 0, the default, every seed is exactly what it always was.          */
+export function generateRoster(cfg, seedOffset = 0) {
   const feasible = checkFeasible(cfg);
   if (!feasible.ok) return { ok: false, problems: feasible.problems, cells: {}, report: null };
 
@@ -1781,7 +1784,7 @@ export function generateRoster(cfg) {
   let cost = Infinity;
   let tried = 0;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const candidate = buildOnce(cfg, attempt, ctx);
+    const candidate = buildOnce(cfg, seedOffset + attempt, ctx);
     const score = auditRoster(cfg, ctx, candidate.cells).cost;
     tried += 1;
     if (score < cost) { cells = candidate.cells; cost = score; }
@@ -1792,7 +1795,7 @@ export function generateRoster(cfg) {
      choice it made on Tuesday; this can, and that is where the last
      uncovered shifts and the last hand-fixes come from. */
   const before = auditRoster(cfg, ctx, cells);
-  cells = polish(cfg, ctx, cells, tried);
+  cells = polish(cfg, ctx, cells, seedOffset + tried);
   let audit = auditRoster(cfg, ctx, cells);
   /* People's Try rules about days were held all through that, as a Must is.
      If a shift is still short, or has nobody in charge, it is done once
@@ -1802,7 +1805,7 @@ export function generateRoster(cfg) {
   const gaps = (a) => a.shortfalls.reduce((n, x) => n + x.needed, 0)
     + a.seniorGaps.reduce((n, x) => n + x.needed, 0);
   if (ctx.dayTry && gaps(audit) > 0) {
-    const bent = polish(cfg, ctx, cells, tried, true);
+    const bent = polish(cfg, ctx, cells, seedOffset + tried, true);
     const bentAudit = auditRoster(cfg, ctx, bent);
     if (gaps(bentAudit) < gaps(audit)) { cells = bent; audit = bentAudit; }
   }
@@ -1815,12 +1818,12 @@ export function generateRoster(cfg) {
   const fairSteps = Math.round((cfg.polishSteps ?? Math.max(10000, Math.min(90000, Math.round(2400000 / size) + 12000))) / 6);
   if ((full.W.shareNight || full.W.shareDay) && fairSteps > 0) {
     const count = (a, test) => a.issues.filter(test).length;
-    const must = (x) => ['restriction', 'absMax', 'dutyMax'].includes(x.kind) || (x.kind === 'personal' && x.rule?.strength === 'hard');
+    const must = mustIssue;
     const shape = (x) => x.kind === 'blockTogether' || (x.kind === 'block' && x.shift === 'night');
     const over = (x) => x.kind === 'overMax';
     const worse = (a, b) => gaps(a) > gaps(b) || count(a, must) > count(b, must) || count(a, shape) > count(b, shape)
       || count(a, over) > count(b, over);
-    const fairer = polish({ ...cfg, polishSteps: fairSteps }, full, cells, tried + 1);
+    const fairer = polish({ ...cfg, polishSteps: fairSteps }, full, cells, seedOffset + tried + 1);
     const fairAudit = auditRoster(cfg, ctx, fairer);
     if (!worse(fairAudit, audit) && auditRoster(cfg, full, fairer).cost < auditRoster(cfg, full, cells).cost) {
       cells = fairer; audit = fairAudit;
@@ -1850,6 +1853,71 @@ export function generateRoster(cfg) {
       issuesToRelaxations(audit.issues), budget, audit.seniorGaps, ctx.seniorIds,
     ),
   };
+}
+
+// A Must broken: the ward's never-bent limits, or a person's own Must rule.
+const mustIssue = (x) => ['restriction', 'absMax', 'dutyMax'].includes(x.kind) || (x.kind === 'personal' && x.rule?.strength === 'hard');
+
+/* ── Other options ──
+   "Show another option" builds the week again with every random choice
+   moved along (seeds 1000, 2000, …). A build is kept as an option only if
+   it is really different — at least a tenth of the person-days differ from
+   every option already kept — and never worse than the first on uncovered
+   shifts, shifts with nobody in charge, or any Must. The first option is
+   generateRoster exactly as it always was.
+
+   One build per call, so the screen can ask for the next only when the
+   manager does. `next` is the try to make; tries run out at OPTION_TRIES. */
+export const OPTION_TRIES = 6;
+export const OPTION_DIFFERENCE = 0.1;
+
+export function optionDifference(cfg, a, b) {
+  const dates = datesBetween(cfg.from, cfg.to);
+  const staff = cfg.staff.filter((s) => !cfg.skipStaff?.includes(s.id));
+  let differ = 0;
+  staff.forEach((s) => dates.forEach((d) => {
+    const k = `${s.id}|${d}`;
+    if ((a[k] || 'off') !== (b[k] || 'off')) differ += 1;
+  }));
+  return staff.length && dates.length ? differ / (staff.length * dates.length) : 0;
+}
+
+export function nextOption(cfg, kept, next = 1) {
+  if (!kept.length || !kept[0].ok || next > OPTION_TRIES) return { option: null, next };
+  const dates = datesBetween(cfg.from, cfg.to);
+  const staff = cfg.staff.filter((s) => !cfg.skipStaff?.includes(s.id));
+  const full = rosterContext(cfg, dates, staff);
+  const ctx = { ...full, W: { ...full.W, shareNight: 0, shareDay: 0 } };
+  const measure = (cells) => {
+    const a = auditRoster(cfg, ctx, cells);
+    return {
+      uncovered: a.shortfalls.reduce((n, x) => n + x.needed, 0),
+      inCharge: a.seniorGaps.reduce((n, x) => n + x.needed, 0),
+      must: a.issues.filter(mustIssue).length,
+    };
+  };
+  const first = measure(kept[0].cells);
+  for (let t = next; t <= OPTION_TRIES; t++) {
+    const res = generateRoster(cfg, t * 1000);
+    if (!res.ok) continue;
+    const m = measure(res.cells);
+    if (m.uncovered > first.uncovered || m.inCharge > first.inCharge || m.must > first.must) continue;
+    if (kept.some((k) => optionDifference(cfg, k.cells, res.cells) < OPTION_DIFFERENCE)) continue;
+    return { option: res, next: t + 1 };
+  }
+  return { option: null, next: OPTION_TRIES + 1 };
+}
+
+/* Up to `max` options at once, the first being generateRoster(cfg). */
+export function generateOptions(cfg, max = 3, first = generateRoster(cfg)) {
+  const options = [first];
+  let next = 1;
+  while (first.ok && options.length < max && next <= OPTION_TRIES) {
+    const found = nextOption(cfg, options, next);
+    next = found.next;
+    if (found.option) options.push(found.option);
+  }
+  return options;
 }
 
 function buildOnce(cfg, seed, ctx) {
