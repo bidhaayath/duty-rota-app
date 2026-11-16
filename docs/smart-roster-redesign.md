@@ -151,7 +151,7 @@ Above the list: "This ward calls the person in charge [ ]" and a one-line key fo
 - Week picker and one big **Make the roster** button.
 - **Ready checklist** before generating: ward needs fit (or a link back to step 1), enough [In-charge word]s on the roster, staff on the roster / skipped, approved duty requests this week — always kept (Must), "what may follow what" rules, look-back period.
 - Result: a one-line summary ("All Must rules met, every shift covered…"), then **What had to give**, each item with person/shift, rule, strength and plain reason. Red box for gaps caused by personal Musts at the top (wording from per-person-days). A gap explained in the red box is never repeated in the generic "could not be filled" box.
-- Buttons: **Use this roster** (today's Apply), **Show another option**, **Discard**. "Show another option" needs engine work (different seeds, keep the 3 best distinct results) — its own later stage.
+- Buttons: **Use this roster** (today's Apply), **Show another option**, **Discard**. "Show another option" needs engine work (different seeds, keep the 3 best distinct results) — stage 7, as built below.
 
 ### As built in stage 5 (`src/RosterSteps.js`)
 - **Three step buttons** at the top — 1 Ward needs · 2 Your staff · 3 Make the roster — always clickable, each with a one-line status: "Done" / "Needs a fix", "N on the roster", "Week ready" / "Pick a week". The current one has a green border and `aria-current="step"`. "← Back" and "Next: …" under each step. On the narrowest phones (340px and below) the words drop under the number.
@@ -159,6 +159,13 @@ Above the list: "This ward calls the person in charge [ ]" and a one-line key fo
 - **Ready checklist** on step 3 until a week is made: settings fit (or "go back to step 1"), enough in-charge on the roster, how many on the roster and skipped, approved requests and fixed duties this week (always kept), "what may follow what", the look-back.
 - **After making**: a one-line summary first ("All Must rules met, every shift covered." or "N shifts not covered · …"), then the week. Apply is now **Use this roster**, same behaviour. No "Show another option" yet (stage 7).
 - The last step is remembered per department in `localStorage` (`smartRoster:step:<deptId>`, try/catch, starts at step 1 when unreadable). `dutyrota:recovering` and `dutyrota:recovery-done` are untouched.
+
+### As built in stage 7 (branch `show-options`)
+- **Engine, no change to how a roster is built**: `generateRoster(cfg, seedOffset = 0)` moves every seed (builder attempts, polish, Try pass, fairness pass) along by the offset; at 0 every seed is what it always was (engine-compare `--quick --job same-weeks`: 0 different). `nextOption(cfg, kept, next)` builds with offsets 1000, 2000, … up to `OPTION_TRIES` = 6 builds in all, and keeps one only if at least 10% of person-days (people on the roster × days; empty = off) differ from every option already kept, and it is never worse than option 1 on uncovered shifts, shifts with no in-charge, or Musts broken. `generateOptions(cfg, max = 3, first)` loops it; option 1 is `generateRoster(cfg)` itself.
+- **On demand**: the first Generate builds only option 1, as before. **Show another option** (under Use this roster) builds the next only when pressed, from the same settings the week was made with. Once there are two, "Option N of M" with ‹ › buttons (44px, "Previous option" / "Next option"). The grid, the summary, What had to give and **Use this roster** all follow the option shown. Up to 3 options.
+- **None found**: "This is the best fit I found — other ways to fill this week were no better." (or "No more different options as good as these." after a second one), and the button goes.
+- **Tip under Gap between night pairs**: when Night's In a row is "In pairs" and the gap is off — "Tip: turn on Gap between night pairs to keep pairs together." Shown only; saves nothing.
+- Tests: `src/showOptions.test.js`.
 
 ## Ini
 
@@ -203,7 +210,7 @@ Animated Ini in the Ask Ini bar, built from Ini's measured proportions (rounded-
 | Staff ticks, in-charge, Skip, ward word | `staffShifts`, `seniorStaff`, `skipStaff`, `seniorTerm` (+ `seniorTermPlural`) | Yes |
 | Personal rules 1–6, Must / Try | `personRules[]` | Yes |
 | Fixed duty | — | No (stage 4) |
-| Show another option | — | No (stage 7) |
+| Show another option | — | Yes, since stage 7 (`nextOption`) |
 
 Things that change how an existing department's roster is built: only stage 0 (a ward on "Don't look back" now has rest checked at the start of the week). Everything else is either the manager's own choice on the screen, or a new key that means today's behaviour when absent. The first edit on the screen still writes the whole merged settings, as today.
 
@@ -219,7 +226,7 @@ Things that change how an existing department's roster is built: only stage 0 (a
 | 4 | **Manager-fixed duty** (engine + panel type 7). | **Engine (small)** + screen | Merged (PR #75) |
 | 5 | **Three-step layout, ready checklist and result summary.** | Screen only | In progress on `three-steps` |
 | 6 | **Ini animations.** | Screen only | In progress on `three-steps` |
-| 7 | **Show another option**: different seeds, keep the 3 best distinct results. | **Engine (medium)** | |
+| 7 | **Show another option**: different seeds, keep the 3 best distinct results. | **Engine (medium)** | In progress on `show-options` |
 | 8 | **Off days "Always together".** | **Engine (medium)** | |
 
 ## Verification for every stage

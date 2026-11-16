@@ -654,14 +654,14 @@ const migrate = (d) => {
 const Card = React.forwardRef(({ children, style, className }, ref) => (
   <div ref={ref} className={["dr-card", className].filter(Boolean).join(" ")} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 18, ...style }}>{children}</div>
 ));
-const Btn = ({ children, onClick, kind = "primary", small, style, disabled }) => {
+const Btn = ({ children, onClick, kind = "primary", small, style, disabled, "aria-label": ariaLabel }) => {
   const kinds = {
     primary: { background: T.lagoon, color: "#fff" },
     ghost: { background: "transparent", color: T.ink, border: `1px solid ${T.line}` },
     danger: { background: "#FBEAE7", color: T.coral },
   };
   return (
-    <button className="dr-btn" onClick={onClick} disabled={disabled} style={{
+    <button className="dr-btn" onClick={onClick} disabled={disabled} aria-label={ariaLabel} style={{
       fontFamily: "inherit", cursor: disabled ? "not-allowed" : "pointer", border: "none",
       borderRadius: 10, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6,
       padding: small ? "6px 12px" : "10px 16px", fontSize: small ? 13 : 14,
