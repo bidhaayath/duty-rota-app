@@ -1081,7 +1081,7 @@ export default function AssistantPanel({
           <div
             className="ini-backdrop"
             onClick={() => setOpen(false)}
-            style={{ position: "fixed", inset: 0, background: "rgba(20,43,51,0.28)", zIndex: 999 }}
+            style={{ position: "fixed", inset: 0, background: "rgba(14,58,71,0.22)", zIndex: 999 }}
           />
           <aside
             className="ini-panel"
@@ -1090,8 +1090,8 @@ export default function AssistantPanel({
             aria-label="Ini · your rota assistant"
             style={{
               position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1000,
-              background: "#fff", color: T.ink, fontFamily: "Inter, system-ui, sans-serif",
-              boxShadow: "-8px 0 30px rgba(20,43,51,0.18)",
+              background: "rgba(255,255,255,0.82)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", borderLeft: "1px solid rgba(255,255,255,0.9)", color: T.ink, fontFamily: "Inter, system-ui, sans-serif",
+              boxShadow: "inset 1px 0 0 rgba(255,255,255,0.85), -8px 0 30px rgba(14,58,71,0.18)",
               display: "flex", flexDirection: "column",
             }}
           >

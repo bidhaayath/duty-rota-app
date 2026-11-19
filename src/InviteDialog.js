@@ -147,13 +147,13 @@ export default function InviteDialog({
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
-        position: "fixed", inset: 0, background: "rgba(20,43,51,0.45)",
+        position: "fixed", inset: 0, background: "rgba(14,58,71,0.35)",
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 18, zIndex: 1000,
       }}
     >
       <div style={{
-        background: "#fff", borderRadius: 14, width: "100%", maxWidth: 460,
+        background: "rgba(255,255,255,0.86)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", border: "1px solid rgba(255,255,255,0.9)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 18px 44px rgba(14,58,71,0.22)", borderRadius: 24, width: "100%", maxWidth: 460,
         padding: "20px 22px 22px", fontFamily: "Inter, system-ui, sans-serif",
         color: T.ink, maxHeight: "90vh", overflowY: "auto",
       }}>

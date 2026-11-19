@@ -1465,8 +1465,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       box-shadow: 0 6px 22px rgba(20,43,51,0.06), inset 0 1px 0 rgba(255,255,255,0.9);
     }
     .dr-stat-lead {
-      background: linear-gradient(135deg, rgba(214,239,233,0.78), rgba(255,255,255,0.6)) !important;
-      border: 1px solid rgba(15,139,126,0.28) !important;
+      background: linear-gradient(135deg, rgba(205,235,244,0.78), rgba(255,255,255,0.6)) !important;
+      border: 1px solid rgba(13,79,97,0.22) !important;
     }
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
       .dr-stat { background: #fff !important; }
@@ -1937,8 +1937,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               inert={!deptMenuOpen}
               style={{
                 position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
-                background: "#fff", color: T.ink, borderRadius: 12, border: `1px solid ${T.line}`,
-                boxShadow: "0 12px 30px rgba(15,30,28,0.18)", overflow: "hidden",
+                background: "rgba(255,255,255,0.8)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", color: T.ink, borderRadius: 16, border: "1px solid rgba(255,255,255,0.9)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 12px 30px rgba(14,58,71,0.18)", overflow: "hidden",
                 transformOrigin: "top left",
                 opacity: deptMenuOpen ? 1 : 0,
                 transform: deptMenuOpen ? "scale(1) translateY(0)" : "scale(0.96) translateY(-4px)",
@@ -2013,8 +2013,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
             <h1 className="dr-depttitle" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
-            <span className="dr-tagline" style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota &amp; non-official day tracker</span>
-            {saveStatus === "saving" && <span style={{ fontSize: 12, color: "#9FC3BD" }}>Saving…</span>}
+            <span className="dr-tagline" style={{ fontSize: 12.5, color: "#A9D3E0" }}>duty rota &amp; non-official day tracker</span>
+            {saveStatus === "saving" && <span style={{ fontSize: 12, color: "#A9D3E0" }}>Saving…</span>}
             {saveStatus === "saved" && <span style={{ fontSize: 12, color: T.leaf }}>✓ Saved</span>}
             <UndoRedoButtons history={history} style={{ alignSelf: "center" }} />
           </div>
@@ -2464,8 +2464,8 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
       {open && pos && (
         <div style={{
           position: "fixed", zIndex: 40, left: pos.left, top: pos.top, bottom: pos.bottom,
-          width: PANEL_W, boxSizing: "border-box", background: "#fff", border: `1px solid ${T.line}`, borderRadius: 10,
-          boxShadow: "0 8px 28px rgba(20,43,51,0.18)", padding: 8, overflowWrap: "break-word", wordBreak: "break-word",
+          width: PANEL_W, boxSizing: "border-box", background: "rgba(255,255,255,0.8)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", border: "1px solid rgba(255,255,255,0.9)", borderRadius: 16,
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 8px 28px rgba(14,58,71,0.18)", padding: 8, overflowWrap: "break-word", wordBreak: "break-word",
           /* The panel is rendered inside a rota cell, and the shared td style
              sets white-space: nowrap so duty codes never wrap. That is
              inherited here, which made the explanatory text in the note and
@@ -3731,7 +3731,7 @@ function Stats({ data, range, setRange, onExport }) {
                    ones were cut off at the bottom of the chart. */}
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-90} textAnchor="end" height={110} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                <Tooltip cursor={{ fill: "rgba(15,139,126,0.06)" }} />
+                <Tooltip cursor={{ fill: "rgba(13,79,97,0.06)" }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar animationDuration={900} animationEasing="ease-out" animationBegin={0} dataKey="Morning" stackId="a" fill="#F4B860" />
                 <Bar animationDuration={900} animationEasing="ease-out" animationBegin={90} dataKey="Afternoon" stackId="a" fill="#8FBF6B" />
@@ -3825,7 +3825,7 @@ function Stats({ data, range, setRange, onExport }) {
                   <CartesianGrid strokeDasharray="3 3" stroke={T.line} />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip cursor={{ fill: "rgba(15,139,126,0.06)" }} />
+                  <Tooltip cursor={{ fill: "rgba(13,79,97,0.06)" }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Line type="monotone" dataKey="Morning" stroke="#E8A33D" dot={false} strokeWidth={2} animationDuration={1200} animationEasing="ease-out" animationBegin={0} activeDot={{ r: 5, strokeWidth: 0 }} />
                   <Line type="monotone" dataKey="Afternoon" stroke="#6E9E4C" dot={false} strokeWidth={2} animationDuration={1200} animationEasing="ease-out" animationBegin={120} activeDot={{ r: 5, strokeWidth: 0 }} />

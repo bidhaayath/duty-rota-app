@@ -457,7 +457,7 @@ export default function Dashboard({
           border-color: rgba(255,255,255,0.45) !important;
         }
         .dr-dash-item { transition: background 140ms ease, border-color 140ms ease, transform 140ms ease; }
-        .dr-dash-item:hover { background: rgba(255,255,255,0.78); border-color: rgba(15,139,126,0.35); }
+        .dr-dash-item:hover { background: rgba(255,255,255,0.78); border-color: rgba(13,79,97,0.3); }
         .dr-dash-item:active { transform: scale(0.99); }
         .dr-dash-item:focus-visible { outline: 2px solid ${T.lagoon}; outline-offset: 2px; }
         @media (prefers-reduced-motion: reduce) { .dr-dash-item { transition: none; } }
