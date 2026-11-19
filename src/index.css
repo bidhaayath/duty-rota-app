@@ -1,6 +1,12 @@
+html,
+body {
+  background: #E4F2F8;
+  color-scheme: light;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -45,5 +51,74 @@ code {
     .dr-fade-in {
       opacity: 0;
     }
+  }
+}
+
+/* ─── Liquid glass redesign: global layer (step 1) ───────────────────────
+   Screen only. Image export copies inline styles, so nothing here changes
+   exported rota or report images. */
+:root {
+  --edr-ink: #0E3A47;
+  --edr-ink-soft: #3A5F6B;
+  --edr-primary: #0D4F61;
+  --edr-primary-2: #1F7F9F;
+  --edr-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --edr-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+body {
+  text-rendering: optimizeLegibility;
+}
+
+button, a, select, input, textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Keyboard focus: a clear 3px ring. Mouse clicks don't show it. */
+button:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid #1F7F9F;
+  outline-offset: 2px;
+}
+
+/* Inputs get a soft glow while typing in them. */
+input:focus, select:focus, textarea:focus {
+  box-shadow: 0 0 0 4px rgba(31, 127, 159, 0.16);
+}
+
+/* Numbers line up in columns. */
+table, td, th {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button, a {
+    transition: transform 160ms var(--edr-out), background-color 200ms ease,
+      color 200ms ease, box-shadow 200ms ease, opacity 200ms ease;
+  }
+  input, select, textarea {
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
+  /* Buttons press in slightly when tapped. No hover lift. */
+  button:not(:disabled):active {
+    transform: scale(0.97);
+  }
+}
+
+/* People who ask their device for less motion get none. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* People who ask for less transparency get solid panels, no blur. */
+@media (prefers-reduced-transparency: reduce) {
+  * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }
