@@ -514,7 +514,7 @@ export default function AssistantPanel({
     padding: "11px 13px", fontSize: 13, color, lineHeight: 1.6,
   });
   const sectionTitle = {
-    fontFamily: "Sora, sans-serif", fontSize: 14, fontWeight: 700, margin: "4px 0 8px", color: T.ink,
+    fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 14, fontWeight: 700, margin: "4px 0 8px", color: T.ink,
   };
 
   const allowance = status && status.ok && !status.unknown && status.cap != null
@@ -887,7 +887,7 @@ export default function AssistantPanel({
       if (status.reason === "not_on_plan") {
         noteArea = (
           <div style={{ ...note("#FBF1DC", "#E7D9B8", "#6B4A0C"), padding: "16px 16px" }}>
-            <div style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+            <div style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
               Ini is on the Plus, Pro and Custom plans
             </div>
             <p style={{ margin: "0 0 14px" }}>
@@ -1103,7 +1103,7 @@ export default function AssistantPanel({
                 {/* Ini peeks in as the panel opens. */}
                 <IniMascot mood={iniMood({ ...face, open: true })} size={44} style={{ flexShrink: 0 }} act={PEEK} />
                 <div style={{ minWidth: 0 }}>
-                  <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>
+                  <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17, margin: 0 }}>
                     Ini · your rota assistant
                   </h2>
                   {allowance && (

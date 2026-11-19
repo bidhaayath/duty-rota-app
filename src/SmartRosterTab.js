@@ -431,7 +431,7 @@ export default function SmartRosterTab({
     // instead of stretching the page.
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 14 }}>
       <Card>
-        <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: "0 0 4px",
+        <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17, margin: "0 0 4px",
                      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           Smart Roster
           <span style={{ fontSize: 11, fontWeight: 700, background: "#E6E4F5",
@@ -799,7 +799,7 @@ function Week({ proposal, data, activeStaff, weekLabel, onApply, onDiscard, onAn
       <Card style={{ borderColor: T.lagoon, borderWidth: 2 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div>
-            <h3 style={{ fontFamily: "Sora, sans-serif", fontSize: 16, margin: "0 0 3px" }}>Proposed week</h3>
+            <h3 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16, margin: "0 0 3px" }}>Proposed week</h3>
             <span style={{ fontSize: 12.5, color: T.inkSoft }}>{weekLabel} · {report.rosteredCount} staff</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -1168,7 +1168,7 @@ function YearToDate({ proposal, activeStaff, rules, T, Card, Btn, Field, inputSt
 
   return (
     <Card>
-      <h3 style={{ fontFamily: "Sora, sans-serif", fontSize: 15, margin: "0 0 4px" }}>
+      <h3 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15, margin: "0 0 4px" }}>
         Totals for {valid ? `${pretty(span.from)} – ${pretty(span.to)}` : "the chosen range"}
         {weekCounted ? ", including this week" : ""}
       </h3>

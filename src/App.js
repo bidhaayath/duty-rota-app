@@ -113,7 +113,7 @@ function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans })
         )}
       </span>
       <button onClick={onSeePlans} style={{
-        background: '#0F8B7E', color: '#fff', fontWeight: 700, fontSize: 12,
+        background: '#0D4F61', color: '#fff', fontWeight: 700, fontSize: 12,
         padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
         whiteSpace: 'nowrap', fontFamily: 'inherit',
       }}>
@@ -145,14 +145,14 @@ function Paywall({ onSeePlans, everPaid, paidTier, paidUntil }) {
        customer's paperwork. These exports are handed to heads of department
        and other organisations, and a "your plan has ended" banner across the
        top of a duty rota is an awkward thing to have to explain. */
-    <div className="dr-anim-in no-print" style={{ background: 'linear-gradient(135deg, #0F8B7E, #0B6A60)', color: '#fff', padding: '18px 20px' }}>
+    <div className="dr-anim-in no-print" style={{ background: 'linear-gradient(135deg, #0D4F61, #1F7F9F)', color: '#fff', padding: '18px 20px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
         <div style={{ flex: '1 1 320px' }}>
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>{heading}</div>
           <div style={{ fontSize: 13, opacity: 0.95, lineHeight: 1.5 }}>{body}</div>
         </div>
         <button onClick={onSeePlans} style={{
-          background: '#fff', color: '#0B6A60', fontWeight: 800, fontSize: 14,
+          background: '#fff', color: '#1F7F9F', fontWeight: 800, fontSize: 14,
           padding: '11px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
           whiteSpace: 'nowrap', fontFamily: 'inherit',
         }}>
@@ -188,7 +188,7 @@ function PromoStrip({ promo, onSeePlans }) {
 
   return (
     <div className="no-print dr-anim-in" style={{
-      position: 'relative', background: last ? '#C0392B' : '#0B6A60', color: '#fff',
+      position: 'relative', background: last ? '#C0392B' : '#1F7F9F', color: '#fff',
       padding: '7px 40px', fontSize: 13, fontWeight: 700, textAlign: 'center', lineHeight: 1.5,
     }}>
       🚀 {text} · {endsInText(endsAt - now)} ·{' '}
@@ -327,11 +327,11 @@ function PaymentResult({ status, paidUntil, txnId, onDone, onSeePlans, onCheckAg
    loses their place in a rota they're mid-way through editing. */
 function LegalFooter() {
   const link = {
-    color: '#4A6570', textDecoration: 'none', fontSize: 12.5,
+    color: '#3A5F6B', textDecoration: 'none', fontSize: 12.5,
   };
   return (
     <div className="no-print" style={{
-      borderTop: '1px solid #DCE8E6', background: '#EEF4F3',
+      borderTop: '1px solid #D3E5EC', background: '#E4F2F8',
       padding: '18px 20px', marginTop: 28,
       display: 'flex', flexWrap: 'wrap', gap: 18,
       alignItems: 'center', justifyContent: 'center',
@@ -692,14 +692,14 @@ export default function App() {
           <span className="edr-topbar-email" style={{ fontSize: '13px', color: '#666' }}>{session.user.email}</span>
           <button
             onClick={() => setShowBilling(true)}
-            style={{ padding: '8px 16px', background: 'white', color: '#0F8B7E', border: '1px solid #0F8B7E', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+            style={{ padding: '8px 16px', background: 'white', color: '#0D4F61', border: '1px solid #0D4F61', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
           >
             My plan
           </button>
           {isAdmin && (
             <button
               onClick={() => setShowAdmin(true)}
-              style={{ padding: '8px 16px', background: '#0B6A60', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              style={{ padding: '8px 16px', background: '#1F7F9F', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
             >
               Admin
             </button>

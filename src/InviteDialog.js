@@ -24,8 +24,8 @@ import supabase from "./supabaseClient";
    ──────────────────────────────────────────────────────────────────────── */
 
 const T = {
-  ink: "#142B33", inkSoft: "#4A6570", mist: "#EEF4F3",
-  line: "#DCE8E6", lagoon: "#0F8B7E", coral: "#E4604E",
+  ink: "#0E3A47", inkSoft: "#3A5F6B", mist: "#E4F2F8",
+  line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E",
   warn: "#8A5A0F", warnBg: "#FBF1DC", warnLine: "#E7D9B8",
 };
 
@@ -158,7 +158,7 @@ export default function InviteDialog({
         color: T.ink, maxHeight: "90vh", overflowY: "auto",
       }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 4 }}>
-          <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 18, fontWeight: 700, margin: 0 }}>
+          <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18, fontWeight: 700, margin: 0 }}>
             {link ? "Invitation ready" : "Invite to their own login"}
           </h2>
           <button onClick={onClose} aria-label="Close" style={{

@@ -31,8 +31,8 @@ import { ownedByMe } from "./deptAllowance";
    ──────────────────────────────────────────────────────────────────────── */
 
 const T = {
-  ink: "#142B33", inkSoft: "#4A6570", mist: "#EEF4F3", card: "#FFFFFF",
-  line: "#DCE8E6", lagoon: "#0F8B7E", coral: "#E4604E",
+  ink: "#0E3A47", inkSoft: "#3A5F6B", mist: "#E4F2F8", card: "#FFFFFF",
+  line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E",
 };
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const MONTHS = ["January", "February", "March", "April", "May", "June",
@@ -294,7 +294,7 @@ export default function Dashboard({
     <div style={{ marginBottom: 8 }}>
       <div className="dr-dash-sec" style={{
         background: T.lagoon, color: "#fff", borderRadius: 10, padding: "11px 14px",
-        fontFamily: "Sora, sans-serif", fontSize: 14.5, fontWeight: 600,
+        fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 14.5, fontWeight: 600,
         display: "flex", alignItems: "center", gap: 8,
       }}>
         <Icon size={16} />
@@ -581,7 +581,7 @@ export default function Dashboard({
           borderRadius: 16, padding: "22px 22px 26px",
         }}>
           <h1 className="dr-dash-title" style={{
-            fontFamily: "Sora, sans-serif", fontSize: 25, fontWeight: 700, color: T.lagoon,
+            fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 25, fontWeight: 700, color: T.lagoon,
             textAlign: "center", margin: "0 0 4px", letterSpacing: -0.3,
           }}>Welcome, {displayName}!</h1>
           <p className="dr-dash-sub" style={{ textAlign: "center", color: T.inkSoft, fontSize: 13, margin: "0 0 20px" }}>
@@ -590,7 +590,7 @@ export default function Dashboard({
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginBottom: 14 }}>
             <button className="dr-dash-item" onClick={prevMonth} aria-label="Previous month" style={navBtn}><ChevronLeft size={18} /></button>
-            <div className="dr-dash-month" style={{ fontFamily: "Sora, sans-serif", fontSize: 16.5, fontWeight: 600, minWidth: 180, textAlign: "center" }}>
+            <div className="dr-dash-month" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16.5, fontWeight: 600, minWidth: 180, textAlign: "center" }}>
               {MONTHS[view.month]} {view.year}
             </div>
             <button className="dr-dash-item" onClick={nextMonth} aria-label="Next month" style={navBtn}><ChevronRight size={18} /></button>
@@ -718,7 +718,7 @@ export default function Dashboard({
             background: selectedInfo.anyNonOfficial ? "rgba(243,217,164,0.22)" : undefined,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
-              <span className="dr-dash-pdate" style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 600 }}>
+              <span className="dr-dash-pdate" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15, fontWeight: 600 }}>
                 {niceFullDate(selected)}
               </span>
               {selected === dstr(today) && (

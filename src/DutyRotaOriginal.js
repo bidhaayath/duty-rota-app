@@ -298,8 +298,8 @@ export const resetRotaVersionTracking = () => {
 
 /* ─────────────────── Design tokens ─────────────────── */
 const T = {
-  ink: "#142B33", inkSoft: "#4A6570", mist: "#EEF4F3", card: "#FFFFFF",
-  line: "#DCE8E6", lagoon: "#0F8B7E", coral: "#E4604E", leaf: "#3FA46A",
+  ink: "#0E3A47", inkSoft: "#3A5F6B", mist: "#E4F2F8", card: "#FFFFFF",
+  line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E", leaf: "#3FA46A",
   sand: "#F4B860", dusk: "#6C7BD9", night: "#2E3358",
 };
 
@@ -775,7 +775,7 @@ function WelcomeGuide({ data, update, setTab }) {
     <Card style={{ marginBottom: 18, border: `1.5px solid ${T.lagoon}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div>
-          <h3 style={{ margin: "0 0 3px", fontFamily: "Sora, sans-serif", fontSize: 16 }}>👋 Welcome! Three steps to get set up</h3>
+          <h3 style={{ margin: "0 0 3px", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16 }}>👋 Welcome! Three steps to get set up</h3>
           <p style={{ margin: "0 0 6px", fontSize: 12.5, color: T.inkSoft }}>Each step ticks itself off as you go. The full guide is in the Help tab any time.</p>
         </div>
         <button onClick={dismiss} title="Hide this guide" style={{ background: "none", border: "none", cursor: "pointer", color: T.inkSoft, padding: 4 }}>
@@ -1391,7 +1391,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     return (
       <div style={{ fontFamily: "Inter, system-ui, sans-serif", padding: 60, textAlign: "center", color: T.inkSoft, maxWidth: 520, margin: "0 auto" }}>
         <div style={{ fontSize: 34, marginBottom: 12 }}>👋</div>
-        <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 19, color: T.ink, margin: "0 0 10px" }}>No rota shared with you yet</h2>
+        <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 19, color: T.ink, margin: "0 0 10px" }}>No rota shared with you yet</h2>
         <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>
           Your account is set up, but nobody has given you access to a department yet.
           Ask the person who invited you to share one with you — it will appear here
@@ -1426,7 +1426,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     readonlyStaffIds == null || !readonlyStaffIds.has(staffId);
 
   const globalCss = `
-    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
     * { box-sizing: border-box; }
     select:focus, input:focus { border-color: ${T.lagoon} !important; }
     ::-webkit-scrollbar { height: 8px; width: 8px; }
@@ -2012,7 +2012,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-            <h1 className="dr-depttitle" style={{ fontFamily: "Sora, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
+            <h1 className="dr-depttitle" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 20, margin: 0, letterSpacing: -0.3 }}>{data.title}</h1>
             <span className="dr-tagline" style={{ fontSize: 12.5, color: "#9FC3BD" }}>duty rota &amp; non-official day tracker</span>
             {saveStatus === "saving" && <span style={{ fontSize: 12, color: "#9FC3BD" }}>Saving…</span>}
             {saveStatus === "saved" && <span style={{ fontSize: 12, color: T.leaf }}>✓ Saved</span>}
@@ -2083,7 +2083,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             </span>
             <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan for more departments.")}`}
                target="_blank" rel="noreferrer"
-               style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12.5, padding: "8px 15px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
+               style={{ background: "#0D4F61", color: "#fff", fontWeight: 700, fontSize: 12.5, padding: "8px 15px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
               Upgrade on WhatsApp
             </a>
           </div>
@@ -2172,7 +2172,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             /* Someone else's department, on a plan without Smart Roster. The
                viewer cannot change that plan, so there is nothing to offer. */
             <Card>
-              <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 18, margin: "0 0 8px" }}>
+              <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18, margin: "0 0 8px" }}>
                 Smart Roster
               </h2>
               <p style={{ fontSize: 13.5, color: T.inkSoft, margin: 0 }}>
@@ -2184,7 +2184,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
                data is untouched — they can still see and export everything.
                If they subscribe, the feature reappears with no migration. */
             <Card>
-              <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 18, margin: "0 0 8px",
+              <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18, margin: "0 0 8px",
                            display: "flex", alignItems: "center", gap: 10 }}>
                 Smart Roster
                 <span style={{ fontSize: 11, fontWeight: 700, background: "#E6E4F5",
@@ -3121,7 +3121,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
           {rotaView === "weekly" ? (
             <>
               <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={15} /></Btn>
-              <div className="dr-range" style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
+              <div className="dr-range" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
               <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={15} /></Btn>
               <Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0))}>Today</Btn>
             </>
@@ -3691,7 +3691,7 @@ function Stats({ data, range, setRange, onExport }) {
               On annual leave
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
-              <CountUp value={summary.onAnnual} style={{ fontFamily: "Sora, sans-serif", fontSize: 34, fontWeight: 700, color: T.lagoon, lineHeight: 1 }} />
+              <CountUp value={summary.onAnnual} style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 34, fontWeight: 700, color: T.lagoon, lineHeight: 1 }} />
               <span style={{ fontSize: 12, color: T.inkSoft }}>
                 of {summary.staffCount} staff
               </span>
@@ -3709,7 +3709,7 @@ function Stats({ data, range, setRange, onExport }) {
             <Card key={label} className="dr-stat" style={{ flex: "1 1 140px", minWidth: 130 }}>
               <div style={{ fontSize: 11.5, fontWeight: 600, color: T.inkSoft, marginBottom: 4 }}>{label}</div>
               <CountUp value={value} decimals={String(value).includes(".") ? 1 : 0}
-                style={{ display: "block", fontFamily: "Sora, sans-serif", fontSize: 26, fontWeight: 700, color: value ? colour : T.line, lineHeight: 1.1 }} />
+                style={{ display: "block", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 26, fontWeight: 700, color: value ? colour : T.line, lineHeight: 1.1 }} />
               {note && <div style={{ fontSize: 10.5, color: T.inkSoft, marginTop: 3, lineHeight: 1.35 }}>{note}</div>}
             </Card>
           ))}
@@ -3718,7 +3718,7 @@ function Stats({ data, range, setRange, onExport }) {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Card ref={(el) => { cardRefs.current["duties"] = el; }} style={{ flex: "1 1 100%", minWidth: 320 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Duties per staff</h3>
+              <h3 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15 }}>Duties per staff</h3>
               <SaveChart cardKey="duties" filename="duties_per_staff" />
             </div>
             <ResponsiveContainer width="100%" height={360}>
@@ -3747,7 +3747,7 @@ function Stats({ data, range, setRange, onExport }) {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Card ref={(el) => { cardRefs.current["leavetype"] = el; }} style={{ flex: "1 1 280px", minWidth: 260 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Staff on leave (by type)</h3>
+              <h3 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15 }}>Staff on leave (by type)</h3>
               <SaveChart cardKey="leavetype" filename="staff_on_leave" />
             </div>
             {!anyLeaveByType ? (
@@ -3770,7 +3770,7 @@ function Stats({ data, range, setRange, onExport }) {
 
           <Card ref={(el) => { cardRefs.current["leavetaken"] = el; }} style={{ flex: "1 1 280px", minWidth: 260 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Leave taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(days by category)</span></h3>
+              <h3 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15 }}>Leave taken <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>(days by category)</span></h3>
               <SaveChart cardKey="leavetaken" filename="leave_taken" />
             </div>
             {!anyLeaveCodes ? (
@@ -3792,7 +3792,7 @@ function Stats({ data, range, setRange, onExport }) {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Card ref={(el) => { cardRefs.current["nonoff"] = el; }} style={{ flex: "1 1 100%", minWidth: 300 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Non-official duties per staff <span style={{ fontSize: 12, color: "#A5731B", fontWeight: 600 }}>(paid days)</span></h3>
+              <h3 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15 }}>Non-official duties per staff <span style={{ fontSize: 12, color: "#A5731B", fontWeight: 600 }}>(paid days)</span></h3>
               <SaveChart cardKey="nonoff" filename="non_official_duties" />
             </div>
             {nonOffByStaff.length === 0 ? (
@@ -3814,7 +3814,7 @@ function Stats({ data, range, setRange, onExport }) {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Card ref={(el) => { cardRefs.current["coverage"] = el; }} style={{ flex: "1 1 100%", minWidth: 320 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-              <h3 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 15 }}>Daily coverage</h3>
+              <h3 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15 }}>Daily coverage</h3>
               <SaveChart cardKey="coverage" filename="daily_coverage" />
             </div>
             {coverage === null ? (
@@ -3850,7 +3850,7 @@ function Stats({ data, range, setRange, onExport }) {
               ["Off days", totals.off, "days rostered off"]].map(([l, v, note]) => (
               <div key={l} style={{ minWidth: 150 }}>
                 <div style={{ fontSize: 11.5, fontWeight: 600, color: T.inkSoft, marginBottom: 2 }}>{l}</div>
-                <div style={{ fontFamily: "Sora, sans-serif", fontSize: 22, fontWeight: 700, color: T.ink }}>{v}</div>
+                <div style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 22, fontWeight: 700, color: T.ink }}>{v}</div>
                 <div style={{ fontSize: 10.5, color: T.inkSoft, marginTop: 2, lineHeight: 1.4 }}>{note}</div>
               </div>
             ))}
@@ -4646,13 +4646,13 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
           </span>
           <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan for more staff.")}`}
              target="_blank" rel="noreferrer"
-             style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12.5, padding: "8px 15px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
+             style={{ background: "#0D4F61", color: "#fff", fontWeight: 700, fontSize: 12.5, padding: "8px 15px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
             Upgrade on WhatsApp
           </a>
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-        <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 18 }}>Staff ({activeStaff.length})</h2>
+        <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18 }}>Staff ({activeStaff.length})</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           {formerStaff.length > 0 && (
             <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, color: T.inkSoft, cursor: "pointer" }}>
@@ -4673,7 +4673,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                 </span>
                 <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan for more staff.")}`}
                    target="_blank" rel="noreferrer"
-                   style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12, padding: "7px 13px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
+                   style={{ background: "#0D4F61", color: "#fff", fontWeight: 700, fontSize: 12, padding: "7px 13px", borderRadius: 7, textDecoration: "none", whiteSpace: "nowrap" }}>
                   Upgrade
                 </a>
               </div>
@@ -5045,13 +5045,13 @@ function InsightsTab({ data, onExport }) {
   const cmpCodes = data.codes.filter((c) => (resA?.perCode[c.id]?.total || 0) + (resB?.perCode[c.id]?.total || 0) > 0);
 
   const selStyle = { ...inputStyle, width: "auto", minWidth: 150, cursor: "pointer" };
-  const H = ({ children }) => <h3 style={{ margin: "0 0 12px", fontFamily: "Sora, sans-serif", fontSize: 15 }}>{children}</h3>;
+  const H = ({ children }) => <h3 style={{ margin: "0 0 12px", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15 }}>{children}</h3>;
   const dowFull = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <h2 style={{ margin: "0 0 4px", fontFamily: "Sora, sans-serif", fontSize: 20 }}>Insights</h2>
+        <h2 style={{ margin: "0 0 4px", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 20 }}>Insights</h2>
         <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>Dig into who did what. Leave days are not counted as duty.</p>
       </div>
 
@@ -5351,7 +5351,7 @@ const SUPPORT_LINK = `https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponen
 function HelpTab({ data }) {
   const Section = ({ title, children }) => (
     <Card style={{ marginBottom: 14 }}>
-      <h3 style={{ margin: "0 0 10px", fontFamily: "Sora, sans-serif", fontSize: 16, color: T.ink }}>{title}</h3>
+      <h3 style={{ margin: "0 0 10px", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16, color: T.ink }}>{title}</h3>
       <div style={{ fontSize: 13.5, lineHeight: 1.7, color: "#33474F" }}>{children}</div>
     </Card>
   );
@@ -5368,7 +5368,7 @@ function HelpTab({ data }) {
   return (
     <div style={{ maxWidth: 760 }}>
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: "0 0 4px", fontFamily: "Sora, sans-serif", fontSize: 20 }}>How to use DutyRota</h2>
+        <h2 style={{ margin: "0 0 4px", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 20 }}>How to use DutyRota</h2>
         <p style={{ margin: 0, fontSize: 13.5, color: T.inkSoft }}>A quick guide to setting up and running your duty rota. You can come back here any time.</p>
       </div>
 
@@ -5675,7 +5675,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </Field>
       </Card>
 
-      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Logo</h2>
+      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Logo</h2>
       <Card>
         {!canUseLogo && (
           <div style={{
@@ -5686,7 +5686,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
             <span>🔒 Adding your own logo is a <strong>Plus</strong> feature.</span>
             <a href={`https://wa.me/9607666261?text=${encodeURIComponent("Hi! I'd like to upgrade my DutyRota plan to add a company logo.")}`}
                target="_blank" rel="noreferrer"
-               style={{ background: "#0F8B7E", color: "#fff", fontWeight: 700, fontSize: 12, padding: "6px 13px", borderRadius: 6, textDecoration: "none", whiteSpace: "nowrap" }}>
+               style={{ background: "#0D4F61", color: "#fff", fontWeight: 700, fontSize: 12, padding: "6px 13px", borderRadius: 6, textDecoration: "none", whiteSpace: "nowrap" }}>
               Upgrade on WhatsApp
             </a>
           </div>
@@ -5770,7 +5770,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         )}
       </div>
 
-      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>The week</h2>
+      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>The week</h2>
       <Card>
         <Field label="A week begins on">
           <select style={{ ...inputStyle, width: "auto", cursor: "pointer" }}
@@ -5788,7 +5788,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </div>
       </Card>
 
-      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Shifts</h2>
+      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Shifts</h2>
       <Card>
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
           <input type="checkbox" checked={!!data.eveningEnabled}
@@ -5817,7 +5817,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </div>
       </Card>
 
-      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Posts</h2>
+      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Posts</h2>
       <Card>
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
           <input type="checkbox" checked={!!data.postsEnabled}
@@ -5832,7 +5832,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </div>
       </Card>
 
-      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Split duties</h2>
+      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Split duties</h2>
       <Card>
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
           <input type="checkbox" checked={!!data.splitEnabled}
@@ -5847,7 +5847,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </div>
       </Card>
 
-      <h2 style={{ margin: "6px 0 0", fontFamily: "Sora, sans-serif", fontSize: 17 }}>Non-official days</h2>
+      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Non-official days</h2>
       <Card>
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
           <input type="checkbox" checked={data.fridayRule}
@@ -6001,7 +6001,7 @@ function DutyCodesTab({ data, update }) {
         counts towards non-official day payment.
       </p>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 17 }}>Duty codes</h2>
+        <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Duty codes</h2>
         <Btn onClick={() => setForm(empty)}><Plus size={15} /> New code</Btn>
       </div>
 
@@ -6066,7 +6066,7 @@ function DutyCodesTab({ data, update }) {
 
       {/* ── Posts ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-        <h2 style={{ margin: 0, fontFamily: "Sora, sans-serif", fontSize: 17 }}>Posts</h2>
+        <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Posts</h2>
         <Btn onClick={() => setPostForm({ id: null, name: "" })}><Plus size={15} /> New post</Btn>
       </div>
       <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>

@@ -217,7 +217,7 @@ export default function RequestsTab({
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <Card>
-        <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: "0 0 4px" }}>Duty requests</h2>
+        <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17, margin: "0 0 4px" }}>Duty requests</h2>
         <p style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.6, margin: "0 0 16px" }}>
           Record what staff have asked for, then tick <strong>Approved</strong> on the ones you agree to.
           Only approved requests are honoured when a rota is generated automatically — the rest are
