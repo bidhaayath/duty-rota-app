@@ -24,8 +24,8 @@ import supabase from "./supabaseClient";
    ──────────────────────────────────────────────────────────────────────── */
 
 const T = {
-  ink: "#142B33", inkSoft: "#4A6570", mist: "#EEF4F3",
-  line: "#DCE8E6", lagoon: "#0F8B7E", coral: "#E4604E",
+  ink: "#0E3A47", inkSoft: "#3A5F6B", mist: "#E4F2F8",
+  line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E",
   warn: "#8A5A0F", warnBg: "#FBF1DC", warnLine: "#E7D9B8",
 };
 
@@ -147,18 +147,18 @@ export default function InviteDialog({
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
-        position: "fixed", inset: 0, background: "rgba(20,43,51,0.45)",
+        position: "fixed", inset: 0, background: "rgba(14,58,71,0.35)",
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 18, zIndex: 1000,
       }}
     >
       <div style={{
-        background: "#fff", borderRadius: 14, width: "100%", maxWidth: 460,
+        background: "rgba(255,255,255,0.86)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", border: "1px solid rgba(255,255,255,0.9)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 18px 44px rgba(14,58,71,0.22)", borderRadius: 24, width: "100%", maxWidth: 460,
         padding: "20px 22px 22px", fontFamily: "Inter, system-ui, sans-serif",
         color: T.ink, maxHeight: "90vh", overflowY: "auto",
       }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 4 }}>
-          <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 18, fontWeight: 700, margin: 0 }}>
+          <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18, fontWeight: 700, margin: 0 }}>
             {link ? "Invitation ready" : "Invite to their own login"}
           </h2>
           <button onClick={onClose} aria-label="Close" style={{

@@ -20,8 +20,8 @@ import supabase from "./supabaseClient";
    ──────────────────────────────────────────────────────────────────────── */
 
 const T = {
-  ink: "#142B33", inkSoft: "#4A6570", mist: "#EEF4F3",
-  line: "#DCE8E6", lagoon: "#0F8B7E", coral: "#E4604E",
+  ink: "#0E3A47", inkSoft: "#3A5F6B", mist: "#E4F2F8",
+  line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E",
 };
 
 const roleWord = (r) => (r === "manager" ? "a manager" : "an employee");
@@ -76,7 +76,7 @@ export default function AcceptInvite({ token, onDone }) {
 
   const title = (t) => (
     <h1 style={{
-      fontFamily: "Sora, sans-serif", fontSize: 20, fontWeight: 700,
+      fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 20, fontWeight: 700,
       margin: "0 0 8px", letterSpacing: -0.2,
     }}>{t}</h1>
   );

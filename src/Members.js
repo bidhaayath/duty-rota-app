@@ -27,8 +27,8 @@ import supabase from "./supabaseClient";
    ──────────────────────────────────────────────────────────────────────── */
 
 const T = {
-  ink: "#142B33", inkSoft: "#4A6570", mist: "#EEF4F3",
-  line: "#DCE8E6", lagoon: "#0F8B7E", coral: "#E4604E",
+  ink: "#0E3A47", inkSoft: "#3A5F6B", mist: "#E4F2F8",
+  line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E",
   warn: "#8A5A0F", warnBg: "#FBF1DC", warnLine: "#E7D9B8",
 };
 
@@ -184,7 +184,7 @@ export default function Members({ onBack }) {
         ><ChevronLeft size={16} /> Back to my dashboard</button>
 
         <h1 style={{
-          fontFamily: "Sora, sans-serif", fontSize: 23, fontWeight: 700,
+          fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 23, fontWeight: 700,
           margin: "0 0 4px", letterSpacing: -0.3,
         }}>Members</h1>
         <p style={{ color: T.inkSoft, fontSize: 13, margin: "0 0 22px", lineHeight: 1.6 }}>

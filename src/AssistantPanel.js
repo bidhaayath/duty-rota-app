@@ -514,7 +514,7 @@ export default function AssistantPanel({
     padding: "11px 13px", fontSize: 13, color, lineHeight: 1.6,
   });
   const sectionTitle = {
-    fontFamily: "Sora, sans-serif", fontSize: 14, fontWeight: 700, margin: "4px 0 8px", color: T.ink,
+    fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 14, fontWeight: 700, margin: "4px 0 8px", color: T.ink,
   };
 
   const allowance = status && status.ok && !status.unknown && status.cap != null
@@ -887,7 +887,7 @@ export default function AssistantPanel({
       if (status.reason === "not_on_plan") {
         noteArea = (
           <div style={{ ...note("#FBF1DC", "#E7D9B8", "#6B4A0C"), padding: "16px 16px" }}>
-            <div style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+            <div style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
               Ini is on the Plus, Pro and Custom plans
             </div>
             <p style={{ margin: "0 0 14px" }}>
@@ -1081,7 +1081,7 @@ export default function AssistantPanel({
           <div
             className="ini-backdrop"
             onClick={() => setOpen(false)}
-            style={{ position: "fixed", inset: 0, background: "rgba(20,43,51,0.28)", zIndex: 999 }}
+            style={{ position: "fixed", inset: 0, background: "rgba(14,58,71,0.22)", zIndex: 999 }}
           />
           <aside
             className="ini-panel"
@@ -1090,8 +1090,8 @@ export default function AssistantPanel({
             aria-label="Ini · your rota assistant"
             style={{
               position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1000,
-              background: "#fff", color: T.ink, fontFamily: "Inter, system-ui, sans-serif",
-              boxShadow: "-8px 0 30px rgba(20,43,51,0.18)",
+              background: "rgba(255,255,255,0.82)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", borderLeft: "1px solid rgba(255,255,255,0.9)", color: T.ink, fontFamily: "Inter, system-ui, sans-serif",
+              boxShadow: "inset 1px 0 0 rgba(255,255,255,0.85), -8px 0 30px rgba(14,58,71,0.18)",
               display: "flex", flexDirection: "column",
             }}
           >
@@ -1103,7 +1103,7 @@ export default function AssistantPanel({
                 {/* Ini peeks in as the panel opens. */}
                 <IniMascot mood={iniMood({ ...face, open: true })} size={44} style={{ flexShrink: 0 }} act={PEEK} />
                 <div style={{ minWidth: 0 }}>
-                  <h2 style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>
+                  <h2 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17, margin: 0 }}>
                     Ini · your rota assistant
                   </h2>
                   {allowance && (

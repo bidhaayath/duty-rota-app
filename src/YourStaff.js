@@ -314,7 +314,7 @@ export default function YourStaff({
 
   return (
     <Card>
-      <h3 style={{ fontFamily: "Sora, sans-serif", fontSize: 16, margin: 0 }}>Your staff</h3>
+      <h3 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16, margin: 0 }}>Your staff</h3>
       <p style={{ ...hint, margin: "4px 0 12px" }}>
         Everything about each person in one row: the shifts they do, who can take charge, who to skip,
         their own rules, and their approved duty requests.

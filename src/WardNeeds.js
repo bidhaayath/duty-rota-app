@@ -215,7 +215,7 @@ function MustCost({ children }) {
   );
 }
 
-const sectionTitle = { fontFamily: "Sora, sans-serif", fontSize: 16, margin: 0 };
+const sectionTitle = { fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16, margin: 0 };
 const caption = (T) => ({ fontSize: 12, fontWeight: 600, color: T.inkSoft });
 const mustChip = {
   fontSize: 13, fontWeight: 700, color: "#0D4A3F", background: "#E6F4F1", border: "1px solid #B9DFD5",

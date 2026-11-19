@@ -365,7 +365,7 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
         <header className="mp-head" style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between",
           flexWrap: "wrap", padding: "14px 18px", borderBottom: `1px solid ${T.line}` }}>
           <div style={{ minWidth: 0 }}>
-            <h2 className="mp-title" style={{ fontFamily: "Sora, sans-serif", fontSize: 17, margin: 0 }}>Roster for {label} · not applied yet</h2>
+            <h2 className="mp-title" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17, margin: 0 }}>Roster for {label} · not applied yet</h2>
             <div style={{ fontSize: 12.5, color: T.inkSoft, marginTop: 3 }}>
               {proposal.ms != null && `Built in ${(proposal.ms / 1000).toFixed(1)} seconds · `}
               {plural(writes.length, "cell")} will change
