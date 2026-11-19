@@ -4,7 +4,7 @@ import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
   AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
-  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown
+  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -18,6 +18,7 @@ import { exportRotaToExcel } from "./rotaExcel";
 import { effectivePlan, deptPlanLoading } from "./deptPlan";
 import { tagDept, ownedByMe, deptAllowance, ownerLevel } from "./deptAllowance";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
+import SideMenu from "./SideMenu";
 /* The rota's counting rules (cells, leave, employment, totals and coverage)
    live in rotaCounts.js so Ini's month preview counts the same way. */
 import {
@@ -789,7 +790,7 @@ function WelcomeGuide({ data, update, setTab }) {
   );
 }
 
-export default function DutyRota({ locked = false, features: viewerFeatures = null, staffLimit: viewerStaffLimit = null, departmentLimit = null, role = null, roleKnown = false, orgName = "", onSaveOrgName = null, canEditOrgName = false, onOpenBilling = null }) {
+export default function DutyRota({ locked = false, features: viewerFeatures = null, staffLimit: viewerStaffLimit = null, departmentLimit = null, role = null, roleKnown = false, orgName = "", onSaveOrgName = null, canEditOrgName = false, onOpenBilling = null, userEmail = "", onOpenAdmin = null }) {
   const [data, setData] = useState(null);
   /* Role and editability belong to a person IN A DEPARTMENT, not to a person.
      Someone can own their own organisation and be a manager in another: at
@@ -1366,6 +1367,16 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     return () => { alive = false; };
   }, []);
 
+  /* On laptops the side menu carries My plan and Log out, so App's top bar
+     steps aside while a department screen with the menu is showing. Only
+     then: Home, loading, the print view and the "nothing shared yet" screen
+     keep the top bar, so Log out is always somewhere on screen. */
+  const sideMenuShown = tab !== "dashboard" && !printView && !!data && !(viewOnlyRole && departments.length === 0);
+  useEffect(() => {
+    document.body.classList.toggle("edr-has-side", sideMenuShown);
+    return () => document.body.classList.remove("edr-has-side");
+  }, [sideMenuShown]);
+
   if (tab === "dashboard") {
     return (
       <Dashboard
@@ -1913,21 +1924,11 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     { id: "help", label: "Help", icon: HelpCircle },
   ];
 
-  return (
-    <div key="dr-app" className="dr-fade-in dr-app" style={{ fontFamily: "Inter, system-ui, sans-serif", background: T.mist, minHeight: "100vh", color: T.ink }}>
-      <style>{globalCss}</style>
 
-      <header className="dr-header" style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
-        {departments.length > 0 && (
-          <div style={{ position: "relative", display: "inline-block", marginBottom: 8 }}>
-            <button className="dr-deptbtn" onClick={() => setDeptMenuOpen((o) => !o)} style={{
-              fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 7,
-              background: "rgba(255,255,255,0.12)", color: "#DDEBE8", border: "1px solid rgba(255,255,255,0.22)",
-              borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-            }}>
-              <Users size={13} /> {(departments.find((d) => d.id === deptId) || {}).name || "Department"}
-              <ChevronDown size={13} className="dr-deptmenu-chevron" style={{ transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
-            </button>
+  // The department dropdown, shared by the phone header and the side menu.
+  // Only one of the two is ever on screen (the other is display: none).
+  const deptMenuBody = (
+    <>
             <div
               onClick={() => setDeptMenuOpen(false)}
               style={{ position: "fixed", inset: 0, zIndex: 59, pointerEvents: deptMenuOpen ? "auto" : "none" }}
@@ -1955,7 +1956,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
                       return (
                         <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
                           fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                          padding: "10px 14px", border: "none", background: d.id === deptId ? T.mist : "#fff",
+                          padding: "10px 14px", border: "none", background: d.id === deptId ? "rgba(13,79,97,0.08)" : "transparent",
                           fontSize: 13.5, fontWeight: d.id === deptId ? 700 : 500, cursor: "pointer", textAlign: "left",
                         }}>
                           {d.id === deptId ? <Check size={14} color={T.lagoon} /> : <span style={{ width: 14 }} />}
@@ -1981,14 +1982,14 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
                     {canManageDepts && (
                       <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                        padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
+                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
                         fontWeight: 600, color: T.lagoon, cursor: "pointer", textAlign: "left",
                       }}><Plus size={14} /> Add department</button>
                     )}
                     {!viewOnlyRole && isOwnerLevel && (
                       <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                        padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
+                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
                         fontWeight: 600, cursor: "pointer", textAlign: "left",
                       }}><Pencil size={14} /> Rename this department</button>
                     )}
@@ -2002,12 +2003,66 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
                     {canManageDepts && allowance.canDelete(deptId) && (
                       <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
                         fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                        padding: "10px 14px", border: "none", background: "#fff", fontSize: 13,
+                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
                         fontWeight: 600, color: T.coral, cursor: "pointer", textAlign: "left",
                       }}><Trash2 size={14} /> Delete this department</button>
                     )}
                   </div>
                 </div>
+    </>
+  );
+  const deptName = (departments.find((d) => d.id === deptId) || {}).name || "Department";
+  const sideDeptSwitcher = departments.length > 0 ? (
+    <div style={{ position: "relative" }}>
+      <button type="button" className="dr-deptbtn edr-navbtn" onClick={() => setDeptMenuOpen((o) => !o)}
+        aria-expanded={deptMenuOpen} title={`Switch department — viewing ${deptName}`} style={{
+          fontFamily: "inherit", display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 52,
+          padding: "8px 12px", borderRadius: 16, background: "rgba(255,255,255,0.6)",
+          border: "1px solid rgba(255,255,255,0.95)", color: T.ink, textAlign: "left", cursor: "pointer",
+        }}>
+        <Users size={18} aria-hidden="true" style={{ flex: "none", color: T.lagoon }} />
+        <span className="edr-hide" style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 11, color: T.inkSoft, letterSpacing: "0.04em", textTransform: "uppercase" }}>Viewing</span>
+          <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deptName}</span>
+        </span>
+        <ChevronDown size={16} aria-hidden="true" className="edr-hide dr-deptmenu-chevron" style={{ flex: "none", transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
+      </button>
+      {deptMenuBody}
+    </div>
+  ) : null;
+  // Side menu order from the redesign. Statistics, Staff Records and
+  // Insights sit together under Reports, with a switch at the top of the page.
+  const REPORT_TABS = [["stats", "Statistics"], ["records", "Staff Records"], ["insights", "Insights"]];
+  const inReports = REPORT_TABS.some(([id]) => id === tab);
+  const sideItems = [
+    { id: "dashboard", label: "Home", icon: HomeIcon },
+    { id: "rota", label: "Rota", icon: CalendarRange },
+    { id: "codes", label: "Duty Codes", icon: Palette },
+    { id: "staff", label: "Staff", icon: Users },
+    { id: "requests", label: "Duty Requests", icon: MessageCircle },
+    { id: "smart", label: "Smart Roster", icon: Wand2 },
+    { id: "reports", label: "Reports", icon: BarChart3 },
+    { id: "settings", label: "Settings", icon: Settings },
+    { id: "sep", divider: true },
+    { id: "help", label: "Help", icon: HelpCircle },
+  ];
+
+  return (
+    <div key="dr-app" className="dr-fade-in dr-app" style={{ fontFamily: "Inter, system-ui, sans-serif", background: "radial-gradient(700px 500px at 8% 4%, #A6DCF0 0%, rgba(166,220,240,0) 70%), radial-gradient(600px 600px at 100% 38%, #9FCDE0 0%, rgba(159,205,224,0) 70%), radial-gradient(700px 500px at 50% 100%, #BDE6F1 0%, rgba(189,230,241,0) 70%), " + T.mist, minHeight: "100vh", color: T.ink }}>
+      <style>{globalCss}</style>
+
+      <header className="dr-header" style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
+        {departments.length > 0 && (
+          <div style={{ position: "relative", display: "inline-block", marginBottom: 8 }}>
+            <button className="dr-deptbtn" onClick={() => setDeptMenuOpen((o) => !o)} style={{
+              fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 7,
+              background: "rgba(255,255,255,0.12)", color: "#DDEBE8", border: "1px solid rgba(255,255,255,0.22)",
+              borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            }}>
+              <Users size={13} /> {(departments.find((d) => d.id === deptId) || {}).name || "Department"}
+              <ChevronDown size={13} className="dr-deptmenu-chevron" style={{ transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
+            </button>
+            {deptMenuBody}
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -2038,7 +2093,40 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         </nav>
       </header>
 
+      <div className="edr-shell">
+      <SideMenu items={sideItems} activeId={inReports ? "reports" : tab}
+        onSelect={(id) => setTab(id === "reports" ? "stats" : id)}
+        deptSwitcher={sideDeptSwitcher} email={userEmail}
+        onOpenPlans={onOpenBilling} onOpenAdmin={onOpenAdmin} />
+      <div className="edr-content">
+      <div className="edr-pagehead no-print">
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h1 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 800, fontSize: 28, letterSpacing: "-0.02em", margin: 0, color: T.ink }}>{data.title}</h1>
+            {saveStatus === "saving" && <span style={{ fontSize: 12.5, color: T.inkSoft }}>Saving…</span>}
+            {saveStatus === "saved" && <span style={{ fontSize: 12.5, color: "#2E7D4F", fontWeight: 600 }}>✓ Saved</span>}
+            <UndoRedoButtons history={history} light />
+          </div>
+          <span style={{ fontSize: 14, color: T.inkSoft }}>Duty rota &amp; non-official day tracker</span>
+        </div>
+        {viewData.logo && <img src={viewData.logo} alt="" style={{ height: 56, maxWidth: 220, objectFit: "contain", flexShrink: 0 }} />}
+      </div>
       <main className="dr-main" style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
+        {inReports && (
+          <div className="edr-desk-only" role="tablist" aria-label="Reports" style={{
+            display: "inline-flex", gap: 4, padding: 4, marginBottom: 16, borderRadius: 999,
+            background: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.95)",
+          }}>
+            {REPORT_TABS.map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} style={{
+                minHeight: 38, padding: "0 16px", borderRadius: 999, border: "none", fontFamily: "inherit",
+                fontSize: 13.5, fontWeight: 600, cursor: "pointer",
+                background: tab === id ? "linear-gradient(90deg, #0D4F61, #1F7F9F)" : "transparent",
+                color: tab === id ? "#fff" : T.ink,
+              }}>{label}</button>
+            ))}
+          </div>
+        )}
         {saveStatus === "error" && (
           <div className="dr-anim-in" style={{
             background: "#FBEAE7", border: "1px solid #F1B8AE", borderRadius: 10,
@@ -2231,6 +2319,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
           orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
         {tab === "help" && <HelpTab data={data} />}
       </main>
+      </div>
+      </div>
 
       {/* Ini, the rota assistant. Shown only where this person can edit —
           the same three checks that switch Undo off. */}

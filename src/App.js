@@ -673,6 +673,11 @@ export default function App() {
       {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} />}
       {showEndingNote && <EndingSoonNote daysLeft={sub.daysLeft} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} onSeePlans={() => setShowBilling(true)} />}
       <style>{`
+        /* Laptops: the side menu carries My plan and Log out on department
+           screens (DutyRota sets edr-has-side on <body> while it shows). */
+        @media (min-width: 900px) {
+          body.edr-has-side .edr-topbar { display: none !important; }
+        }
         /* On a phone there isn't room for the name, the address and the
            buttons. The address is the least useful of the three — the person
            knows who they are signed in as, and it is on their account screen. */
@@ -716,7 +721,9 @@ export default function App() {
         departmentLimit={sub.departmentLimit} role={role} roleKnown={roleKnown}
         orgName={org.name} onSaveOrgName={saveOrgName}
         canEditOrgName={role === null || role === 'owner'}
-        onOpenBilling={() => setShowBilling(true)} />
+        onOpenBilling={() => setShowBilling(true)}
+        userEmail={session.user.email}
+        onOpenAdmin={isAdmin ? () => setShowAdmin(true) : null} />
       <LegalFooter />
     </div>
   );

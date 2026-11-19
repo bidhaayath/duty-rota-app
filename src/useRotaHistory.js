@@ -281,7 +281,7 @@ export function useRotaHistory(data, setData, scopeKey, options = {}) {
 /* Two buttons for the dark header. The tooltip says what will be undone, so
    nobody has to press it to find out — which, with an undo button, is the
    one way of finding out that cannot be taken back. */
-export function UndoRedoButtons({ history, style }) {
+export function UndoRedoButtons({ history, style, light = false }) {
   /* Sized to sit beside the save status rather than below it. On a phone the
      word "Undo" is hidden by the stylesheet and only the arrow remains — two
      small buttons on the same line as everything else, instead of a row of
@@ -292,12 +292,13 @@ export function UndoRedoButtons({ history, style }) {
      otherwise indistinguishable from an empty box. */
   const base = {
     fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5,
-    background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.22)",
-    borderRadius: 8, padding: "4px 9px", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4,
+    background: light ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.12)",
+    border: light ? "1px solid rgba(14,58,71,0.14)" : "1px solid rgba(255,255,255,0.22)",
+    borderRadius: light ? 999 : 8, padding: light ? "6px 12px" : "4px 9px", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4,
   };
   const btn = (on) => ({
     ...base,
-    color: on ? "#DDEBE8" : "rgba(221,235,232,0.35)",
+    color: light ? (on ? "#0D4F61" : "rgba(14,58,71,0.3)") : (on ? "#DDEBE8" : "rgba(221,235,232,0.35)"),
     cursor: on ? "pointer" : "not-allowed",
   });
   return (
