@@ -57,7 +57,7 @@
 
 import { addLeave, addRequest, weeklyOff } from "./leaveAndRequests";
 import { setCode, clearDays, swapDuties, setNonOfficial } from "./rotaEdits";
-import { setShifts, setOffsPerWeek, setMaxInARow, setSeniorCover, setSeniors } from "./settings";
+import { setShifts, setOffsPerWeek, setMaxInARow, setSeniorCover, setSeniors, setCoverage, setWeeklyShifts } from "./settings";
 import { setSkip, personRule, fixedDuty } from "./people";
 import { build } from "./build";
 import { plural, listWords, staffOf } from "./shared";
@@ -79,7 +79,7 @@ export const GROUPS = [
 
 const CATALOGUE = Object.fromEntries(
   [addLeave, addRequest, weeklyOff, setCode, clearDays, swapDuties, setNonOfficial,
-    setShifts, setOffsPerWeek, setMaxInARow, setSeniorCover, setSeniors,
+    setShifts, setOffsPerWeek, setMaxInARow, setSeniorCover, setSeniors, setCoverage, setWeeklyShifts,
     setSkip, personRule, fixedDuty, build].map((e) => [e.type, e]),
 );
 export const entryFor = (type) => CATALOGUE[type] || null;
