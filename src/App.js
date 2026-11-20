@@ -101,7 +101,7 @@ function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans })
   const days = <strong>{daysLeft} day{daysLeft === 1 ? '' : 's'}</strong>;
 
   return (
-    <div className="dr-anim-in" style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '10px 20px', fontSize: 13, color: '#7A6320', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+    <div className="dr-anim-in no-print" style={{ background: '#FFF8E7', borderBottom: '1px solid #EBDCB2', padding: '10px 20px', fontSize: 13, color: '#7A6320', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
       <span>
         {everPaid ? (
           <>

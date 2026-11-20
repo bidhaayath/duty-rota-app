@@ -5,6 +5,7 @@ import Account from "./Account";
 import SubscriptionHistory from "./SubscriptionHistory";
 import Members from "./Members";
 import { ownedByMe } from "./deptAllowance";
+import { styleFor as leaveStyleFor } from "./leaveTypes";
 import { weekTotalsFor, isEmployedOn, leaveOn, entriesOf as rotaEntriesOf, DUTY_CATS } from "./rotaCounts";
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -34,15 +35,7 @@ const T = {
 };
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 /* Leave periods, shown with the same short codes and colours as the rota
-   (LEAVE_STYLES in DutyRotaOriginal.js). A custom "other" leave keeps its
-   own name as the label. */
-const LEAVE_CHIPS = {
-  annual:       { abbrev: "AL",  label: "Annual leave",         bg: "#D8EEE9" },
-  maternity:    { abbrev: "MAT", label: "Maternity leave",      bg: "#E9E9E9" },
-  prematernity: { abbrev: "PML", label: "Pre-maternity leave",  bg: "#F6E0EC" },
-  emergency:    { abbrev: "EL",  label: "Emergency leave",      bg: "#FBE3DF" },
-  other:        { abbrev: "LV",  label: "Other extended leave", bg: "#E6E4F5" },
-};
+   (leaveTypes.js), including a department's own colour for a type. */
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -191,7 +184,7 @@ export default function Dashboard({
       if (!mine) return null;
       return {
         deptName: d.name, deptId: d.id, staffId: mine.id, me: mine,
-        staff: rota.staff || [], eveningEnabled: !!rota.eveningEnabled,
+        staff: rota.staff || [], eveningEnabled: !!rota.eveningEnabled, leaveColors: rota.leaveColors || null,
         codes: rota.codes || [], cells: rota.cells || {},
         // Needed to mark non-official days and on-call turns. Both are
         // per department, so someone in two departments can have a day
@@ -247,10 +240,10 @@ export default function Dashboard({
          treats it (a leave day is never counted as a duty). */
       const period = isEmployedOn(m.me, dateStr) ? leaveOn(m.me, dateStr) : null;
       if (period) {
-        const ls = LEAVE_CHIPS[period.type] || LEAVE_CHIPS.other;
+        const ls = leaveStyleFor(period, m.leaveColors);
         duties.push({
           postName: "", post: "", text: ls.abbrev,
-          label: period.type === "other" && period.label ? period.label : ls.label,
+          label: ls.label,
           color: ls.bg, deptName: m.deptName, deptId: m.deptId, counts: "leave",
           nonOfficial: nonOff, onCall: false, leave: true,
         });
