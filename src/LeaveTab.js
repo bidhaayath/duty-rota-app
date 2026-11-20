@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Download, X } from "lucide-react";
 import { LEAVE_STYLES, LEAVE_TYPE_OPTIONS, LEAVE_PALETTE, styleFor, textOnBg } from "./leaveTypes";
 import { leaveOn, isEmployedOn, cellEntries, isNonOff } from "./rotaCounts";
+import { exportLeaveToExcel } from "./leaveExcel";
 
 /* ─────────────────── Leave tab ───────────────────
    Every kind of leave in the department, drawn as bars across the days it
@@ -87,7 +88,12 @@ const itemLook = (item, colors) => {
 
 /* The chart: names down the left, the days across, leave as bars. Inline
    styles only, so the same component prints and saves as a picture. */
-export function LeaveChart({ data, days, rows, filter = "all", onPick = null, compact = false }) {
+/* The Show filter is "all", or a list of the leave types picked (AL and MAT,
+   say). A single type as a plain string still works. */
+export const inFilter = (filter, type) =>
+  filter === "all" || (Array.isArray(filter) ? filter.includes(type) : filter === type);
+
+export function LeaveChart({ data, days, rows, filter = "all", everyone = false, onPick = null, compact = false }) {
   const colors = data.leaveColors || null;
   // Narrower names on a phone; they stay frozen on the left while the days scroll.
   const phone = !compact && typeof window !== "undefined" && window.innerWidth < 640;
@@ -111,10 +117,17 @@ export function LeaveChart({ data, days, rows, filter = "all", onPick = null, co
     else months[months.length - 1].len++;
   });
   const grid = { display: "grid", gridTemplateColumns: `${nameW}px repeat(${days.length}, minmax(${colMin}px, 1fr))` };
-  const shown = rows.map((r) => ({ ...r, items: r.items.filter((it) => filter === "all" || it.type === filter) }))
-    .filter((r) => filter === "all" || r.items.length);
+  const shown = rows.map((r) => ({ ...r, items: r.items.filter((it) => inFilter(filter, it.type)) }))
+    .filter((r) => filter === "all" || everyone || r.items.length);
+  // On screen the bars open from left to right, one row after another. Exports
+  // (compact) never animate, so a picture never catches a half-open bar.
+  const animate = !compact;
   return (
     <div style={{ minWidth: compact ? 0 : nameW + days.length * colMin, width: compact ? "100%" : undefined, fontFamily: "Inter, system-ui, sans-serif", color: "#0E3A47" }}>
+      {animate && (
+        <style>{`@keyframes edrLeaveOpen { from { clip-path: inset(0 100% 0 0 round 999px); opacity: 0.4; } to { clip-path: inset(0 0 0 0 round 999px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .edr-leavebar { animation: none !important; } }`}</style>
+      )}
       <div style={{ ...grid, borderBottom: "1px solid #D3E5EC", background: "#FFFFFF", position: "sticky", top: 0, zIndex: 2 }}>
         <div style={{ ...frozen, background: "#FFFFFF", padding: "8px 12px", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", color: "#3A5F6B", display: "flex", alignItems: "center", boxShadow: compact ? "none" : "1px 0 0 #D3E5EC" }}>NAME</div>
         {yearMode && months.map((m) => (
@@ -133,7 +146,7 @@ export function LeaveChart({ data, days, rows, filter = "all", onPick = null, co
         })}
       </div>
       {shown.length === 0 && (
-        <div style={{ padding: 18, fontSize: 13, color: "#3A5F6B" }}>No leave{filter === "all" ? "" : " of this type"} in these dates.</div>
+        <div style={{ padding: 18, fontSize: 13, color: "#3A5F6B" }}>No leave{filter === "all" ? "" : " of these types"} in these dates.</div>
       )}
       {shown.map(({ staff, items }, i) => (
         <div key={staff.id} style={{ ...grid, position: "relative", minHeight: compact ? 28 : 36, borderBottom: "1px solid #EEF4F6", background: i % 2 ? "#FAFCFD" : "#FFFFFF" }}>
@@ -170,7 +183,7 @@ export function LeaveChart({ data, days, rows, filter = "all", onPick = null, co
               : (span >= 4 && long ? `${name} (${spanText(full.start, full.end)})` : name);
             const clickable = !!onPick;
             return (
-              <div key={k} role={clickable ? "button" : "img"} tabIndex={clickable ? 0 : undefined}
+              <div key={k} className={animate ? "edr-leavebar" : undefined} role={clickable ? "button" : "img"} tabIndex={clickable ? 0 : undefined}
                 aria-label={`${staff.name}: ${st.label}, ${niceDate(it.start)} to ${niceDate(it.end)}${it.kind === "code" ? " (from the rota)" : ""}`}
                 title={`${st.label}: ${spanText(full.start, full.end)}${it.kind === "code" ? " · entered on the rota" : ""}`}
                 onClick={clickable ? () => onPick(it) : undefined}
@@ -182,6 +195,7 @@ export function LeaveChart({ data, days, rows, filter = "all", onPick = null, co
                   background: st.bg, color: st.fg, fontSize: compact ? 9.5 : 11, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   border: it.kind === "code" ? `1.5px dashed ${st.fg}` : "1px solid rgba(14,58,71,0.08)",
                   cursor: clickable ? "pointer" : "default",
+                  animation: animate ? `edrLeaveOpen 650ms cubic-bezier(0.22, 1, 0.36, 1) ${Math.min(i, 12) * 45 + 80}ms both` : undefined,
                 }}>{label}</div>
             );
           })}
@@ -209,8 +223,12 @@ export default function LeaveTab({ data, update, canEdit = false, staffEditable 
   const [anchor, setAnchor] = useState(today);
   const [range, setRange] = useState({ from: today, to: addDays(today, 13) });
   const [filter, setFilter] = useState("all");
+  // With one leave type picked: show only the staff who have it, or everyone.
+  const [everyone, setEveryone] = useState(false);
   const [form, setForm] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The colours open toward whichever side has room, so none are cut off.
+  const [paletteRight, setPaletteRight] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
   const days = useMemo(() => {
@@ -352,7 +370,7 @@ Those days become empty on the rota.`)) return;
   };
 
   const list = rows.flatMap((r) => r.items.map((it) => ({ ...it, staff: r.staff })))
-    .filter((it) => filter === "all" || it.type === filter)
+    .filter((it) => inFilter(filter, it.type))
     .sort((a, b) => (a.kind === "period" ? a.period.start : a.start).localeCompare(b.kind === "period" ? b.period.start : b.start));
   const formLook = form ? styleFor({ type: form.type }, colors) : null;
 
@@ -407,7 +425,7 @@ Those days become empty on the rota.`)) return;
                   background: "rgba(255,255,255,0.92)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)",
                   border: "1px solid rgba(255,255,255,0.95)", boxShadow: "0 14px 34px rgba(14,58,71,0.2)" }}>
                   {[["both", "Chart and list"], ["chart", "Chart only"], ["list", "List only"]].map(([v, l]) => (
-                    <button key={v} type="button" role="menuitem" onClick={() => { setExportOpen(false); onExport({ days, filter, title: rangeLabel, parts: v }); }}
+                    <button key={v} type="button" role="menuitem" onClick={() => { setExportOpen(false); onExport({ days, filter, everyone, title: rangeLabel, parts: v }); }}
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", border: "none", borderRadius: 10, background: "transparent",
                         fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: "#0E3A47", cursor: "pointer" }}>{l}</button>
                   ))}
@@ -469,12 +487,16 @@ Those days become empty on the rota.`)) return;
             <input type="date" value={form.end} min={form.start} onChange={(e) => setForm({ ...form, end: e.target.value })} style={{ ...inp, width: 150 }} /></label>
           <div className="lv-colour" style={{ ...fieldLbl, position: "relative" }}>
             <span>Colour for {form.type === "other" ? "other leave" : (LEAVE_STYLES[form.type]?.abbrev || "LV")}</span>
-            <button type="button" aria-expanded={paletteOpen} onClick={() => setPaletteOpen((v) => !v)} style={{ ...inp, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", width: 130 }}>
+            <button type="button" aria-expanded={paletteOpen} onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setPaletteRight(r.left + 252 > window.innerWidth - 12);
+              setPaletteOpen((v) => !v);
+            }} style={{ ...inp, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", width: 130 }}>
               <span aria-hidden="true" style={{ width: 20, height: 20, borderRadius: 6, background: formLook.bg, border: "1px solid rgba(14,58,71,0.15)" }} />
               <span style={{ fontSize: 13 }}>{formLook.abbrev}</span>
             </button>
             {paletteOpen && (
-              <div role="group" aria-label="Pick a colour" style={{ position: "absolute", top: "100%", marginTop: 6, left: 0, zIndex: 30, width: 236, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, padding: 10, borderRadius: 16,
+              <div role="group" aria-label="Pick a colour" style={{ position: "absolute", top: "100%", marginTop: 6, ...(paletteRight ? { right: 0 } : { left: 0 }), zIndex: 30, width: 252, boxSizing: "border-box", display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, padding: 10, borderRadius: 16,
                 background: "rgba(255,255,255,0.92)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", border: "1px solid rgba(255,255,255,0.95)", boxShadow: "0 14px 34px rgba(14,58,71,0.2)" }}>
                 {LEAVE_PALETTE.map((hex) => (
                   <button key={hex} type="button" aria-label={`Colour ${hex}`} aria-pressed={formLook.bg.toLowerCase() === hex.toLowerCase()}
@@ -504,11 +526,17 @@ Those days become empty on the rota.`)) return;
       {/* Filter by type */}
       <div role="group" aria-label="Show" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         <span style={{ fontSize: 12.5, fontWeight: 600, color: "#3A5F6B" }}>Show</span>
-        {["all", ...LEAVE_TYPE_OPTIONS.map(([v]) => v).filter((v) => typesHere.includes(v) || filter === v)].map((v) => {
+        {["all", ...LEAVE_TYPE_OPTIONS.map(([v]) => v).filter((v) => typesHere.includes(v) || (Array.isArray(filter) && filter.includes(v)))].map((v) => {
           const st = v === "all" ? null : styleFor({ type: v }, colors);
-          const on = filter === v;
+          const on = v === "all" ? filter === "all" : Array.isArray(filter) && filter.includes(v);
           return (
-            <button key={v} type="button" aria-pressed={on} onClick={() => setFilter(v)} style={{
+            <button key={v} type="button" aria-pressed={on} onClick={() => setFilter((f) => {
+              // "All leave" clears the picks; a type button adds or removes that type.
+              if (v === "all") return "all";
+              const picked = Array.isArray(f) ? f : [];
+              const next = picked.includes(v) ? picked.filter((x) => x !== v) : [...picked, v];
+              return next.length ? next : "all";
+            })} style={{
               height: 28, padding: "0 12px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
               border: on ? "2px solid #0D4F61" : "1px solid rgba(14,58,71,0.15)",
               background: st ? st.bg : (on ? "#0D4F61" : "#FFFFFF"), color: st ? st.fg : (on ? "#FFFFFF" : "#0D4F61") }}>
@@ -516,11 +544,21 @@ Those days become empty on the rota.`)) return;
             </button>
           );
         })}
+        {filter !== "all" && (
+          <button type="button" aria-pressed={everyone} onClick={() => setEveryone((e) => !e)} style={{
+            marginLeft: 6, height: 28, padding: "0 12px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+            display: "inline-flex", alignItems: "center", gap: 6,
+            border: "1px solid rgba(14,58,71,0.15)", background: everyone ? "#E4F2F8" : "#FFFFFF", color: "#0D4F61" }}>
+            <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 4, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center",
+              border: everyone ? "none" : "1.5px solid #3A5F6B", background: everyone ? "#0D4F61" : "transparent", color: "#FFFFFF", fontSize: 10, lineHeight: 1 }}>{everyone ? "\u2713" : ""}</span>
+            Show all staff
+          </button>
+        )}
       </div>
 
       {/* The chart */}
       <section aria-label="Leave chart" style={{ ...card, padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" }}>
-        <LeaveChart data={data} days={days} rows={rows} filter={filter} onPick={canEdit ? openEdit : null} />
+        <LeaveChart data={data} days={days} rows={rows} filter={filter} everyone={everyone} onPick={canEdit ? openEdit : null} />
       </section>
       <div style={{ fontSize: 12, color: "#3A5F6B" }}>
         Tap a bar to edit it. Dashed bars are leave entered as a rota code (SL, FRL, ML…), with the same code on
@@ -533,7 +571,7 @@ Those days become empty on the rota.`)) return;
           <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16, fontWeight: 700 }}>Leave in these dates</h2>
           <span style={{ fontSize: 12.5, color: "#3A5F6B" }}>{list.length} {list.length === 1 ? "entry" : "entries"}</span>
         </div>
-        {list.length === 0 && <div style={{ fontSize: 13, color: "#3A5F6B" }}>No leave{filter === "all" ? "" : " of this type"} in these dates.</div>}
+        {list.length === 0 && <div style={{ fontSize: 13, color: "#3A5F6B" }}>No leave{filter === "all" ? "" : " of these types"} in these dates.</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 340, overflowY: "auto" }}>
           {list.map((it, k) => {
             const st = itemLook(it, colors);
@@ -571,15 +609,67 @@ const generatedAt = () => {
   return `Generated on ${n.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${n.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`;
 };
 
+/* The Excel file: the same leave as the export on screen (dates, Show
+   filter, "Show all staff", chart and/or list), described plainly for
+   leaveExcel.js. Only writes a file on this device. */
+export async function saveLeaveExcel(data, cfg) {
+  const days = cfg.days;
+  const colors = data.leaveColors || null;
+  const typeLabel = cfg.filter === "all" ? "All leave"
+    : [].concat(cfg.filter).map((t) => styleFor({ type: t }, colors).label).join(", ");
+  const all = leaveItemsFor(data, days);
+  const rows = all
+    .filter((r) => cfg.filter === "all" || cfg.everyone || r.items.some((it) => inFilter(cfg.filter, it.type)))
+    .map((r) => {
+      const cells = {};
+      const bands = [];
+      r.items.filter((it) => inFilter(cfg.filter, it.type)).forEach((it) => {
+        const st = itemLook(it, colors);
+        const a = days.indexOf(it.start), b = days.indexOf(it.end);
+        if (a < 0 || b < 0) return;
+        for (let i = a; i <= b; i++) cells[i] = { text: st.abbrev, bg: st.bg, fg: st.fg };
+        // For the month-by-month sheet: the whole leave, "AL (7 Jul – 9 Aug)".
+        const full = it.kind === "period" ? it.period : it;
+        const name = it.kind === "period" && it.period.type === "other" && it.period.label ? it.period.label : st.abbrev;
+        bands.push({ text: `${name} (${spanText(full.start, full.end)})`, bg: st.bg, fg: st.fg, from: a, to: b });
+      });
+      return { name: r.staff.name, cells, bands, total: Object.keys(cells).length };
+    });
+  const list = all.flatMap((r) => r.items.map((it) => ({ ...it, staff: r.staff })))
+    .filter((it) => inFilter(cfg.filter, it.type))
+    .sort((a, b) => (a.kind === "period" ? a.period.start : a.start).localeCompare(b.kind === "period" ? b.period.start : b.start)
+      || a.staff.name.localeCompare(b.staff.name))
+    .map((it) => {
+      const full = it.kind === "period" ? it.period : it;
+      const st = itemLook(it, colors);
+      return {
+        name: it.staff.name, abbrev: st.abbrev,
+        type: it.kind === "period" && it.period.type === "other" && it.period.label ? it.period.label : st.label,
+        start: full.start, end: full.end,
+        days: Math.round((parseD(full.end) - parseD(full.start)) / 86400000) + 1,
+        enteredAs: it.kind === "period" ? "Leave period" : "Rota", bg: st.bg, fg: st.fg,
+      };
+    });
+  await exportLeaveToExcel({
+    orgName: data.orgName || "", deptName: data.title || "Leave", rangeLabel: cfg.title || "", typeLabel,
+    parts: cfg.parts || "both", rows, list,
+    days: days.map((d) => ({
+      date: d, dow: DOW[parseD(d).getDay()][0], day: parseD(d).getDate(), nonOff: isNonOff(data, d),
+      month: parseD(d).toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
+    })),
+  });
+}
+
 export function LeavePrint({ data, cfg }) {
   const days = cfg.days;
   const rows = leaveItemsFor(data, days);
-  const typeLabel = cfg.filter === "all" ? "All leave" : (styleFor({ type: cfg.filter }, data.leaveColors).label);
-  const staffShown = rows.filter((r) => cfg.filter === "all" || r.items.some((it) => it.type === cfg.filter)).length;
+  const typeLabel = cfg.filter === "all" ? "All leave"
+    : [].concat(cfg.filter).map((t) => styleFor({ type: t }, data.leaveColors).label).join(", ");
+  const staffShown = rows.filter((r) => cfg.filter === "all" || cfg.everyone || r.items.some((it) => inFilter(cfg.filter, it.type))).length;
   const parts = cfg.parts || "both";
   // The list: every leave in these dates, earliest first, with its full dates.
   const items = rows.flatMap((r) => r.items.map((it) => ({ ...it, staff: r.staff })))
-    .filter((it) => cfg.filter === "all" || it.type === cfg.filter)
+    .filter((it) => inFilter(cfg.filter, it.type))
     .sort((a, b) => (a.kind === "period" ? a.period.start : a.start).localeCompare(b.kind === "period" ? b.period.start : b.start)
       || a.staff.name.localeCompare(b.staff.name));
   const longDate = (d) => parseD(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -601,7 +691,7 @@ export function LeavePrint({ data, cfg }) {
       </div>
       {parts !== "list" && (
         <div style={{ border: "1px solid #D3E5EC", borderRadius: 10, overflow: "hidden" }}>
-          <LeaveChart data={data} days={days} rows={rows} filter={cfg.filter} compact />
+          <LeaveChart data={data} days={days} rows={rows} filter={cfg.filter} everyone={!!cfg.everyone} compact />
         </div>
       )}
       {parts !== "chart" && (
@@ -639,7 +729,7 @@ export function LeavePrint({ data, cfg }) {
           </tbody>
         </table>
       )}
-      {parts !== "list" && rows.some((r) => r.items.some((it) => it.kind === "code" && (cfg.filter === "all" || it.type === cfg.filter))) && (
+      {parts !== "list" && rows.some((r) => r.items.some((it) => it.kind === "code" && inFilter(cfg.filter, it.type))) && (
         <div style={{ marginTop: 6, fontSize: 9.5, color: "#888" }}>Dashed bars are leave entered as a rota code.</div>
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 8, fontSize: 10, color: "#666" }}>

@@ -55,7 +55,7 @@ test("Ini asks on the line, the answers tick it, and the whole note saves in one
     uid={uidFn} dstr={iso} canBuild onMonthApplied={jest.fn()} />;
   const uidFn = (() => { let n = 0; return () => `r${++n}`; })();
   const { rerender } = render(panel(data));
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   fireEvent.change(await screen.findByPlaceholderText(/Fathimath Easa/), { target: { value: note } });
   fireEvent.click(screen.getByText("Read my note"));
 
@@ -114,7 +114,7 @@ test("a name that could be two people is asked about, offering only them", async
     uid={uidFn} dstr={iso} canBuild onMonthApplied={jest.fn()} />;
   const uidFn = () => "u";
   const { rerender } = render(panel(data));
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   fireEvent.change(await screen.findByPlaceholderText(/Fathimath Easa/), { target: { value: "Skip Ana" } });
   fireEvent.click(screen.getByText("Read my note"));
 

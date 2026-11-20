@@ -21,7 +21,7 @@ import { tagDept, ownedByMe, deptAllowance, ownerLevel } from "./deptAllowance";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 import SideMenu from "./SideMenu";
 import { LEAVE_STYLES, LEAVE_TYPE_OPTIONS, styleFor } from "./leaveTypes";
-import LeaveTab, { LeavePrint } from "./LeaveTab";
+import LeaveTab, { LeavePrint, saveLeaveExcel } from "./LeaveTab";
 /* The rota's counting rules (cells, leave, employment, totals and coverage)
    live in rotaCounts.js so Ini's month preview counts the same way. */
 import {
@@ -2123,6 +2123,12 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
           <Btn small onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</Btn>
           {printView.kind === "rota" && (
             <Btn small onClick={saveAsExcel}><FileSpreadsheet size={14} /> Export Excel</Btn>
+          )}
+          {printView.kind === "leave" && (
+            <Btn small onClick={async () => {
+              try { await saveLeaveExcel(viewData, printView.cfg); }
+              catch (e) { console.error("Leave Excel export failed:", e); window.alert("Sorry, couldn't create the Excel file. Try Print / Save as PDF instead."); }
+            }}><FileSpreadsheet size={14} /> Export Excel</Btn>
           )}
           <Btn small onClick={saveAsImage} disabled={!canSaveImage} title={canSaveImage ? "" : `Available for ranges up to ${IMG_MAX_DAYS} days — use Print / Save as PDF for wider ranges.`}><Image size={14} /> Save as image</Btn>
           {!canSaveImage && <span style={{ alignSelf: "center", fontSize: 12, color: T.inkSoft }}>Image export supports up to {IMG_MAX_DAYS} days — use PDF for wider ranges.</span>}

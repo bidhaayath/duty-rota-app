@@ -30,7 +30,7 @@
    month's allowance.                                                      */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Sparkles, X, AlertTriangle, Check, Wand2 } from "lucide-react";
+import { Sparkles, X, AlertTriangle, Check, Wand2, Gamepad2 } from "lucide-react";
 import supabase from "./supabaseClient";
 import {
   prepareBuild, finishMonth, plainProblems, lookbackOptions, lookbackIdFor, lookbackSentence,
@@ -41,6 +41,8 @@ import MonthPreview from "./MonthPreview";
 import IniMascot from "./IniMascot";
 import { useLook } from "./IniBuddy";
 import { useIniMoments } from "./iniMoments";
+import { useFabLife, useNewestAct } from "./iniFabLife";
+import IniGame from "./IniGame";
 import { mergeRules, seniorTermsOf } from "./rosterConfig";
 import { SHIFTS } from "./rosterEngine";
 import { GROUPS, LEAVE_TYPES, entryFor, readReply, checkLines, applyLines, savedWords } from "./iniActions";
@@ -230,6 +232,14 @@ export default function AssistantPanel({
   /* The button's Ini speaks at moments when the Ask Ini bar's is not on
      screen (iniMoments.js) — on another tab, say, after "Use this roster". */
   const fabMoment = useIniMoments({ userId, priority: 1, enabled: !!visible && !!deptId && !open && !preview });
+  // The corner Ini's own life: awake and curious, little moves, a cute
+  // line on a tap (iniFabLife.js). The bubble's "Ask Ini" opens the panel.
+  const fabLife = useFabLife({ userId, enabled: !!visible && !open && !preview });
+  const fabAct = useNewestAct(fabMoment.act, fabLife.act);
+  // Hangman with Ini, from the gamepad icon in the tap bubble.
+  const [gameOpen, setGameOpen] = useState(false);
+  const openGame = () => { fabLife.hush(); fabLife.setBusy(true); setGameOpen(true); };
+  const closeGame = () => { fabLife.setBusy(false); setGameOpen(false); };
   useEffect(() => {
     if (!ask || ask.n === askSeen.current) return;
     askSeen.current = ask.n;
@@ -1040,7 +1050,10 @@ export default function AssistantPanel({
             font-size: 16px !important;
           }
         }
-        @media (prefers-reduced-motion: reduce) { .ini-panel, .ini-backdrop { animation: none; } }
+        @keyframes iniFabSpin { 0% { transform: translateY(0) rotate(0) scale(1); } 45% { transform: translateY(-22px) rotate(200deg) scale(1.12); }
+          75% { transform: translateY(2px) rotate(340deg) scale(0.96); } 100% { transform: translateY(0) rotate(360deg) scale(1); } }
+        .ini-tapbubble { animation: ini-fade 180ms ease-out; }
+        @media (prefers-reduced-motion: reduce) { .ini-panel, .ini-backdrop, .ini-fab, .ini-tapbubble { animation: none !important; } }
         @media print { .ini-root { display: none !important; } }
       `}</style>
 
@@ -1050,24 +1063,58 @@ export default function AssistantPanel({
           ref={fabRef}
           type="button"
           className="ini-fab"
-          aria-label="Ask Ini"
-          title="Ask Ini"
-          onClick={wake}
+          aria-label="Ini, tap to say hi"
+          title="Tap Ini"
+          onClick={() => { fabMoment.hush(); if (gameOpen) closeGame(); fabLife.onTap(); }}
           style={{
             position: "fixed", right: 16, bottom: 16, zIndex: 900,
             width: 50, height: 50, padding: 0, borderRadius: "50%", border: "1px solid #D5E0D8", cursor: "pointer",
             background: "#fff",
             display: "flex", alignItems: "center", justifyContent: "center",
             boxShadow: "0 6px 18px rgba(20,43,51,0.18)",
+            animation: fabLife.move === "spin" ? "iniFabSpin 950ms cubic-bezier(0.34, 1.3, 0.64, 1)" : undefined,
           }}
         >
-          <IniMascot mood={iniMood({ ...face, open: false })} size={44} look={fabLook} act={fabMoment.act} />
+          {/* Opening the panel, or just after a month is applied, the panel's
+              own face shows; otherwise the corner Ini's. */}
+          <IniMascot mood={face.waking || face.done === "apply" ? iniMood({ ...face, open: false }) : fabLife.mood}
+            size={44} look={fabLook} act={fabAct} />
         </button>
       )}
+      {/* What Ini says when tapped, with the way into the panel. */}
+      {!open && !preview && fabLife.bubble && !gameOpen && (
+        <div className="ini-tapbubble" onFocus={fabLife.holdBubble} onBlur={fabLife.releaseBubble}
+          style={{
+            position: "fixed", right: 16, bottom: 74, zIndex: 901, width: "max-content", maxWidth: "min(250px, calc(100vw - 32px))",
+            background: "#142B33", color: "#fff", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4, padding: "9px 11px",
+            borderRadius: "14px 14px 4px 14px", boxShadow: "0 6px 18px rgba(20,43,51,0.22)",
+            display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8,
+          }}>
+          <button type="button" aria-label="Close Ini's message" title="Close" onClick={fabLife.hush}
+            style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, padding: 0, borderRadius: 999, border: "none",
+              background: "transparent", color: "rgba(255,255,255,0.75)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={14} strokeWidth={2.5} aria-hidden="true" />
+          </button>
+          <span aria-live="polite" style={{ paddingRight: 18 }}>{fabLife.bubble}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button type="button" aria-label="Ask Ini" onClick={wake}
+              style={{ height: 28, padding: "0 12px", borderRadius: 999, border: "none", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 12, fontWeight: 700, background: "#9ED066", color: "#142B33", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              Ask Ini <span aria-hidden="true">→</span>
+            </button>
+            <button type="button" aria-label="Play hangman with Ini" title="Play hangman" onClick={openGame}
+              style={{ width: 28, height: 28, padding: 0, borderRadius: 999, border: "1px solid rgba(255,255,255,0.25)", cursor: "pointer",
+                background: "rgba(255,255,255,0.08)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <Gamepad2 size={15} strokeWidth={2.2} aria-hidden="true" />
+            </button>
+          </span>
+        </div>
+      )}
+      {!open && !preview && gameOpen && <IniGame onClose={closeGame} onMood={fabLife.react} />}
       {/* What the button's Ini says, just above it. Read out; never in the way of a tap. */}
       {!open && !preview && (
         <span aria-live="polite"
-          style={fabMoment.bubble ? {
+          style={fabMoment.bubble && !fabLife.bubble ? {
             position: "fixed", right: 16, bottom: 74, zIndex: 900, maxWidth: "min(240px, calc(100vw - 32px))",
             background: "#142B33", color: "#fff", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4, padding: "7px 10px",
             borderRadius: "12px 12px 4px 12px", boxShadow: "0 6px 18px rgba(20,43,51,0.18)", pointerEvents: "none",

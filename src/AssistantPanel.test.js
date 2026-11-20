@@ -36,7 +36,7 @@ const renderPanel = (data, update = jest.fn()) => render(
 // Ini wakes up for a moment before the panel opens, and the note box
 // appears once the allowance has been checked.
 const open = async () => {
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   await screen.findByText("Choose dates");
   await screen.findByPlaceholderText(/Fathimath Easa/);
 };
@@ -155,7 +155,7 @@ test("a save that is refused says so and keeps the checklist", async () => {
     }));
     const update = jest.fn();          // refuses: the rota never changes
     renderPanel(makeData(), update);
-    fireEvent.click(screen.getByLabelText("Ask Ini"));
+    fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
     await screen.findByText("Choose dates");
     fireEvent.click(screen.getByText("Choose dates"));
     fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-12-01" } });
