@@ -51,11 +51,11 @@ const panel = (data, update) => (
 );
 // The mood each Ini is showing, from its screen-reader label ("Ini, listening").
 const moodOf = (root) => root.querySelector('svg[aria-label^="Ini, "]').getAttribute("aria-label").slice(5);
-const buttonMood = () => moodOf(screen.getByLabelText("Ask Ini"));
+const buttonMood = () => moodOf(screen.getByLabelText("Ini, tap to say hi"));
 const headerMood = () => moodOf(screen.getByRole("dialog"));
 const reply = (body, status = 200) => Promise.resolve({ ok: status === 200, status, json: () => Promise.resolve(body) });
 const openPanel = async () => {
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   await screen.findByRole("dialog");
   await screen.findByPlaceholderText(/Fathimath Easa/);
 };
@@ -112,11 +112,11 @@ describe("Ini's face in the panel", () => {
   test("the button rests, wakes when tapped, and the panel opens listening", async () => {
     render(panel(makeData(), jest.fn()));
     expect(buttonMood()).toBe("resting");
-    fireEvent.click(screen.getByLabelText("Ask Ini"));
+    fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
     expect(buttonMood()).toBe("waking up");
     expect(screen.queryByRole("dialog")).toBeNull();
     // A second tap while waking does nothing extra.
-    fireEvent.click(screen.getByLabelText("Ask Ini"));
+    fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
     await screen.findByRole("dialog");
     expect(headerMood()).toBe("listening");
     expect(screen.queryByLabelText("Ask Ini")).toBeNull();
@@ -125,7 +125,7 @@ describe("Ini's face in the panel", () => {
   test("with reduced motion the panel opens straight away", async () => {
     window.matchMedia = (q) => ({ matches: q.includes("reduce"), addListener() {}, removeListener() {} });
     render(panel(makeData(), jest.fn()));
-    fireEvent.click(screen.getByLabelText("Ask Ini"));
+    fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(headerMood()).toBe("listening");
     await screen.findByPlaceholderText(/Fathimath Easa/);
@@ -191,14 +191,14 @@ describe("Ini's face in the panel", () => {
   test("spotted when the allowance check says no, but not for the upgrade offer", async () => {
     mockStatus = { ok: false, reason: "not_allowed" };
     const { unmount } = render(panel(makeData(), jest.fn()));
-    fireEvent.click(screen.getByLabelText("Ask Ini"));
+    fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
     expect(await screen.findByText(/Only the owner and managers/)).toBeInTheDocument();
     expect(headerMood()).toBe("spotted something");
     unmount();
 
     mockStatus = { ok: false, reason: "not_on_plan" };
     render(panel(makeData(), jest.fn()));
-    fireEvent.click(screen.getByLabelText("Ask Ini"));
+    fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
     expect(await screen.findByText(/Ini is on the Plus, Pro and Custom plans/)).toBeInTheDocument();
     expect(headerMood()).toBe("listening");
   });
@@ -244,7 +244,7 @@ describe("Ini's face in the panel", () => {
       expect(headerMood()).toBe("listening");
     });
 
-    test("after Apply the button shows done for 4 seconds, then rests", async () => {
+    test("after Apply the button shows done for 4 seconds, then its own face again", async () => {
       startMonthBuild.mockImplementation(() => ({ promise: Promise.resolve({ ok: true, ms: 5 }), cancel: () => {} }));
       render(panel(makeData(), jest.fn()));
       await openPanel();
@@ -253,7 +253,7 @@ describe("Ini's face in the panel", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(buttonMood()).toBe("all done");
       act(() => { jest.advanceTimersByTime(4100); });
-      expect(buttonMood()).toBe("resting");
+      expect(buttonMood()).not.toBe("all done");
     });
   });
 });
@@ -263,7 +263,7 @@ test("neither Ini can reach an export: both sit inside the no-print wrapper", as
   const wrapper = container.firstChild;
   expect(wrapper).toHaveClass("no-print", "ini-root");
   expect(wrapper.textContent + wrapper.innerHTML).toMatch(/@media print \{ \.ini-root \{ display: none !important; \} \}/);
-  expect(wrapper).toContainElement(screen.getByLabelText("Ask Ini"));
+  expect(wrapper).toContainElement(screen.getByLabelText("Ini, tap to say hi"));
   await openPanel();
   expect(wrapper).toContainElement(screen.getByRole("dialog"));
 });

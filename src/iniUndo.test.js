@@ -74,10 +74,10 @@ test("leave and duty codes from one note are one Undo step, and Undo never empti
   render(<App />);
   // Opening the department: the rota is empty while it loads.
   act(() => { api.open(loaded()); });
-  await screen.findByLabelText("Ask Ini");
+  await screen.findByLabelText("Ini, tap to say hi");
   const before = JSON.stringify(api.data);
 
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   fireEvent.click(await screen.findByText("Choose dates"));
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-11-01" } });
   fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-30" } });
@@ -126,7 +126,7 @@ test("standing settings and weekly days off save with everything else, one Undo 
   }));
   render(<App withSmartRoster />);
   act(() => { api.open(loaded()); });
-  await screen.findByLabelText("Ask Ini");
+  await screen.findByLabelText("Ini, tap to say hi");
   const before = JSON.stringify(api.data);
 
   // What Smart Roster's screen shows: Mariyam's shift chips and the off days.
@@ -139,7 +139,7 @@ test("standing settings and weekly days off save with everything else, one Undo 
   expect(mariyamChips()).not.toMatch(/✓/);
   expect([offDays("Fewest"), offDays("Most")]).toEqual(["1", "2"]);
 
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   fireEvent.click(await screen.findByText("Choose dates"));
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-11-01" } });
   fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-30" } });
@@ -182,7 +182,7 @@ test("days and nights in a row save in one step, Smart Roster shows them, and on
   }));
   render(<App withSmartRoster />);
   act(() => { api.open(loaded()); });
-  await screen.findByLabelText("Ask Ini");
+  await screen.findByLabelText("Ini, tap to say hi");
   const before = JSON.stringify(api.data);
 
   const days = () => screen.getByLabelText("Working days in a row, at most").textContent;
@@ -192,7 +192,7 @@ test("days and nights in a row save in one step, Smart Roster shows them, and on
   };
   expect([days(), nights()]).toEqual(["5", "Up to 2 in a row"]);
 
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   fireEvent.click(await screen.findByText("Choose dates"));
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-11-01" } });
   fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-30" } });
@@ -259,7 +259,7 @@ test("senior lines send the ward's word, save in one step with everything else, 
   }));
   render(<App withSmartRoster />);
   act(() => { api.open({ ...loaded(), rosterRules: { seniorTerm: "In-charge", seniorStaff: ["m"] } }); });
-  await screen.findByLabelText("Ask Ini");
+  await screen.findByLabelText("Ini, tap to say hi");
   const before = JSON.stringify(api.data);
 
   const chipsOf = (name) => { goStep(2); return screen.getByRole("group", { name }).textContent; };
@@ -268,7 +268,7 @@ test("senior lines send the ward's word, save in one step with everything else, 
   expect(chipsOf("Mariyam")).toMatch(/✓ In-charge/);
   expect([seniorsOn("Morning"), seniorsOn("Night")]).toEqual(["0", "0"]);
 
-  fireEvent.click(screen.getByLabelText("Ask Ini"));
+  fireEvent.click(screen.getByLabelText("Ini, tap to say hi")); fireEvent.click(screen.getByLabelText("Ask Ini"));
   fireEvent.click(await screen.findByText("Choose dates"));
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-11-01" } });
   fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-11-30" } });
