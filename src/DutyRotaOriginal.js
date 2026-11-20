@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { toPng } from "html-to-image";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
-  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Baby, Plane, Printer, BarChart3,
-  AlertTriangle, MoreHorizontal, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Plane, Printer, BarChart3,
+  AlertTriangle, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
   User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon
 } from "lucide-react";
 import {
@@ -20,6 +20,8 @@ import { effectivePlan, deptPlanLoading } from "./deptPlan";
 import { tagDept, ownedByMe, deptAllowance, ownerLevel } from "./deptAllowance";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
 import SideMenu from "./SideMenu";
+import { LEAVE_STYLES, LEAVE_TYPE_OPTIONS, styleFor } from "./leaveTypes";
+import LeaveTab, { LeavePrint } from "./LeaveTab";
 /* The rota's counting rules (cells, leave, employment, totals and coverage)
    live in rotaCounts.js so Ini's month preview counts the same way. */
 import {
@@ -308,18 +310,7 @@ const T = {
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 // The redesign's page background: soft blue light over the pale page colour.
 const PAGE_BG = "radial-gradient(700px 500px at 8% 4%, #A6DCF0 0%, rgba(166,220,240,0) 70%), radial-gradient(600px 600px at 100% 38%, #9FCDE0 0%, rgba(159,205,224,0) 70%), radial-gradient(700px 500px at 50% 100%, #BDE6F1 0%, rgba(189,230,241,0) 70%), " + T.mist;
-const LEAVE_STYLES = {
-  annual:       { label: "Annual Leave",     abbrev: "AL",  bg: "#D8EEE9", fg: "#0B6A60", icon: Plane },
-  maternity:    { label: "Maternity",        abbrev: "MAT", bg: "#E9E9E9", fg: "#5A6B72", icon: Baby },
-  prematernity: { label: "Pre-Maternity",    abbrev: "PML", bg: "#F6E0EC", fg: "#9C3D6E", icon: Baby },
-  emergency:    { label: "Emergency Leave",  abbrev: "EL",  bg: "#FBE3DF", fg: "#B3532F", icon: AlertTriangle },
-  other:        { label: "Other Extended Leave", abbrev: "LV", bg: "#E6E4F5", fg: "#4E4A8C", icon: MoreHorizontal },
-};
-// Resolve a period's display style (custom "other" labels keep the generic style)
-const styleFor = (period) => {
-  const base = LEAVE_STYLES[period.type] || LEAVE_STYLES.other;
-  return period.type === "other" && period.label ? { ...base, label: period.label } : base;
-};
+// Leave types, their look and the custom colours live in leaveTypes.js.
 // Which leave column a code feeds. "leave" is the catch-all that feeds the
 // Other leave column; sl/frl/ml feed their own, so a code like N/FRL can be
 // counted as FRL without being named "FRL". Newer codes say so explicitly via `counts`.
@@ -500,11 +491,18 @@ const recordsFor = (data, from, to) => {
       .reduce((a, p) => a + rawOverlap(p), 0);
     const maternityDays = (s.leavePeriods || []).filter((p) => p.type === "maternity")
       .reduce((a, p) => a + rawOverlap(p), 0);
-    // Pre-maternity, emergency, and custom periods count as calendar days
-    const otherPeriodDays = (s.leavePeriods || [])
-      .filter((p) => !["annual", "maternity"].includes(p.type))
+    /* SL, FRL and ML can be a rota code or a leave period; both land in the
+       same column. A day inside a period never reaches the cell count above
+       (leaveOn skips it), so no day is counted twice. */
+    const periodDays = (type) => (s.leavePeriods || []).filter((p) => p.type === type)
       .reduce((a, p) => a + rawOverlap(p), 0);
-    const sl = t.leaveByBucket.sl, frl = t.leaveByBucket.frl, ml = t.leaveByBucket.ml;
+    // Pre-maternity, paternity, emergency and custom periods count as calendar days
+    const otherPeriodDays = (s.leavePeriods || [])
+      .filter((p) => !["annual", "maternity", "sl", "frl", "ml"].includes(p.type))
+      .reduce((a, p) => a + rawOverlap(p), 0);
+    const sl = t.leaveByBucket.sl + periodDays("sl");
+    const frl = t.leaveByBucket.frl + periodDays("frl");
+    const ml = t.leaveByBucket.ml + periodDays("ml");
     const otherLeave = t.leaveByBucket.other + otherPeriodDays;
     return {
       staff: s, ...t, annualDays, maternityDays, otherPeriodDays, sl, frl, ml, otherLeave,
@@ -737,6 +735,43 @@ const weekSegments = (staff, days) => {
     i = j + 1;
   }
   return segs;
+};
+
+/* Leave typed as rota codes (SL, FRL, ML, other leave codes): the same code
+   on 4 or more days in a row is drawn as one band, like a leave period —
+   "FRL (26 Nov – 29 Nov)". Screen only, and only for plain cells: a day with
+   a note, an exchange mark or a second duty stays its own cell. Tapping a
+   band splits it back into cells for editing (`open` holds those keys).
+   Nothing is saved; the cells and their counting are unchanged. */
+const RUN_MIN = 4;
+// Exports always draw the bands (nothing is "tapped open" there).
+const NO_OPEN_RUNS = new Set();
+const joinLeaveRuns = (data, staffId, segs, open) => {
+  const leaveCodeOf = (date) => {
+    if (cellMetaOf(data, date, staffId)) return null;
+    const entries = cellEntries(data, date, staffId);
+    if (entries.length !== 1) return null;
+    const code = data.codes.find((c) => c.id === entries[0].code);
+    return code && leaveBucket(code) ? code : null;
+  };
+  const out = [];
+  let k = 0;
+  while (k < segs.length) {
+    const seg = segs[k];
+    const code = seg.kind === "cell" ? leaveCodeOf(seg.date) : null;
+    if (!code) { out.push(seg); k++; continue; }
+    let j = k;
+    while (j + 1 < segs.length && segs[j + 1].kind === "cell" && leaveCodeOf(segs[j + 1].date)?.id === code.id) j++;
+    const len = j - k + 1;
+    const key = `${staffId}:${seg.date}:${code.id}`;
+    if (len >= RUN_MIN && !open.has(key)) {
+      out.push({ kind: "codeRun", code, start: seg.date, end: segs[j].date, span: len, key });
+    } else {
+      for (let x = k; x <= j; x++) out.push(segs[x]);
+    }
+    k = j + 1;
+  }
+  return out;
 };
 
 /* ─────────────────── App ─────────────────── */
@@ -1486,6 +1521,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     { id: "staff", label: "Staff", icon: Users },
     { id: "requests", label: "Duty Requests", icon: MessageCircle },
     { id: "smart", label: "Smart Roster", icon: Wand2 },
+    { id: "leave", label: "Leave", icon: Plane },
     { id: "reports", label: "Reports", icon: BarChart3 },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "sep", divider: true },
@@ -1595,6 +1631,9 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     @media print {
       .no-print { display: none !important; }
       body { background: #fff !important; }
+      /* On screen the export page fills the window; on paper that extra
+         height spilled onto a blank second sheet. */
+      .dr-printview { min-height: 0 !important; padding: 0 !important; }
       * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .recharts-wrapper, .recharts-surface { break-inside: avoid; page-break-inside: avoid; }
     }
@@ -1982,13 +2021,17 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
           extras,
           rows: staffRows.map((s, i) => {
             const t = weekTotalsFor(viewData, s, rotaDays);
-            const cells = weekSegments(s, rotaDays).map((seg) => {
+            const cells = joinLeaveRuns(viewData, s.id, weekSegments(s, rotaDays), NO_OPEN_RUNS).map((seg) => {
+              if (seg.kind === "codeRun") {
+                return { span: seg.span, bg: seg.code.color, fg: textOn(seg.code.color),
+                         text: seg.code.code, sub: `(${niceDate(seg.start)} – ${niceDate(seg.end)})` };
+              }
               if (seg.kind === "notEmployed") {
                 return { span: seg.span, muted: true, bg: "#F2F4F5", fg: "#9AA5AB",
                          text: seg.span >= 2 ? (seg.before ? "Not yet joined" : "Left") : "—" };
               }
               if (seg.kind === "leave") {
-                const st = styleFor(seg.period);
+                const st = styleFor(seg.period, viewData.leaveColors);
                 return { span: seg.span, bg: st.bg, fg: st.fg,
                          text: seg.span >= 3 ? st.label : st.abbrev,
                          sub: seg.span >= 3 ? `(${niceDate(seg.period.start)} – ${niceDate(seg.period.end)})` : "" };
@@ -2074,7 +2117,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       }
     };
     return (
-      <div style={{ fontFamily: "Inter, system-ui, sans-serif", background: "#fff", minHeight: "100vh", color: T.ink, padding: 16 }}>
+      <div className="dr-printview" style={{ fontFamily: "Inter, system-ui, sans-serif", background: "#fff", minHeight: "100vh", color: T.ink, padding: 16 }}>
         <style>{globalCss}</style>
         <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
           <Btn small onClick={() => window.print()}><Printer size={14} /> Print / Save as PDF</Btn>
@@ -2122,6 +2165,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         {printView.kind === "records" && <RecordsPrint data={viewData} from={range.from} to={range.to} />}
         {printView.kind === "stats" && <StatsPrint data={viewData} from={statRange.from} to={statRange.to} />}
         {printView.kind === "insights" && <InsightsPrint data={viewData} cfg={printView.cfg} />}
+        {printView.kind === "leave" && <LeavePrint data={viewData} cfg={printView.cfg} />}
         </div>
       </div>
     );
@@ -2134,6 +2178,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     { id: "staff", label: "Staff", icon: Users },
     { id: "requests", label: "Duty Requests", icon: MessageCircle },
     { id: "smart", label: "Smart Roster", icon: Wand2 },
+    { id: "leave", label: "Leave", icon: Plane },
     { id: "codes", label: "Duty Codes", icon: Palette },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "insights", label: "Insights", icon: Search },
@@ -2410,6 +2455,11 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         {tab === "codes" && <DutyCodesTab data={data} update={update} />}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true}
           orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
+        {tab === "leave" && (
+          <LeaveTab data={data} update={update} staffEditable={staffEditable}
+            canEdit={!(editBlocked || currentDeptLocked || viewOnlyRole)}
+            onExport={(cfg) => setPrintView({ kind: "leave", cfg })} />
+        )}
         {tab === "help" && <HelpTab data={data} />}
       </main>
       </div>
@@ -2441,10 +2491,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
    brand-new code without leaving the rota. Chips are finger-sized.       */
 const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", "#4DB6AC", "#F06292", "#A1887F", "#9575CD", "#4DD0E1"];
 // The same five leave types as the Staff tab's leave form.
-const LEAVE_TYPE_OPTIONS = [
-  ["annual", "Annual leave"], ["maternity", "Maternity"], ["prematernity", "Pre-maternity"],
-  ["emergency", "Emergency leave"], ["other", "Other extended leave (custom name)"],
-];
+// LEAVE_TYPE_OPTIONS comes from leaveTypes.js.
 
 function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled, exchange, onExchange,
   posts = [], postsEnabled = false, postId = "", onPickPost, postName = "",
@@ -2595,7 +2642,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
-      <button className="dr-cell" onClick={open ? close : openPanel} style={{
+      <button className="dr-cell" onClick={open ? close : openPanel} title={note ? `Note: ${note}` : undefined} style={{
         fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
         padding: "7px 4px", borderRadius: 7, border: `1px solid ${hasCode ? "transparent" : T.line}`,
         background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none", position: "relative",
@@ -3007,6 +3054,8 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
      tab's arrows — swap with the person above or below in the list shown —
      so the order is one order everywhere, exports included. */
   const [arranging, setArranging] = useState(false);
+  // Leave-code bands the manager has tapped open to edit day by day.
+  const [openRuns, setOpenRuns] = useState(() => new Set());
   const moveRow = (id, dir) => {
     const ids = shownStaffIds.current;
     const pos = ids.indexOf(id);
@@ -3302,7 +3351,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
     if (!s) return "This staff member no longer exists.";
     const dates = datesBetween(lv.start, lv.end);
     const clashWith = (person) => dates.map((dt) => leaveOn(person, dt)).find(Boolean);
-    const describe = (p) => `${styleFor(p).label}: ${niceDate(p.start)} – ${niceDate(p.end)}`;
+    const describe = (p) => `${styleFor(p, data.leaveColors).label}: ${niceDate(p.start)} – ${niceDate(p.end)}`;
     const clash = clashWith(s);
     if (clash) return `Overlaps existing leave (${describe(clash)}). Change the dates, or edit that period in the Staff tab.`;
     const period = { type: lv.type, start: lv.start, end: lv.end, id: uid() };
@@ -3555,7 +3604,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
           </thead>
           <tbody>
             {shownStaff.map((s, i) => {
-              const segs = weekSegments(s, days);
+              const segs = showOriginal ? weekSegments(s, days) : joinLeaveRuns(data, s.id, weekSegments(s, days), openRuns);
               const t = weekTotalsFor(viewRota, s, days);
               return (
                 <tr key={s.id}>
@@ -3586,8 +3635,22 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                         </td>
                       );
                     }
+                    if (seg.kind === "codeRun") {
+                      return (
+                        <td key={`r${i2}`} colSpan={seg.span} style={{ ...td, padding: 3, textAlign: "center" }}>
+                          <button type="button" className="dr-cell"
+                            title={`${seg.code.label || seg.code.code}, ${niceDate(seg.start)} – ${niceDate(seg.end)}. Tap to edit these days one by one.`}
+                            onClick={() => setOpenRuns((prev) => new Set(prev).add(seg.key))}
+                            style={{ width: "100%", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 6px", borderRadius: 7, cursor: "pointer",
+                              border: "1px solid rgba(0,0,0,0.06)", background: seg.code.color, color: textOn(seg.code.color), letterSpacing: 0.5,
+                              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {seg.code.code} <span style={{ fontWeight: 500, letterSpacing: 0, fontSize: 11.5 }}>({niceDate(seg.start)} – {niceDate(seg.end)})</span>
+                          </button>
+                        </td>
+                      );
+                    }
                     if (seg.kind === "leave") {
-                      const st = styleFor(seg.period);
+                      const st = styleFor(seg.period, data.leaveColors);
                       return (
                         <td key={`l${i2}`} colSpan={seg.span} style={{ ...td, textAlign: "center", background: st.bg, color: st.fg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
                           {seg.span >= 3 ? st.label : st.abbrev}
@@ -3979,6 +4042,7 @@ function Stats({ data, range, setRange, onExport }) {
     { name: "Annual", value: staffOnLeaveType("annual"), color: "#0F8B7E" },
     { name: "Maternity", value: staffOnLeaveType("maternity"), color: "#9AA5AB" },
     { name: "Pre-maternity", value: staffOnLeaveType("prematernity"), color: "#9C3D6E" },
+    { name: "Paternity", value: staffOnLeaveType("paternity"), color: "#2D4E8A" },
     { name: "Emergency", value: staffOnLeaveType("emergency"), color: "#E4604E" },
     { name: "Other ext.", value: staffOnLeaveType("other"), color: "#6C7BD9" },
   ];
@@ -4385,7 +4449,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
         </thead>
         <tbody>
           {shownStaff.map((s, i) => {
-            const segs = weekSegments(s, days);
+            const segs = joinLeaveRuns(data, s.id, weekSegments(s, days), NO_OPEN_RUNS);
             const t = weekTotalsFor(data, s, days);
             return (
               <tr key={s.id}>
@@ -4402,8 +4466,19 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
                       </td>
                     );
                   }
+                  if (seg.kind === "codeRun") {
+                    // The same leave code on 4+ days in a row, as one band. Inline styles only.
+                    return (
+                      <td key={`r${i2}`} colSpan={seg.span} style={{ ...ptd, background: seg.code.color, color: textOn(seg.code.color), fontWeight: 700, letterSpacing: 1 }}>
+                        {seg.code.code}
+                        <span style={{ fontWeight: 500, letterSpacing: 0, marginLeft: 6, fontSize: 8.5 }}>
+                          ({niceDate(seg.start)} – {niceDate(seg.end)})
+                        </span>
+                      </td>
+                    );
+                  }
                   if (seg.kind === "leave") {
-                    const st = styleFor(seg.period);
+                    const st = styleFor(seg.period, data.leaveColors);
                     return (
                       <td key={`l${i2}`} colSpan={seg.span} style={{ ...ptd, background: st.bg, fontWeight: 700, letterSpacing: seg.span > 1 ? 1 : 0 }}>
                         {seg.span >= 3 ? st.label : st.abbrev}
@@ -4673,6 +4748,7 @@ function StatsPrint({ data, from, to }) {
     { name: "Annual", value: staffOnLeaveType("annual"), color: "#0F8B7E" },
     { name: "Maternity", value: staffOnLeaveType("maternity"), color: "#9AA5AB" },
     { name: "Pre-mat.", value: staffOnLeaveType("prematernity"), color: "#9C3D6E" },
+    { name: "Paternity", value: staffOnLeaveType("paternity"), color: "#2D4E8A" },
     { name: "Emergency", value: staffOnLeaveType("emergency"), color: "#E4604E" },
     { name: "Other ext.", value: staffOnLeaveType("other"), color: "#6C7BD9" },
   ];
@@ -5120,10 +5196,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
               <Field label="Type">
                 <select style={{ ...inputStyle, width: "auto" }} value={np.type} onChange={(e) => setNp({ ...np, type: e.target.value })}>
-                  <option value="annual">Annual leave</option>
-                  <option value="maternity">Maternity</option>
-                  <option value="prematernity">Pre-maternity</option>
-                  <option value="emergency">Emergency leave</option>
+                  {LEAVE_TYPE_OPTIONS.filter(([v]) => v !== "other").map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   <option value="other">Other extended leave (custom name)</option>
                 </select>
               </Field>
@@ -5140,7 +5213,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
               {(form.leavePeriods || []).length === 0 && <span style={{ fontSize: 12.5, color: T.inkSoft }}>No leave periods yet.</span>}
               {(form.leavePeriods || []).map((p) => {
-                const st = styleFor(p);
+                const st = styleFor(p, data.leaveColors);
                 const counted = spanDays(p.start, p.end);
                 return (
                   <span key={p.id} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: st.bg, color: st.fg, borderRadius: 8, padding: "5px 10px", fontSize: 12.5, fontWeight: 600 }}>
@@ -5220,7 +5293,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                   <td style={{ ...td, whiteSpace: "normal", maxWidth: 280 }}>
                     {(s.leavePeriods || []).length === 0 ? <span style={{ color: T.inkSoft }}>—</span> :
                       (s.leavePeriods || []).map((p) => {
-                        const st = styleFor(p);
+                        const st = styleFor(p, data.leaveColors);
                         return (
                           <span key={p.id} style={{ display: "inline-block", background: st.bg, color: st.fg, borderRadius: 6, padding: "2px 7px", fontSize: 11.5, fontWeight: 600, margin: "2px 4px 2px 0" }}>
                             {p.type === "other" ? st.label : st.abbrev}: {shortDate(p.start)}–{shortDate(p.end)}

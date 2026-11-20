@@ -115,6 +115,11 @@ table, td, th {
   }
 }
 
+/* Exports: the pale page colour must not fill the rest of the last sheet. */
+@media print {
+  html, body, #root { background: #FFFFFF !important; min-height: 0 !important; }
+}
+
 /* People who ask for less transparency get solid panels, no blur. */
 @media (prefers-reduced-transparency: reduce) {
   * {
