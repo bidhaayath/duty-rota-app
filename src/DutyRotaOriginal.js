@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { toPng } from "html-to-image";
 import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
@@ -1709,6 +1710,77 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       min-width: 168px; box-shadow: 1px 0 0 ${T.line};
     }
     .rota-foot-label { position: sticky; left: 0; z-index: 2; }
+    /* The rota box scrolls both ways inside itself, sized to the screen, so
+       the date row (top), # and name (left), daily totals (bottom) and, on a
+       laptop, the per-person totals (right) all stay put. */
+    .dr-rota-scroll { max-height: calc(100vh - 170px); max-height: calc(100dvh - 170px); }
+    .dr-rota-grid thead th { position: sticky; top: 0; z-index: 5; }
+    .dr-rota-grid thead th.rota-corner { z-index: 7; }
+    .dr-rota-grid tbody td.rota-num, .dr-rota-grid tbody td.rota-name { z-index: 4; }
+    .rota-goldchip { display: none; }
+    .rota-arrow {
+      width: 22px; height: 22px; padding: 0; border-radius: 6px; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid rgba(14,58,71,0.2); background: #fff; color: #0D4F61;
+    }
+    .rota-arrow:disabled { opacity: 0.3; cursor: default; }
+    .rota-namebtn:hover, .rota-namebtn:focus-visible { color: ${T.lagoon} !important; text-decoration: underline; text-underline-offset: 3px; }
+    @media screen and (min-width: 900px) {
+      /* A week plus its totals fits a 1366px laptop with the menu open, and
+         slim rows show a dozen or more staff without scrolling. */
+      .dr-rota-grid .rota-name { min-width: 140px; }
+      .dr-rota-grid .dr-cell { min-width: 62px !important; padding-top: 3px !important; padding-bottom: 3px !important; font-size: 12px !important; }
+      .dr-rota-grid tbody td { padding-top: 1px !important; padding-bottom: 1px !important; font-size: 12.5px; }
+      .rota-goldnote:not(.rota-goldnote-open) { display: none !important; }
+      .rota-goldchip { display: inline-flex; }
+      /* Laptop: the gold chip and the buttons stay together on one line at
+         the right; if the row is too full they move down as one group. */
+      .rota-toolbar-right { flex-wrap: nowrap !important; margin-left: auto; justify-content: flex-end; }
+      .rota-toolbar-left { gap: 8px !important; flex-wrap: nowrap !important; }
+      .rota-rangenav { gap: 6px !important; }
+      .rota-rangenav input[type="date"] { padding: 5px 6px !important; font-size: 12.5px !important; }
+      .rota-toolbar-right > * { flex: none; white-space: nowrap; }
+      /* Gold already marks a non-official day, so the word goes on a laptop
+         and the date row stays two lines. */
+      .dr-rota-grid .rota-nonoff-word { display: none; }
+      .dr-rota-grid thead th { padding-top: 4px !important; padding-bottom: 4px !important; line-height: 1.25; }
+      .dr-rota-grid thead th { padding-top: 6px !important; padding-bottom: 6px !important; }
+      .rota-tot { position: sticky; z-index: 4; right: var(--tot-right, 0px); }
+      .dr-rota-grid thead th.rota-tot { z-index: 6; }
+      .rota-tot-first { box-shadow: -1px 0 0 ${T.line}; }
+    }
+    @media screen and (max-width: 899px) {
+      .dr-rota-scroll { max-height: calc(100vh - 150px); max-height: calc(100dvh - 150px); }
+      /* Phone toolbar: switch + Today, then a full-width date bar, then the
+         buttons and the gold chip. The full gold sentence opens from the chip. */
+      .rota-toolbar { gap: 8px !important; }
+      .rota-toolbar-left { width: 100%; gap: 8px !important; }
+      .rota-viewswitch { order: 1; background: rgba(13,79,97,0.09); border: none !important; border-radius: 999px !important; padding: 2px; }
+      .rota-viewswitch .dr-viewtoggle { border-radius: 999px !important; }
+      .rota-viewswitch .dr-viewtoggle:not(.is-on) { background: transparent !important; color: #0D4F61 !important; }
+      .rota-todaybtn { order: 2; margin-left: auto; }
+      /* Quiet on a phone: tinted circles and see-through fields, no white
+         boxes. Add staff stays the one solid button. */
+      .rota-rangenav { order: 3; flex: 1 1 100%; justify-content: space-between; gap: 6px !important; }
+      .rota-rangenav > button, .rota-todaybtn > button, .rota-soft > button {
+        border: none !important; background: rgba(13,79,97,0.09) !important; color: #0D4F61 !important; box-shadow: none !important;
+      }
+      .rota-soft.rota-soft-on > button { background: #0D4F61 !important; color: #fff !important; }
+      .rota-rangenav > button { width: 34px; height: 34px; padding: 0 !important; border-radius: 50% !important; display: inline-flex; align-items: center; justify-content: center; }
+      .rota-todaybtn > button { border-radius: 999px !important; }
+      .rota-soft > button { width: 34px; height: 34px; padding: 0 !important; border-radius: 50% !important; justify-content: center; }
+      .rota-btnlabel { display: none; }
+      .rota-rangenav .dr-range { font-size: 14px !important; text-align: center; flex: 1; }
+      .rota-rangenav input[type="date"] {
+        font-size: 12px !important; padding: 5px 8px !important; min-width: 0;
+        background: rgba(255,255,255,0.45) !important; border: 1px solid rgba(14,58,71,0.12) !important; border-radius: 999px !important;
+      }
+      .rota-toolbar-right { width: 100%; gap: 6px !important; }
+      .rota-goldchip { display: inline-flex !important; width: 34px; height: 34px; padding: 0 !important; box-sizing: border-box; }
+      .rota-chiplabel { display: none; }
+      .rota-toolbar-right { justify-content: flex-end; flex-wrap: nowrap !important; }
+      .rota-goldnote:not(.rota-goldnote-open) { display: none !important; }
+    }
 
     /* ── The header on a phone ──
        On a laptop there is room for the tagline, a full-size logo and a
@@ -2122,13 +2194,14 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       <div className="edr-pagehead no-print">
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h1 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 800, fontSize: 28, letterSpacing: "-0.02em", margin: 0, color: T.ink }}>{data.title}</h1>
+            <h1 style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 800, fontSize: 23, letterSpacing: "-0.02em", margin: 0, color: T.ink }}>{data.title}</h1>
             {saveStatus === "saving" && <span style={{ fontSize: 12.5, color: T.inkSoft }}>Saving…</span>}
             {saveStatus === "saved" && <span style={{ fontSize: 12.5, color: "#2E7D4F", fontWeight: 600 }}>✓ Saved</span>}
             <UndoRedoButtons history={history} light />
           </div>
-          <span style={{ fontSize: 14, color: T.inkSoft }}>Duty rota &amp; non-official day tracker</span>
         </div>
+        {/* The rota puts See original rota and the gold chip here on a laptop. */}
+        <div id="edr-pagehead-slot" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }} />
         {viewData.logo && <img src={viewData.logo} alt="" style={{ height: 56, maxWidth: 220, objectFit: "contain", flexShrink: 0 }} />}
       </div>
       <main className="dr-main" style={{ padding: "20px 22px 40px", maxWidth: 1250, margin: "0 auto" }}>
@@ -2256,7 +2329,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         )}
 
         <WelcomeGuide data={data} update={update} setTab={setTab} />
-        {tab === "rota" && <WeekRota data={data} update={update} staffEditable={staffEditable} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} />}
+        {tab === "rota" && <WeekRota data={data} update={update} staffEditable={staffEditable} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} canAddStaff={!(editBlocked || currentDeptLocked || viewOnlyRole)} staffLimit={staffLimit} onOpenStaffTab={() => setTab("staff")} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
@@ -2895,14 +2968,83 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 }
 
 /* ─────────────────── Weekly rota grid ─────────────────── */
-function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport }) {
+function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport, canAddStaff = false, staffLimit = null, onOpenStaffTab = null }) {
   const codeById = codeByIdOf(data);
   // "See original rota" shows what each changed cell was BEFORE it was
   // exchanged. The whole rota is view-only while this is on, so nobody
   // edits the past by accident.
   const [showOriginal, setShowOriginal] = useState(false);
-  // The duty-code legend is collapsed on a phone; this opens it.
-  const [legendOpen, setLegendOpen] = useState(false);
+  /* Names only on the rota. Hovering a name (laptop) or tapping it (phone)
+     shows that person's details in a small card. Screen only: the export
+     has its own column picker for designation, contact and the rest. */
+  const [nameCard, setNameCard] = useState(null); // { id, x, y }
+  const nameCardTimer = useRef(null);
+  const showNameCard = (id, el) => {
+    clearTimeout(nameCardTimer.current);
+    const r = el.getBoundingClientRect();
+    setNameCard({ id, x: r.right + 8, y: r.top });
+  };
+  const hideNameCard = () => {
+    clearTimeout(nameCardTimer.current);
+    nameCardTimer.current = setTimeout(() => setNameCard(null), 120);
+  };
+  useEffect(() => {
+    if (!nameCard) return undefined;
+    const close = (e) => { if (e.type === "scroll" || e.key === "Escape" || e.type === "pointerdown") setNameCard(null); };
+    window.addEventListener("keydown", close);
+    window.addEventListener("scroll", close, true);
+    return () => { window.removeEventListener("keydown", close); window.removeEventListener("scroll", close, true); };
+  }, [nameCard]);
+  useEffect(() => () => clearTimeout(nameCardTimer.current), []);
+
+  /* Add staff without leaving the rota: name and designation here, the rest
+     in the Staff tab. Same staff list and the same plan limit as the Staff
+     tab's own Add staff. */
+  const [quickAdd, setQuickAdd] = useState(null); // { name, designation } while open
+  // The gold chip opens the full non-official explanation (phones can't hover).
+  const [goldOpen, setGoldOpen] = useState(false);
+  /* Arrange rows: up/down arrows beside each name. Same rule as the Staff
+     tab's arrows — swap with the person above or below in the list shown —
+     so the order is one order everywhere, exports included. */
+  const [arranging, setArranging] = useState(false);
+  const moveRow = (id, dir) => {
+    const ids = shownStaffIds.current;
+    const pos = ids.indexOf(id);
+    const targetId = ids[pos + dir];
+    if (pos < 0 || targetId === undefined) return;
+    update((d) => {
+      const a = d.staff.findIndex((x) => x.id === id);
+      const b = d.staff.findIndex((x) => x.id === targetId);
+      if (a < 0 || b < 0) return d;
+      [d.staff[a], d.staff[b]] = [d.staff[b], d.staff[a]];
+      return d;
+    });
+  };
+  const shownStaffIds = useRef([]);
+  /* On a laptop, See original rota and the gold chip sit on the page
+     heading's top line (a slot beside the department name), so the toolbar
+     below fits on one line. Phones keep them in the toolbar. */
+  const [headSlot, setHeadSlot] = useState(null);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 900px)");
+    const pick = () => setHeadSlot(mq.matches ? document.getElementById("edr-pagehead-slot") : null);
+    pick();
+    mq.addEventListener("change", pick);
+    return () => mq.removeEventListener("change", pick);
+  }, []);
+  const activeCount = data.staff.filter((x) => !isFormer(x)).length;
+  const atStaffLimit = staffLimit != null && activeCount >= staffLimit;
+  const saveQuickAdd = (andMore) => {
+    const name = (quickAdd?.name || "").trim();
+    if (!name) return;
+    if (atStaffLimit) { alert(`Your plan includes ${staffLimit} staff, and that limit is reached.`); return; }
+    update((d) => {
+      d.staff.push({ name, designation: (quickAdd.designation || "").trim(), contact: "", recc: "", licence: "", email: "",
+        employmentRole: "employee", startDate: "", endDate: "", leavePeriods: [], id: uid() });
+      return d;
+    });
+    setQuickAdd(andMore ? { name: "", designation: "" } : null);
+  };
   const anyExchanges = days.some((date) =>
     data.staff.some((s) => exchangeOf(data, date, s.id)));
 
@@ -3209,18 +3351,75 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
 
   const range = `${niceDate(days[0])} – ${niceDate(days[days.length - 1])}`;
   const shownStaff = staffForDays(data, days);
+  shownStaffIds.current = shownStaff.map((x) => x.id);
+  /* The per-person totals, slim enough that a week and its totals fit a
+     laptop. On a laptop they freeze to the right (see .rota-tot); on a
+     phone they scroll with the days. [header, key, background, tooltip] */
+  const totCols = [
+    ["M", "morning", "#FEF7E8", "Morning duties"], ["A", "afternoon", "#F0F7EA", "Afternoon duties"],
+    ...(data.eveningEnabled ? [["E", "evening", "#FBEEE9", "Evening duties"]] : []),
+    // OD and RD are left off the screen to save room; they are still
+    // counted, and still on Staff Records and every export.
+    ["N", "night", "#EBF3FB", "Night duties"], ["OFF", "off", "#FFFFFF", "Off days"],
+    ["NOD", "nonOfficialDuty", "#FBF1DC", "Non-official day duties (count for payment)"],
+  ];
+  const TOT_W = 38, NOD_W = 48;
+  const totW = (h) => { const w = h === "NOD" ? NOD_W : TOT_W; return { width: w, minWidth: w, maxWidth: w }; };
+  // Distance from the right edge for column k, so each frozen total sits
+  // beside the next.
+  const totRight = (k) => totCols.slice(k + 1).reduce((a, [h]) => a + (h === "NOD" ? NOD_W : TOT_W), 0);
+  const FOOT_H = 22;
+  /* The rota box is as tall as the space from its top edge (with the page
+     scrolled to the top) to the bottom of the window, so every laptop shows
+     as many staff as its screen can hold, and the dates, names and totals
+     are all on screen at once. Phones keep the CSS height. */
+  const rotaBoxRef = useRef(null);
+  const [rotaBoxMax, setRotaBoxMax] = useState(null);
+  useEffect(() => {
+    const fit = () => {
+      const el = rotaBoxRef.current;
+      if (!el || window.innerWidth < 900) { setRotaBoxMax(null); return; }
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      setRotaBoxMax(Math.max(320, Math.round(window.innerHeight - top - 14)));
+    };
+    fit();
+    const t = setTimeout(fit, 300); // after banners and fonts settle
+    window.addEventListener("resize", fit);
+    return () => { clearTimeout(t); window.removeEventListener("resize", fit); };
+  }, [quickAdd, showOriginal, rotaView]);
+  const cardStaff = nameCard ? data.staff.find((x) => x.id === nameCard.id) : null;
+  const topPieces = (
+    <>
+      {(anyExchanges || showOriginal) && (
+        <span className={"rota-soft" + (showOriginal ? " rota-soft-on" : "")}>
+          <Btn kind="ghost" small onClick={() => setShowOriginal((v) => !v)} aria-label={showOriginal ? "Back to current rota" : "See original rota"}
+            style={showOriginal ? { background: "#E7F0FA", color: "#2F6DB5", border: "1px solid #B9D3EE" } : { background: "#FFFFFF", border: "1px solid rgba(14,58,71,0.25)", color: "#0D4F61" }}>
+            {showOriginal ? <RotateCcw size={14} /> : <Eye size={14} />}
+            <span className="rota-btnlabel">{showOriginal ? "Back to current" : "See original rota"}</span>
+          </Btn>
+        </span>
+      )}
+      <span className="rota-goldchip" role="button" tabIndex={0} aria-expanded={goldOpen} aria-label="Gold days are non-official"
+        onClick={() => setGoldOpen((v) => !v)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setGoldOpen((v) => !v); } }}
+        title={`Gold headers are non-official days${data.fridayRule ? " (all Fridays, plus any date you tap to toggle)" : " (tap a day header to toggle)"}. Duty on those days counts for payment.`}
+        style={{ alignItems: "center", justifyContent: "center", gap: 6, padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600,
+          background: "#FFF0CF", border: "1px solid #E6C27A", color: "#7A4F00", cursor: "pointer" }}>
+        <Coins size={13} /> <span className="rota-chiplabel">Gold = non-official</span>
+      </span>
+    </>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ display: "inline-flex", border: `1px solid ${T.line}`, borderRadius: 8, overflow: "hidden" }}>
+      <div className="rota-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div className="rota-toolbar-left" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div className="rota-viewswitch" style={{ display: "inline-flex", border: `1px solid ${T.line}`, borderRadius: 8, overflow: "hidden" }}>
             {["weekly", "monthly"].map((v) => (
               <button key={v} onClick={() => {
                 if (v === rotaView) return;
                 if (v === "weekly") setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0));
                 setRotaView(v);
-              }} className="dr-viewtoggle" style={{
+              }} className={"dr-viewtoggle" + (rotaView === v ? " is-on" : "")} style={{
                 fontFamily: "inherit", padding: "6px 13px", fontSize: 12.5, fontWeight: 700,
                 border: "none", cursor: "pointer",
                 background: rotaView === v ? T.lagoon : "#fff",
@@ -3230,55 +3429,78 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
           </div>
           {rotaView === "weekly" ? (
             <>
-              <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={15} /></Btn>
-              <div className="dr-range" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
-              <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={15} /></Btn>
-              <Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0))}>Today</Btn>
+              <span className="rota-rangenav" style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="Previous week"><ChevronLeft size={15} /></Btn>
+                <div className="dr-range" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 700, fontSize: 15 }}>{range}</div>
+                <Btn kind="ghost" small onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="Next week"><ChevronRight size={15} /></Btn>
+              </span>
+              <span className="rota-todaybtn"><Btn kind="ghost" small onClick={() => setWeekStart(startOfWeek(dstr(new Date()), data.weekStartsOn ?? 0))}>Today</Btn></span>
             </>
           ) : (
             <>
-              <Btn kind="ghost" small onClick={() => shiftRange(-1)}><ChevronLeft size={15} /></Btn>
-              <input type="date" style={dateInput} value={monthRange.start}
-                onChange={(e) => setRange(e.target.value, monthRange.end)} />
-              <span style={{ color: T.inkSoft }}>–</span>
-              <input type="date" style={dateInput} value={monthRange.end}
-                onChange={(e) => setRange(monthRange.start, e.target.value)} />
-              <Btn kind="ghost" small onClick={() => shiftRange(1)}><ChevronRight size={15} /></Btn>
-              <Btn kind="ghost" small onClick={thisMonth}>This month</Btn>
+              <span className="rota-rangenav" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <Btn kind="ghost" small onClick={() => shiftRange(-1)} aria-label="Earlier"><ChevronLeft size={15} /></Btn>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                  <input type="date" style={dateInput} value={monthRange.start}
+                    onChange={(e) => setRange(e.target.value, monthRange.end)} />
+                  <span style={{ color: T.inkSoft }}>–</span>
+                  <input type="date" style={dateInput} value={monthRange.end}
+                    onChange={(e) => setRange(monthRange.start, e.target.value)} />
+                </span>
+                <Btn kind="ghost" small onClick={() => shiftRange(1)} aria-label="Later"><ChevronRight size={15} /></Btn>
+              </span>
+              <span className="rota-todaybtn"><Btn kind="ghost" small onClick={thisMonth}>This month</Btn></span>
             </>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div className="rota-toolbar-right" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {/* Kept visible while the toggle is ON even if this range has no
               exchanges — otherwise navigating to a clean week would hide the
               only way back out of view-only mode. */}
-          {(anyExchanges || showOriginal) && (
-            <Btn kind="ghost" small onClick={() => setShowOriginal((v) => !v)}
-              style={showOriginal ? { background: "#E7F0FA", color: "#2F6DB5", border: "1px solid #B9D3EE" } : undefined}>
-              {showOriginal ? <><RotateCcw size={14} /> Back to current</> : <><Eye size={14} /> See original rota</>}
-            </Btn>
+          {!headSlot && topPieces}
+          {canAddStaff && shownStaff.length > 1 && (
+            <span className={"rota-soft" + (arranging ? " rota-soft-on" : "")}><Btn kind="ghost" small aria-label={arranging ? "Done arranging" : "Arrange rows"} onClick={() => { setArranging((v) => !v); setNameCard(null); }}
+              style={arranging
+                ? { background: "#0D4F61", color: "#fff", border: "1px solid #0D4F61" }
+                : { background: "#FFFFFF", border: "1px solid rgba(14,58,71,0.25)", color: "#0D4F61" }}>
+              <ArrowDownAZ size={14} /> <span className="rota-btnlabel">{arranging ? "Done" : "Arrange"}</span>
+            </Btn></span>
           )}
-          <Btn kind="ghost" small onClick={onExport}><Printer size={14} /> Export PDF</Btn>
+          {canAddStaff && (
+            <Btn small onClick={() => setQuickAdd(quickAdd ? null : { name: "", designation: "" })}
+              style={{ background: "linear-gradient(90deg, #0D4F61, #1F7F9F)", boxShadow: "0 4px 12px rgba(13,79,97,0.22)" }}><Plus size={14} /> Add staff</Btn>
+          )}
+          <span className="rota-soft"><Btn kind="ghost" small onClick={onExport} aria-label="Export PDF"
+            style={{ background: "#FFFFFF", border: "1px solid rgba(14,58,71,0.25)", color: "#0D4F61", boxShadow: "0 2px 8px rgba(14,58,71,0.08)" }}><Printer size={14} /> <span className="rota-btnlabel">Export PDF</span></Btn></span>
         </div>
       </div>
 
-      <div>
-        <div className={`dr-legend${legendOpen ? " dr-open" : ""}`}
-          style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
-          {data.codes.map((c) => (
-            <span key={c.id} style={{ display: "flex", alignItems: "center", gap: 4, color: T.inkSoft }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: c.color, border: `1px solid ${T.line}` }} />
-              {c.code}
-            </span>
-          ))}
-        </div>
-        {/* Only rendered at all on a narrow screen — see .dr-legend-toggle. */}
-        <button className="dr-legend-toggle" onClick={() => setLegendOpen((v) => !v)}
-          style={{ color: T.lagoon, marginTop: 4 }}>
-          {legendOpen ? "Hide codes" : `All ${data.codes.length} codes`}
-          {legendOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-        </button>
-      </div>
+      {quickAdd && (
+        <Card className="dr-anim-in" style={{ padding: 14, display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+          {atStaffLimit ? (
+            <div style={{ fontSize: 13, color: "#7A6320", flex: 1 }}>
+              Your plan includes {staffLimit} staff, and that limit is reached. Upgrade on the plan page to add more.
+            </div>
+          ) : (
+            <>
+              <Field label="Name"><input autoFocus style={{ ...inputStyle, minWidth: 200 }} value={quickAdd.name} placeholder="e.g. Aminath Ali"
+                onChange={(e) => setQuickAdd({ ...quickAdd, name: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") saveQuickAdd(true); if (e.key === "Escape") setQuickAdd(null); }} /></Field>
+              <Field label="Designation (optional)"><input style={{ ...inputStyle, minWidth: 160 }} value={quickAdd.designation} placeholder="e.g. Staff nurse"
+                onChange={(e) => setQuickAdd({ ...quickAdd, designation: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") saveQuickAdd(true); if (e.key === "Escape") setQuickAdd(null); }} /></Field>
+              <Btn small onClick={() => saveQuickAdd(false)} disabled={!quickAdd.name.trim()}><Plus size={14} /> Add</Btn>
+              <Btn kind="ghost" small onClick={() => saveQuickAdd(true)} disabled={!quickAdd.name.trim()}>Add and next</Btn>
+            </>
+          )}
+          <Btn kind="ghost" small onClick={() => setQuickAdd(null)}>Close</Btn>
+          {onOpenStaffTab && (
+            <button type="button" onClick={onOpenStaffTab} style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, color: T.lagoon, background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}>
+              More details in Staff →
+            </button>
+          )}
+        </Card>
+      )}
 
       {showOriginal && (
         <div style={{
@@ -3298,19 +3520,19 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
       {/* The text is wrapped in one span so it stays a single sentence. Without
           it, each text node becomes its own flex column and gets squeezed into
           a narrow, unreadable stack on a phone. */}
-      <div style={{ fontSize: 12.5, color: T.inkSoft, display: "flex", alignItems: "flex-start", gap: 6, lineHeight: 1.5 }}>
+      <div className={"rota-goldnote" + (goldOpen ? " rota-goldnote-open" : "")} style={{ fontSize: 12.5, color: T.inkSoft, display: "flex", alignItems: "flex-start", gap: 6, lineHeight: 1.5 }}>
         <Coins size={13} color={T.sand} style={{ flexShrink: 0, marginTop: 2 }} />
         <span style={{ minWidth: 0 }}>
           Gold headers are <strong>non-official days</strong>{data.fridayRule ? " (all Fridays, plus any date you tap to toggle)" : " (tap a day header to toggle)"}. Duty on those days counts for payment.
         </span>
       </div>
 
-      <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table className="dr-rota-grid" style={{ borderCollapse: "collapse", width: "100%", minWidth: 1120 }}>
+      <Card ref={rotaBoxRef} className="dr-rota-scroll" style={{ padding: 0, overflow: "auto", ...(rotaBoxMax ? { maxHeight: rotaBoxMax } : null) }}>
+        <table className="dr-rota-grid" style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%" }}>
           <thead>
             <tr>
-              <th className="rota-num" style={th}>#</th>
-              <th className="rota-name" style={th}>NAME</th>
+              <th className="rota-num rota-corner" style={th}>#</th>
+              <th className="rota-name rota-corner" style={th}>NAME</th>
               {days.map((date) => {
                 const d = parseD(date);
                 const nonOff = isNonOff(data, date);
@@ -3321,14 +3543,14 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     onClick={() => toggleNonOfficial(date)}>
                     <div style={{ fontWeight: 700, color: nonOff ? "#A5731B" : T.inkSoft }}>{DAY_NAMES[d.getDay()]}</div>
                     <div style={{ fontSize: 10.5, fontWeight: 500 }}>{d.getDate()} {d.toLocaleString("en", { month: "short" })}</div>
-                    {nonOff && <div style={{ fontSize: 9.5, fontWeight: 800, color: "#A5731B" }}>NON-OFFICIAL</div>}
+                    {nonOff && <div className="rota-nonoff-word" style={{ fontSize: 9.5, fontWeight: 800, color: "#A5731B" }}>NON-OFFICIAL</div>}
                   </th>
                 );
               })}
-              {["M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "OFF"].map((h) => (
-                <th key={h} style={{ ...th, textAlign: "center", background: "#F4F8F7" }}>{h}</th>
+              {totCols.map(([h, , bg, tip], k) => (
+                <th key={h} title={tip} className={"rota-tot" + (k === 0 ? " rota-tot-first" : "")}
+                  style={{ ...th, ...totW(h), textAlign: "center", padding: "9px 2px", background: bg, "--tot-right": totRight(k) + "px", ...(h === "NOD" ? { color: "#A5731B" } : null) }}>{h}</th>
               ))}
-              <th style={{ ...th, textAlign: "center", background: "#FBF1DC", color: "#A5731B" }}>NON-OFF DUTY</th>
             </tr>
           </thead>
           <tbody>
@@ -3339,10 +3561,22 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                 <tr key={s.id}>
                   <td className="rota-num" style={{ ...td, fontWeight: 700, fontSize: 12, color: T.inkSoft }}>{i + 1}</td>
                   <td className="rota-name" style={{ ...td, fontWeight: 600 }}>
-                    {s.name}
-                    {s.designation && (
-                      <span className="rota-desig" style={{ color: T.inkSoft, fontWeight: 500 }}> — {s.designation}</span>
+                    {arranging && (
+                      <span style={{ display: "inline-flex", gap: 2, marginRight: 6, verticalAlign: "middle" }}>
+                        <button type="button" className="rota-arrow" aria-label={`Move ${s.name} up`} disabled={i === 0}
+                          onClick={() => moveRow(s.id, -1)}><ChevronUp size={13} /></button>
+                        <button type="button" className="rota-arrow" aria-label={`Move ${s.name} down`} disabled={i === shownStaff.length - 1}
+                          onClick={() => moveRow(s.id, 1)}><ChevronDown size={13} /></button>
+                      </span>
                     )}
+                    <button type="button" className="rota-namebtn" aria-haspopup="dialog"
+                      aria-expanded={nameCard?.id === s.id} title={s.designation ? `${s.name} — ${s.designation}` : s.name}
+                      onMouseEnter={(e) => showNameCard(s.id, e.currentTarget)} onMouseLeave={hideNameCard}
+                      onFocus={(e) => showNameCard(s.id, e.currentTarget)} onBlur={hideNameCard}
+                      onClick={(e) => { if (nameCard?.id === s.id) setNameCard(null); else showNameCard(s.id, e.currentTarget); }}
+                      style={{ font: "inherit", fontWeight: 600, color: "inherit", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+                      {s.name}
+                    </button>
                   </td>
                   {segs.map((seg, i2) => {
                     if (seg.kind === "notEmployed") {
@@ -3470,14 +3704,10 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                       </td>
                     );
                   })}
-                  <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#FEF7E8" }}>{t.morning}</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#F0F7EA" }}>{t.afternoon}</td>
-                  {data.eveningEnabled && <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#FBEEE9" }}>{t.evening}</td>}
-                  <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#EBF3FB" }}>{t.night}</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#F0EBF8" }}>{t.other}</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 700, background: "#F7EFE7" }}>{t.release}</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{t.off}</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 800, background: "#FBF1DC", color: "#A5731B" }}>{t.nonOfficialDuty}</td>
+                  {totCols.map(([h, key, bg], k) => (
+                    <td key={h} className={"rota-tot" + (k === 0 ? " rota-tot-first" : "")}
+                      style={{ ...td, ...totW(h), textAlign: "center", padding: "8px 2px", fontWeight: h === "NOD" ? 800 : 700, background: bg, "--tot-right": totRight(k) + "px", ...(h === "NOD" ? { color: "#A5731B" } : null) }}>{t[key]}</td>
+                  ))}
                 </tr>
               );
             })}
@@ -3521,26 +3751,60 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                   </td>
                 );
               })}
-              <td colSpan={data.eveningEnabled ? 8 : 7} style={{ ...td, background: "#fff" }} />
+              <td colSpan={totCols.length} className="rota-tot rota-tot-first" style={{ ...td, background: "#fff", "--tot-right": "0px" }} />
             </tr>
           </tbody>
           <tfoot>
             {[["MORNING", "morning", "#F4B860"], ["AFTERNOON", "afternoon", "#8FBF6B"],
               ...(data.eveningEnabled ? [["EVENING", "evening", "#E58E77"]] : []), ["NIGHT", "night", "#6FA8DC"],
-              ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color]) => (
-              <tr key={cat}>
-                <td colSpan={2} className="rota-foot-label" style={{ ...td, background: color, color: textOn(color), fontWeight: 800, fontSize: 12 }}>{label}</td>
-                {days.map((date) => (
-                  <td key={date} style={{ ...td, textAlign: "center", fontWeight: 700, background: color + "33" }}>{dayCountFor(viewRota, date, cat)}</td>
-                ))}
-                <td colSpan={data.eveningEnabled ? 8 : 7} style={{ ...td, background: "#fff" }} />
-              </tr>
-            ))}
+              ...(data.codes.some((c) => c.counts === "other") ? [["OTHER DUTY", "other", "#8E7CC3"]] : [])].map(([label, cat, color], fi, all) => {
+              /* Frozen to the bottom of the rota box, stacked: the last row
+                 sits at 0, each one above it one row higher. Opaque
+                 backgrounds, so the rows scrolling underneath never show
+                 through. */
+              const foot = { position: "sticky", bottom: (all.length - 1 - fi) * FOOT_H, height: FOOT_H, boxSizing: "border-box", padding: "0 6px" };
+              return (
+                <tr key={cat}>
+                  <td colSpan={2} className="rota-foot-label" style={{ ...td, ...foot, zIndex: 4, background: color, color: textOn(color), fontWeight: 800, fontSize: 12 }}>{label}</td>
+                  {days.map((date) => (
+                    <td key={date} style={{ ...td, ...foot, zIndex: 3, textAlign: "center", fontWeight: 700, background: `linear-gradient(${color}33, ${color}33), #fff` }}>{dayCountFor(viewRota, date, cat)}</td>
+                  ))}
+                  <td colSpan={totCols.length} className="rota-tot rota-tot-first" style={{ ...td, ...foot, zIndex: 4, background: "#fff", "--tot-right": "0px" }} />
+                </tr>
+              );
+            })}
           </tfoot>
         </table>
       </Card>
+      {headSlot && createPortal(topPieces, headSlot)}
+      {cardStaff && (
+        <div role="dialog" aria-label={`${cardStaff.name} details`}
+          onMouseEnter={() => clearTimeout(nameCardTimer.current)} onMouseLeave={hideNameCard}
+          style={{
+            position: "fixed", zIndex: 80, left: Math.min(nameCard.x, window.innerWidth - 270), top: Math.max(8, Math.min(nameCard.y, window.innerHeight - 230)),
+            width: 250, boxSizing: "border-box", padding: "12px 14px", borderRadius: 16, color: T.ink,
+            background: "rgba(255,255,255,0.86)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)",
+            border: "1px solid rgba(255,255,255,0.9)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 12px 30px rgba(14,58,71,0.2)",
+          }}>
+          <div style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 800, fontSize: 15, marginBottom: 2 }}>{cardStaff.name}</div>
+          {cardStaff.designation && <div style={{ fontSize: 12.5, color: T.inkSoft, marginBottom: 8 }}>{cardStaff.designation}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: 12.5 }}>
+            {[["Employee ID", cardStaff.recc], ["Contact", cardStaff.contact], ["Email", cardStaff.email], ["Licence", cardStaff.licence],
+              ["Joined", cardStaff.startDate ? niceDate(cardStaff.startDate) : ""], ["Last day", cardStaff.endDate ? niceDate(cardStaff.endDate) : ""],
+            ].filter(([, v]) => v).map(([k, v]) => (
+              <React.Fragment key={k}>
+                <span style={{ color: T.inkSoft }}>{k}</span>
+                <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{v}</span>
+              </React.Fragment>
+            ))}
+          </div>
+          {!cardStaff.designation && !cardStaff.recc && !cardStaff.contact && !cardStaff.email && !cardStaff.licence && (
+            <div style={{ fontSize: 12, color: T.inkSoft }}>No other details yet. Add them in the Staff tab.</div>
+          )}
+        </div>
+      )}
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-        Showing <strong>{shownStaff.length}</strong> staff for this range. The numbers down the left match the printed rota, so you can refer to a row by its number. On a phone the designation is hidden to leave room for the days — it still appears on every PDF and image export.
+        Showing <strong>{shownStaff.length}</strong> staff for this range. The numbers down the left match the printed rota, so you can refer to a row by its number. Hover or tap a name to see that person's details; choose which details to print on the export screen.
       </div>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
         RD (release duty) counts as duty for the staff member — including for non-official day payment — but not in this unit's shift coverage rows. Annual leave and maternity are set in the <strong>Staff</strong> tab and appear as merged bands.

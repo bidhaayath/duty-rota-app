@@ -83,7 +83,7 @@ const CSS = `
     .edr-tab.edr-on { animation: edrTabIn 220ms cubic-bezier(0.23, 1, 0.32, 1); }
   }
   /* The page heading that used to live in the dark header. */
-  .edr-pagehead { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 4px 0 18px; }
+  .edr-pagehead { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 0 0 10px; }
   @media (min-width: 900px) {
     .dr-header { display: none !important; }
     .edr-content main.dr-main { padding: 0 0 40px !important; max-width: none !important; }
