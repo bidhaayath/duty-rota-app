@@ -52,6 +52,9 @@ const MAX_STAFF = 300;
 const MAX_CODES = 80;
 const MAX_ACTIONS = 120;    // after Claude answers
 const MAX_RANGE_DAYS = 92;  // the longest date range any one action may cover
+// …except a leave period: maternity and long leave easily run past three
+// months, so leave may cover up to a year.
+const MAX_LEAVE_DAYS = 366;
 const MAX_SENIOR_COVER = 10; // the most seniors any one shift may ask for
 const MAX_IN_A_ROW = 14;      // the longest run of days or nights a limit may allow
 // One person's own rules, as Smart Roster's Your staff panel keeps them.
@@ -548,6 +551,10 @@ function checkAnswer(answer, input, today) {
   const latest = addDaysISO(today, 400);
   const okDate = (d) => isRealDate(d) && d >= earliest && d <= latest;
   const okRange = (a, b) => okDate(a) && okDate(b) && a <= b && b <= addDaysISO(a, MAX_RANGE_DAYS - 1);
+  // A leave may have begun up to a year ago (a maternity leave already under way).
+  const leaveEarliest = addDaysISO(today, -MAX_LEAVE_DAYS);
+  const okLeaveDate = (d) => isRealDate(d) && d >= leaveEarliest && d <= latest;
+  const okLeave = (a, b) => okLeaveDate(a) && okLeaveDate(b) && a <= b && b <= addDaysISO(a, MAX_LEAVE_DAYS - 1);
 
   const a = answer && typeof answer === 'object' ? answer : {};
   const actions = [];
@@ -591,7 +598,7 @@ function checkAnswer(answer, input, today) {
       case 'add_leave': {
         if (!who) break;
         // The last day left out (end null) is asked for in the app.
-        const datesOk = raw.end == null ? okDate(raw.start) : okRange(raw.start, raw.end);
+        const datesOk = raw.end == null ? okLeaveDate(raw.start) : okLeave(raw.start, raw.end);
         if (!datesOk) { note(`Leave for ${who.name} had dates that did not make sense, so it was left out.`); break; }
         actions.push({
           type: 'add_leave', staffId: who.id, staffName: who.name,
