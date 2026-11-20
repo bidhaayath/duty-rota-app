@@ -334,7 +334,7 @@ describe("the server", () => {
 
   test("the prompt: one person never changes the ward, leave is never a rule, and staff are refs only", () => {
     const { system, user } = parse.buildPrompt(input, TODAY);
-    expect(system).toMatch(/Never use set_offs_per_week,\s+set_senior_cover or set_max_in_a_row for one person/);
+    expect(system).toMatch(/Never use set_offs_per_week,\s+set_senior_cover, set_max_in_a_row, set_coverage or set_weekly_shifts for one person/);
     expect(system).toMatch(/Leave is never a person_rule or a fixed_duty/);
     expect(system).toMatch(/recorded in the\s+Staff tab/);
     expect(system).toMatch(/"Shau gets only 1\s+night a week" gives atMost night 1/);

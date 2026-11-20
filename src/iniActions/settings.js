@@ -27,6 +27,19 @@
    of its "In a row" row write them. Above what those boxes allow is
    blocked, so Ini never saves a value the screen could not.
 
+   set_coverage      { cover: { [shift]: { min, max } } }   0–50, null = leave as is
+     rosterRules.coverage[shift].min/max   staff on that shift every day
+                                           (max null = no limit)
+   Written as "Who's needed on each shift" writes them (WardNeeds.js). When
+   a new "at least" is above the "at most" already saved (or the reverse),
+   the other side moves to match and the line says so, so the ward is never
+   left asking for more than it allows.
+
+   set_weekly_shifts { shift, min, max }   0–7, null = leave as is
+     rosterRules.weeklyMin[shift] / weeklyMax[shift]   each person, each week
+   Written as the "Each person, each week" table writes them. Off days stay
+   with set_offs_per_week.
+
    set_shifts and set_seniors are about named people, so the checklist
    shows them under "Your staff" (people.js), not with the ward's settings. */
 
@@ -394,3 +407,134 @@ export const setSeniors = {
     return d;
   },
 };
+
+/* ── set_coverage ── */
+const coverWords = (c) => `${c?.min ?? 0}–${c?.max == null ? "no limit" : c.max}`;
+const planStaffCover = (l, data) => {
+  const rules = mergeRules(data.rosterRules || {});
+  const runs = wardShifts(data);
+  const rows = SHIFTS.filter((sh) => l.cover[sh]).map((sh) => {
+    const cur = rules.coverage[sh] || {};
+    const ask = l.cover[sh];
+    let min = ask.min ?? (cur.min ?? 0);
+    let max = ask.max !== null && ask.max !== undefined ? ask.max : (cur.max ?? null);
+    const moved = [];
+    if (max != null && min > max) {
+      if (ask.min != null && ask.max == null) { max = min; moved.push(`at most raised to ${min} to match`); }
+      else if (ask.max != null && ask.min == null) { min = max; moved.push(`at least lowered to ${max} to match`); }
+    }
+    return { sh, cur: { min: cur.min ?? 0, max: cur.max ?? null }, next: { min, max }, moved, runs: runs.includes(sh) };
+  });
+  return { rules, rows };
+};
+const fixCover = (v) => (Number.isInteger(v) && v >= 0 && v <= 50 ? v : null);
+
+export const setCoverage = {
+  type: "set_coverage",
+  group: "settings",
+  savedAs: "settings",
+  saved: setShifts.saved,
+
+  fromServer: (a) => {
+    if (!a.cover || typeof a.cover !== "object") return null;
+    const cover = {};
+    SHIFTS.forEach((sh) => {
+      const c = a.cover[sh];
+      if (!c) return;
+      const min = fixCover(c.min), max = fixCover(c.max);
+      if (min !== null || max !== null) cover[sh] = { min, max };
+    });
+    return Object.keys(cover).length ? { cover } : null;
+  },
+  describe: (l, { sim }) => ({
+    what: "Staff on each shift, every day",
+    when: planStaffCover(l, sim).rows.map((r) => `${SHIFT_LABELS[r.sh]} ${coverWords(r.cur)} → ${coverWords(r.next)}`).join(", "),
+  }),
+
+  check: (l, { sim, today }) => {
+    const { rows } = planStaffCover(l, sim);
+    const bad = rows.find((r) => r.next.max != null && r.next.min > r.next.max);
+    if (bad) {
+      return { blocked: `On ${SHIFT_LABELS[bad.sh]} shift that would be at least ${bad.next.min} but at most ${bad.next.max}. Write the note again with both numbers, or change them in Smart Roster.` };
+    }
+    const changed = rows.filter((r) => r.next.min !== r.cur.min || r.next.max !== r.cur.max);
+    if (!changed.length) return { blocked: "Staff on each shift are already set like this." };
+    const warnings = ["applies to every day, from now on"];
+    rows.forEach((r) => r.moved.forEach((m) => warnings.push(`${SHIFT_LABELS[r.sh]}: ${m}`)));
+    // Enough people on the ward for the fewest asked every day?
+    const day = today || todayStr();
+    const staff = (sim.staff || []).filter((p) => !p.endDate || p.endDate >= day);
+    const rules = mergeRules(sim.rosterRules || {});
+    const perDay = wardShifts(sim).reduce((n, sh) => {
+      const r = rows.find((x) => x.sh === sh);
+      return n + (r ? r.next.min : (rules.coverage[sh]?.min || 0));
+    }, 0);
+    if (staff.length && perDay > staff.length) {
+      warnings.push(`that is ${plural(perDay, "person", "people")} on duty every day, but the ward has ${plural(staff.length, "person", "people")}`);
+    }
+    return { warnings };
+  },
+
+  apply: (d, l) => {
+    const { rules, rows } = planStaffCover(l, d);
+    if (rows.some((r) => r.next.max != null && r.next.min > r.next.max)) return d;
+    const coverage = { ...rules.coverage };
+    rows.forEach((r) => { coverage[r.sh] = { ...(coverage[r.sh] || {}), min: r.next.min, max: r.next.max }; });
+    d.rosterRules = { ...(d.rosterRules || {}), coverage };
+    return d;
+  },
+};
+
+/* ── set_weekly_shifts ── */
+const weekWords = (min, max) => `${min ?? 0}–${max == null ? "no limit" : max}`;
+const planWeekly = (l, data) => {
+  const rules = mergeRules(data.rosterRules || {});
+  const cur = { min: rules.weeklyMin?.[l.shift] ?? null, max: rules.weeklyMax?.[l.shift] ?? null };
+  return { rules, cur, next: { min: l.min ?? cur.min, max: l.max ?? cur.max } };
+};
+const fixWeek = (v) => (Number.isInteger(v) && v >= 0 && v <= 7 ? v : null);
+
+export const setWeeklyShifts = {
+  type: "set_weekly_shifts",
+  group: "settings",
+  savedAs: "settings",
+  saved: setShifts.saved,
+
+  fromServer: (a) => {
+    if (!SHIFTS.includes(a.shift)) return null;
+    const min = fixWeek(a.min), max = fixWeek(a.max);
+    return min === null && max === null ? null : { shift: a.shift, min, max };
+  },
+  describe: (l, { sim }) => {
+    const { cur, next } = planWeekly(l, sim);
+    const name = SHIFT_LABELS[l.shift];
+    return { what: `${name[0].toUpperCase()}${name.slice(1)}s per person, each week`, when: `${weekWords(cur.min, cur.max)} → ${weekWords(next.min, next.max)}` };
+  },
+
+  check: (l, { sim }) => {
+    const { cur, next } = planWeekly(l, sim);
+    if (next.min != null && next.max != null && next.min > next.max) {
+      return { blocked: `The fewest ${SHIFT_LABELS[l.shift]}s a week (${next.min}) would be more than the most (${next.max}). Write the note again with both numbers, or change them in Smart Roster.` };
+    }
+    if (next.min === cur.min && next.max === cur.max) return { blocked: `${SHIFT_LABELS[l.shift][0].toUpperCase()}${SHIFT_LABELS[l.shift].slice(1)}s per week are already set like this.` };
+    const warnings = ["applies to everyone on the ward, every week, unless they have their own rule"];
+    if (!wardShifts(sim).includes(l.shift)) warnings.push(`the ward does not run ${SHIFT_LABELS[l.shift]} shifts in Smart Roster, so this makes no difference until it does`);
+    return { warnings };
+  },
+
+  apply: (d, l) => {
+    const { rules, next } = planWeekly(l, d);
+    if (next.min != null && next.max != null && next.min > next.max) return d;
+    d.rosterRules = {
+      ...(d.rosterRules || {}),
+      weeklyMin: { ...rules.weeklyMin, [l.shift]: next.min },
+      weeklyMax: { ...rules.weeklyMax, [l.shift]: next.max },
+    };
+    return d;
+  },
+};
+
+function todayStr() {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+}
