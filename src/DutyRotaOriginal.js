@@ -737,7 +737,8 @@ const weekSegments = (staff, days) => {
   return segs;
 };
 
-/* Leave typed as rota codes (SL, FRL, ML, other leave codes): the same code
+/* Leave typed as rota codes (SL, FRL, ML, other leave codes), and release
+   duty (RD, a code that counts as "release"): the same code
    on 4 or more days in a row is drawn as one band, like a leave period —
    "FRL (26 Nov – 29 Nov)". Screen only, and only for plain cells: a day with
    a note, an exchange mark or a second duty stays its own cell. Tapping a
@@ -752,7 +753,7 @@ const joinLeaveRuns = (data, staffId, segs, open) => {
     const entries = cellEntries(data, date, staffId);
     if (entries.length !== 1) return null;
     const code = data.codes.find((c) => c.id === entries[0].code);
-    return code && leaveBucket(code) ? code : null;
+    return code && (leaveBucket(code) || code.counts === "release") ? code : null;
   };
   const out = [];
   let k = 0;
@@ -1957,24 +1958,11 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       /* Wide tables on a phone. Both force a minimum width so their columns
          stay readable on a laptop; on a 360px screen that becomes a long
          sideways scroll. Releasing the minimum lets them use the width
-         available, and the staff table drops the columns a manager is least
-         likely to need on a phone. Nothing is lost \u2014 every field is still
-         there on a wider screen and in the staff edit form. */
+         available. */
       .dr-app table.dr-codes-table { min-width: 0 !important; }
       .dr-app table.dr-staff-table { min-width: 0 !important; }
-      /* Staff columns: 1 # | 2 Name | 3 Designation | 4 Email | 5 Access
-         6 Contact | 7 Employee ID | 8 Licence | 9 Employment | 10 Leave
-         11 Status | 12 actions. Hidden below: 6, 7, 8, 9, 10. */
-      .dr-app table.dr-staff-table th:nth-child(6),
-      .dr-app table.dr-staff-table td:nth-child(6),
-      .dr-app table.dr-staff-table th:nth-child(7),
-      .dr-app table.dr-staff-table td:nth-child(7),
-      .dr-app table.dr-staff-table th:nth-child(8),
-      .dr-app table.dr-staff-table td:nth-child(8),
-      .dr-app table.dr-staff-table th:nth-child(9),
-      .dr-app table.dr-staff-table td:nth-child(9),
-      .dr-app table.dr-staff-table th:nth-child(10),
-      .dr-app table.dr-staff-table td:nth-child(10) { display: none !important; }
+      /* The staff table keeps every column on a phone: the names stay on
+         the left while the rest scrolls sideways. */
     }
   `;
 
@@ -1999,7 +1987,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         // The same staff detail columns the PDF and image exports include.
         const extras = [
           ["designation", "DESIGNATION"], ["contact", "CONTACT"],
-          ["email", "EMAIL"], ["recc", "RECC NO."],
+          ["email", "EMAIL"], ["recc", "EMPLOYEE ID"],
         ].filter(([k]) => exportCols[k]).map(([key, label]) => ({ key, label }));
 
         const model = {
@@ -2152,7 +2140,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
           {printView.kind === "rota" && (
             <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, fontSize: 13, color: T.ink }}>
               Include:
-              {[["designation", "Designation"], ["contact", "Contact no."], ["email", "Email"], ["recc", "RECC no."]].map(([k, label]) => (
+              {[["designation", "Designation"], ["contact", "Contact no."], ["email", "Email"], ["recc", "Employee ID"]].map(([k, label]) => (
                 <label key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: T.ink, cursor: "pointer" }}>
                   <input type="checkbox" checked={exportCols[k]} onChange={(e) => setExportCols({ ...exportCols, [k]: e.target.checked })} style={{ cursor: "pointer" }} />
                   {label}
@@ -2384,7 +2372,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
-        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={isOwnerLevel} deptId={deptId} deptName={(departments.find((d) => d.id === deptId) || {}).name} />}
+        {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={isOwnerLevel} deptId={deptId} deptName={(departments.find((d) => d.id === deptId) || {}).name}
+          canEdit={!(editBlocked || currentDeptLocked || viewOnlyRole)} />}
         {tab === "requests" && (
           <RequestsTab
             data={data} update={update} staffEditable={staffEditable}
@@ -3850,7 +3839,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
         <div role="dialog" aria-label={`${cardStaff.name} details`}
           onMouseEnter={() => clearTimeout(nameCardTimer.current)} onMouseLeave={hideNameCard}
           style={{
-            position: "fixed", zIndex: 80, left: Math.min(nameCard.x, window.innerWidth - 270), top: Math.max(8, Math.min(nameCard.y, window.innerHeight - 230)),
+            position: "fixed", zIndex: 80, left: Math.min(nameCard.x, window.innerWidth - 270), top: Math.max(8, Math.min(nameCard.y, window.innerHeight - 230 - 22 * (data.staffColumns || []).length)),
             width: 250, boxSizing: "border-box", padding: "12px 14px", borderRadius: 16, color: T.ink,
             background: "rgba(255,255,255,0.86)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)",
             border: "1px solid rgba(255,255,255,0.9)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 12px 30px rgba(14,58,71,0.2)",
@@ -3858,16 +3847,19 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
           <div style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontWeight: 800, fontSize: 15, marginBottom: 2 }}>{cardStaff.name}</div>
           {cardStaff.designation && <div style={{ fontSize: 12.5, color: T.inkSoft, marginBottom: 8 }}>{cardStaff.designation}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: 12.5 }}>
-            {[["Employee ID", cardStaff.recc], ["Contact", cardStaff.contact], ["Email", cardStaff.email], ["Licence", cardStaff.licence],
+            {[["Employee ID", cardStaff.recc], ["Contact", cardStaff.contact], ["Email", cardStaff.email], ["Licence", cardStaff.licence ? niceDate(cardStaff.licence) : ""],
               ["Joined", cardStaff.startDate ? niceDate(cardStaff.startDate) : ""], ["Last day", cardStaff.endDate ? niceDate(cardStaff.endDate) : ""],
-            ].filter(([, v]) => v).map(([k, v]) => (
-              <React.Fragment key={k}>
+              // The department's own columns (Staff tab → Add column).
+              ...(data.staffColumns || []).map((c) => [c.name, ((cardStaff.extra || {})[c.id] || "").trim()]),
+            ].filter(([, v]) => v).map(([k, v], i) => (
+              <React.Fragment key={`${i}-${k}`}>
                 <span style={{ color: T.inkSoft }}>{k}</span>
                 <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{v}</span>
               </React.Fragment>
             ))}
           </div>
-          {!cardStaff.designation && !cardStaff.recc && !cardStaff.contact && !cardStaff.email && !cardStaff.licence && (
+          {!cardStaff.designation && !cardStaff.recc && !cardStaff.contact && !cardStaff.email && !cardStaff.licence
+            && !(data.staffColumns || []).some((c) => ((cardStaff.extra || {})[c.id] || "").trim()) && (
             <div style={{ fontSize: 12, color: T.inkSoft }}>No other details yet. Add them in the Staff tab.</div>
           )}
         </div>
@@ -4358,7 +4350,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
     ["designation", "DESIGNATION", (s) => s.designation || ""],
     ["contact", "CONTACT", (s) => s.contact || ""],
     ["email", "EMAIL", (s) => s.email || ""],
-    ["recc", "RECC NO.", (s) => s.recc || ""],
+    ["recc", "EMPLOYEE ID", (s) => s.recc || ""],
   ].filter(([k]) => cols[k]);
   /* On a long range the name column is capped by the compact CSS; the extra
      columns get the same treatment inline (the image export drops classes),
@@ -4947,7 +4939,7 @@ function StatsPrint({ data, from, to }) {
 // rather than how the department runs — that stays with the owner. A null
 // role means an account with no membership row, i.e. every existing customer,
 // who is effectively the owner of their own organisation.
-function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true, canGrantManager = true, deptId, deptName }) {
+function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true, canGrantManager = true, deptId, deptName, canEdit = true }) {
   // email and employmentRole are what turn a staff row into an invitation:
   // the email says who to invite, the role says what they get. Both are
   // optional, so every staff member entered before this simply has them
@@ -4959,6 +4951,38 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
   const { access, isOwner: isOrgOwner, refresh: refreshAccess } = useOrgAccess(deptId);
   const npEmpty = { type: "annual", label: "", start: "", end: "" };
   const [np, setNp] = useState(npEmpty);
+  /* Columns the department adds for itself ("Blood group", "Locker no.").
+     Kept in the rota data: data.staffColumns = [{ id, name }], and each
+     person's value in staff.extra[columnId]. A department that never adds
+     one has neither, and nothing about it changes. */
+  const staffColumns = data.staffColumns || [];
+  const [newCol, setNewCol] = useState(null);   // null = closed, else the name being typed
+  const BUILT_IN = ["#", "name", "designation", "email", "access", "contact", "employee id", "licence expiry", "employment", "status"];
+  const addColumn = () => {
+    const name = (newCol || "").trim().replace(/\s+/g, " ").slice(0, 30);
+    if (!name) return;
+    const low = name.toLowerCase();
+    if (BUILT_IN.includes(low) || staffColumns.some((c) => c.name.toLowerCase() === low)) {
+      alert(`There is already a column called "${name}".`);
+      return;
+    }
+    update((d) => { d.staffColumns = [...(d.staffColumns || []), { id: uid(), name }]; return d; });
+    setNewCol(null);
+  };
+  const removeColumn = (c) => {
+    const filled = data.staff.filter((s) => ((s.extra || {})[c.id] || "").trim()).length;
+    const msg = filled
+      ? `Remove the column "${c.name}"?\n\nWhat's written in it for ${filled} staff member${filled === 1 ? "" : "s"} will be removed too. Undo can bring it back.`
+      : `Remove the column "${c.name}"?`;
+    if (!window.confirm(msg)) return;
+    update((d) => {
+      d.staffColumns = (d.staffColumns || []).filter((x) => x.id !== c.id);
+      d.staff.forEach((st) => {
+        if (st.extra && c.id in st.extra) { st.extra = { ...st.extra }; delete st.extra[c.id]; }
+      });
+      return d;
+    });
+  };
 
   const save = () => {
     if (!form.name.trim()) return;
@@ -5108,8 +5132,11 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-        <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18 }}>Staff ({activeStaff.length})</h2>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 22, fontWeight: 800, letterSpacing: "-0.01em" }}>Staff ({activeStaff.length})</h2>
+          <span style={{ fontSize: 13, color: T.inkSoft }}>The order here is the order on the rota and in every export.</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {formerStaff.length > 0 && (
             <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, color: T.inkSoft, cursor: "pointer" }}>
               <input type="checkbox" checked={showFormer} onChange={(e) => setShowFormer(e.target.checked)}
@@ -5117,10 +5144,16 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
               Show former staff ({formerStaff.length})
             </label>
           )}
-          {data.staff.length > 1 && (
+          {canEdit && data.staff.length > 1 && (
             <Btn kind="ghost" small onClick={sortAZ}><ArrowDownAZ size={14} /> Sort A–Z</Btn>
           )}
-          {(() => {
+          {canEdit && <button type="button" onClick={() => setNewCol(newCol === null ? "" : null)} aria-expanded={newCol !== null}
+            style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 36, padding: "0 14px", borderRadius: 999,
+              border: "1.5px dashed rgba(13,79,97,0.5)", background: "rgba(255,255,255,0.55)", color: T.lagoon,
+              fontFamily: "inherit", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+            <Plus size={14} /> Add column
+          </button>}
+          {canEdit && (() => {
             const atLimit = staffLimit != null && activeStaff.length >= staffLimit;
             return atLimit ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -5140,14 +5173,37 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
         </div>
       </div>
 
+      {newCol !== null && (
+        <Card className="dr-anim-in" style={{ padding: 14 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+            <Field label="New column name">
+              <input autoFocus style={{ ...inputStyle, width: 220 }} value={newCol} maxLength={30} placeholder="e.g. Blood group"
+                onChange={(e) => setNewCol(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addColumn(); if (e.key === "Escape") setNewCol(null); }} />
+            </Field>
+            <Btn small onClick={addColumn} disabled={!newCol.trim()}><Check size={13} /> Add column</Btn>
+            <Btn kind="ghost" small onClick={() => setNewCol(null)}>Cancel</Btn>
+          </div>
+          <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 8 }}>
+            The column appears in the table for everyone in this department. Fill it in with each person's Edit button.
+          </div>
+        </Card>
+      )}
+
       {form && (
         <Card className="dr-anim-in">
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
             <Field label="Name"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aminath Ali" /></Field>
             <Field label="Designation (optional)"><input style={inputStyle} value={form.designation || ""} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="e.g. Staff Nurse" /></Field>
             <Field label="Contact no."><input style={inputStyle} value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></Field>
-            <Field label="RECC no."><input style={inputStyle} value={form.recc} onChange={(e) => setForm({ ...form, recc: e.target.value })} /></Field>
+            <Field label="Employee ID"><input style={inputStyle} value={form.recc} onChange={(e) => setForm({ ...form, recc: e.target.value })} /></Field>
             <Field label="Licence expiry"><input type="date" style={inputStyle} value={form.licence} onChange={(e) => setForm({ ...form, licence: e.target.value })} /></Field>
+            {staffColumns.map((c) => (
+              <Field key={c.id} label={c.name}>
+                <input style={inputStyle} value={(form.extra || {})[c.id] || ""} maxLength={200}
+                  onChange={(e) => setForm({ ...form, extra: { ...(form.extra || {}), [c.id]: e.target.value } })} />
+              </Field>
+            ))}
           </div>
 
           <div style={{ marginTop: 16, borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
@@ -5242,42 +5298,78 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
         </Card>
       )}
 
-      <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table className="dr-staff-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+      <Card style={{ padding: 0, overflow: "hidden" }}>
+        {/* Names stay on the left and the buttons on the right while the
+            columns scroll sideways (the buttons only on a wide screen). */}
+        <style>{`
+          .dr-staff-table th, .dr-staff-table td { border-bottom: 1px solid ${T.line}; }
+          .dr-staff-table tbody tr:hover > * { background-color: #EEF7FA; }
+          @media (min-width: 900px) {
+            .dr-staff-act { position: sticky; right: 0; z-index: 2; box-shadow: -6px 0 10px -6px rgba(14,58,71,0.2); }
+          }
+          /* A phone: a narrower name column leaves room for the others. */
+          @media (max-width: 600px) {
+            .dr-staff-table .dr-staff-name { min-width: 0 !important; max-width: 150px; padding-left: 6px !important; padding-right: 8px !important; }
+            .dr-staff-table .dr-staff-name .dr-staff-nm { min-width: 0 !important; font-size: 12.5px; }
+          }
+        `}</style>
+        <div style={{ overflowX: "auto" }}>
+        <table className="dr-staff-table" style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
           <thead>
-            <tr>{["#", "Name", "Designation", "Email", "Access", "Contact", "RECC no.", "Licence expiry", "Employment", "Leave periods", "Status", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+            <tr>
+              <th className="dr-staff-name" style={{ ...th, borderBottom: "none", position: "sticky", left: 0, zIndex: 3, background: "#EAF5F9", minWidth: 190, paddingLeft: 14 }}>Name</th>
+              {["Designation", "Email", "Access", "Contact", "Employee ID", "Licence expiry", "Employment", "Status"].map((h) => (
+                <th key={h} style={{ ...th, borderBottom: "none", background: "#F1F8FB" }}>{h}</th>
+              ))}
+              {staffColumns.map((c) => (
+                <th key={c.id} style={{ ...th, borderBottom: "none", background: "#E0F1EC", color: "#0A5E4E", padding: "5px 10px" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    {c.name}
+                    {canEdit && <button type="button" aria-label={`Remove column ${c.name}`} title="Remove column" onClick={() => removeColumn(c)}
+                      style={{ width: 24, height: 24, padding: 0, borderRadius: "50%", border: "none", background: "rgba(10,94,78,0.12)", color: "#0A5E4E", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                      <X size={12} />
+                    </button>}
+                  </span>
+                </th>
+              ))}
+              {canEdit && <th className="dr-staff-act" style={{ ...th, borderBottom: "none", background: "#EAF5F9" }}><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Actions</span></th>}
+            </tr>
           </thead>
           <tbody>
             {visibleStaff.map((s, idx) => {
               const today = onLeaveToday(s);
               const gone = isFormer(s);
               const arrowStyle = (disabled) => ({
-                background: "transparent", border: `1px solid ${T.line}`, borderRadius: 6,
-                width: 24, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
+                background: "transparent", border: "none", borderRadius: 6,
+                width: 26, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
                 cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.3 : 1,
-                color: T.ink, padding: 0,
+                color: T.lagoon, padding: 0,
               });
               const atTop = idx === 0;
               const atBottom = idx === visibleStaff.length - 1;
+              // Sticky cells need a solid background, or the columns show through.
+              const solid = gone ? "#F4F6F7" : "#F7FBFD";
+              const cell = gone ? { ...td, color: T.inkSoft } : td;
+              const dash = (v) => (v ? v : <span style={{ color: T.inkSoft }}>—</span>);
               return (
-                <tr key={s.id} style={gone ? { background: "#FAFBFB", opacity: 0.72 } : undefined}>
-                  <td style={{ ...td, padding: "6px 8px" }}>
+                <tr key={s.id} style={gone ? { opacity: 0.75 } : undefined}>
+                  <th scope="row" className="dr-staff-name" style={{ ...td, position: "sticky", left: 0, zIndex: 2, background: solid, textAlign: "left", padding: "5px 12px 5px 10px", boxShadow: "6px 0 10px -8px rgba(14,58,71,0.18)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 700, minWidth: 14 }}>{idx + 1}</span>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <button title="Move up" disabled={atTop} onClick={() => move(s.id, -1)} style={arrowStyle(atTop)}>
-                          <ChevronUp size={13} />
+                      <span style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600, minWidth: 16, textAlign: "right" }}>{idx + 1}</span>
+                      {canEdit && <div style={{ display: "flex", flexDirection: "column" }}>
+                        <button type="button" aria-label={`Move ${s.name} up`} title="Move up" disabled={atTop} onClick={() => move(s.id, -1)} style={arrowStyle(atTop)}>
+                          <ChevronUp size={14} />
                         </button>
-                        <button title="Move down" disabled={atBottom} onClick={() => move(s.id, 1)} style={arrowStyle(atBottom)}>
-                          <ChevronDown size={13} />
+                        <button type="button" aria-label={`Move ${s.name} down`} title="Move down" disabled={atBottom} onClick={() => move(s.id, 1)} style={arrowStyle(atBottom)}>
+                          <ChevronDown size={14} />
                         </button>
-                      </div>
+                      </div>}
+                      <span className="dr-staff-nm" style={{ fontWeight: 600, color: gone ? T.inkSoft : T.ink, whiteSpace: "normal", minWidth: 110 }}>{s.name}</span>
                     </div>
-                  </td>
-                  <td style={{ ...td, fontWeight: 600 }}>{s.name}</td>
-                  <td style={{ ...td, color: s.designation ? T.ink : T.inkSoft }}>{s.designation || "—"}</td>
-                  <td style={{ ...td, color: s.email ? T.ink : T.inkSoft, fontSize: 12.5 }}>{s.email || "—"}</td>
-                  <td style={td}>
+                  </th>
+                  <td style={cell}>{dash(s.designation)}</td>
+                  <td style={{ ...cell, fontSize: 12.5 }}>{dash(s.email)}</td>
+                  <td style={cell}>
                     <StaffAccessCell
                       email={s.email}
                       deptId={deptId}
@@ -5287,49 +5379,44 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
                       onChanged={refreshAccess}
                     />
                   </td>
-                  <td style={td}>{s.contact}</td>
-                  <td style={td}>{s.recc}</td>
-                  <td style={{ ...td, color: gone ? T.inkSoft : licenceSoon(s) ? T.coral : T.ink, fontWeight: !gone && licenceSoon(s) ? 700 : 400 }}>
+                  <td style={cell}>{dash(s.contact)}</td>
+                  <td style={cell}>{dash(s.recc)}</td>
+                  <td style={{ ...cell, color: gone ? T.inkSoft : licenceSoon(s) ? T.coral : T.ink, fontWeight: !gone && licenceSoon(s) ? 700 : 400 }}>
                     {s.licence ? niceDate(s.licence) : "—"}{!gone && licenceSoon(s) && " ⚠"}
                   </td>
-                  <td style={{ ...td, fontSize: 12 }}>
+                  <td style={{ ...cell, fontSize: 12 }}>
                     {s.startDate ? `From ${shortDate(s.startDate)}` : "—"}
                     {s.endDate && <><br /><span style={{ color: "#B3532F", fontWeight: 600 }}>Left {shortDate(s.endDate)}</span></>}
                   </td>
-                  <td style={{ ...td, whiteSpace: "normal", maxWidth: 280 }}>
-                    {(s.leavePeriods || []).length === 0 ? <span style={{ color: T.inkSoft }}>—</span> :
-                      (s.leavePeriods || []).map((p) => {
-                        const st = styleFor(p, data.leaveColors);
-                        return (
-                          <span key={p.id} style={{ display: "inline-block", background: st.bg, color: st.fg, borderRadius: 6, padding: "2px 7px", fontSize: 11.5, fontWeight: 600, margin: "2px 4px 2px 0" }}>
-                            {p.type === "other" ? st.label : st.abbrev}: {shortDate(p.start)}–{shortDate(p.end)}
-                          </span>
-                        );
-                      })}
-                  </td>
-                  <td style={td}>{gone
+                  <td style={cell}>{gone
                     ? <span style={{ fontSize: 11.5, background: "#ECEFF0", color: "#5A6B72", borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>Former staff</span>
                     : !staffEditable(s.id)
                     ? <span title="View-only on your current plan" style={{ fontSize: 11.5, background: "#FBF1DC", color: "#A5731B", border: "1px solid #E7D9B8", borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>🔒 View only</span>
                     : today
                     ? <LeaveChip period={today} />
                     : <span style={{ fontSize: 11.5, background: "#E8F5EC", color: T.leaf, borderRadius: 999, padding: "3px 9px", fontWeight: 700 }}>Active</span>}</td>
-                  <td style={{ ...td, whiteSpace: "nowrap" }}>
-                    <Btn kind="ghost" small disabled={!staffEditable(s.id)} onClick={() => { if (staffEditable(s.id)) setForm(s); }} style={{ marginRight: 6 }}><Pencil size={13} /></Btn>
-                    {gone
-                      ? <Btn kind="ghost" small onClick={() => reactivate(s.id)} style={{ marginRight: 6 }}>Reactivate</Btn>
-                      : <Btn kind="ghost" small disabled={!staffEditable(s.id)} onClick={() => markLeft(s.id)} style={{ marginRight: 6 }}>Mark left</Btn>}
-                    <Btn kind="danger" small disabled={!staffEditable(s.id)} onClick={() => remove(s.id)}><Trash2 size={13} /></Btn>
-                  </td>
+                  {staffColumns.map((c) => (
+                    <td key={c.id} style={{ ...cell, background: "rgba(224,241,236,0.35)", whiteSpace: "normal", maxWidth: 220 }}>{dash((s.extra || {})[c.id])}</td>
+                  ))}
+                  {canEdit && <td className="dr-staff-act" style={{ ...td, whiteSpace: "nowrap", background: solid, padding: "5px 12px" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Btn kind="ghost" small disabled={!staffEditable(s.id)} onClick={() => { if (staffEditable(s.id)) setForm(s); }} aria-label={`Edit ${s.name}`}><Pencil size={13} /></Btn>
+                      {gone
+                        ? <Btn kind="ghost" small onClick={() => reactivate(s.id)}>Reactivate</Btn>
+                        : <Btn kind="ghost" small disabled={!staffEditable(s.id)} onClick={() => markLeft(s.id)}>Mark left</Btn>}
+                      <Btn kind="danger" small disabled={!staffEditable(s.id)} onClick={() => remove(s.id)} aria-label={`Delete ${s.name}`}><Trash2 size={13} /></Btn>
+                    </span>
+                  </td>}
                 </tr>
               );
             })}
-            {visibleStaff.length === 0 && <tr><td colSpan={10} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
+            {visibleStaff.length === 0 && <tr><td colSpan={10 + staffColumns.length} style={{ ...td, textAlign: "center", padding: 24, color: T.inkSoft }}>No staff yet.</td></tr>}
           </tbody>
         </table>
+        </div>
       </Card>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-        ⚠ marks licences expiring within 90 days. Annual leave is tracked by leave periods — each staff member's leave renews on their own dates.
+        ⚠ marks licences expiring within 90 days. Leave is kept in the Leave tab (and in each person's Edit form).
       </div>
       <div style={{ fontSize: 12.5, color: T.inkSoft }}>
         Use the ▲ ▼ arrows to set the order staff appear in — this order is used in the weekly rota, records, statistics, and all PDF exports.
