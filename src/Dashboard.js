@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useMemo } from "react";
-import {
-  LayoutDashboard, Users, ChevronLeft, ChevronRight, Plus,
-  Settings, CreditCard, User, LogOut,
-} from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Users, ChevronLeft, ChevronRight, Plus, User, CreditCard, X } from "lucide-react";
 import supabase from "./supabaseClient";
 import Account from "./Account";
 import SubscriptionHistory from "./SubscriptionHistory";
 import Members from "./Members";
 import { ownedByMe } from "./deptAllowance";
+import { weekTotalsFor, isEmployedOn, leaveOn, entriesOf as rotaEntriesOf, DUTY_CATS } from "./rotaCounts";
 
 /* ────────────────────────────────────────────────────────────────────────
    My Dashboard — full-screen personal home.
@@ -35,6 +33,16 @@ const T = {
   line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E",
 };
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+/* Leave periods, shown with the same short codes and colours as the rota
+   (LEAVE_STYLES in DutyRotaOriginal.js). A custom "other" leave keeps its
+   own name as the label. */
+const LEAVE_CHIPS = {
+  annual:       { abbrev: "AL",  label: "Annual leave",         bg: "#D8EEE9" },
+  maternity:    { abbrev: "MAT", label: "Maternity leave",      bg: "#E9E9E9" },
+  prematernity: { abbrev: "PML", label: "Pre-maternity leave",  bg: "#F6E0EC" },
+  emergency:    { abbrev: "EL",  label: "Emergency leave",      bg: "#FBE3DF" },
+  other:        { abbrev: "LV",  label: "Other extended leave", bg: "#E6E4F5" },
+};
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -85,11 +93,16 @@ export default function Dashboard({
   onAddDepartment = null,
   canAddDepartment = false,
   onOpenPlans = null,
+  screen: screenProp = null,
+  onScreen = null,
 }) {
   /* Which full screen is showing. "home" is the calendar; "account" is the
      account screen reached from the sidebar. Kept here rather than in the
      parent so the sidebar owns its own navigation. */
-  const [screen, setScreen] = useState("home");
+  const [screenOwn, setScreenOwn] = useState("home");
+  // The side menu can drive this from outside (Your account, Members).
+  const screen = screenProp || screenOwn;
+  const setScreen = (next) => { if (onScreen) onScreen(next); else setScreenOwn(next); };
   const [email, setEmail] = useState(null);
   const [accountName, setAccountName] = useState("");
   const [staffName, setStaffName] = useState("");
@@ -177,7 +190,8 @@ export default function Dashboard({
       );
       if (!mine) return null;
       return {
-        deptName: d.name, staffId: mine.id,
+        deptName: d.name, deptId: d.id, staffId: mine.id, me: mine,
+        staff: rota.staff || [], eveningEnabled: !!rota.eveningEnabled,
         codes: rota.codes || [], cells: rota.cells || {},
         // Needed to mark non-official days and on-call turns. Both are
         // per department, so someone in two departments can have a day
@@ -229,6 +243,19 @@ export default function Dashboard({
       const onCall = (m.onCall || {})[dateStr] === m.staffId;
       if (nonOff) anyNonOfficial = true;
       if (onCall) anyOnCall = true;
+      /* On leave: the leave shows instead of the cell, exactly as the rota
+         treats it (a leave day is never counted as a duty). */
+      const period = isEmployedOn(m.me, dateStr) ? leaveOn(m.me, dateStr) : null;
+      if (period) {
+        const ls = LEAVE_CHIPS[period.type] || LEAVE_CHIPS.other;
+        duties.push({
+          postName: "", post: "", text: ls.abbrev,
+          label: period.type === "other" && period.label ? period.label : ls.label,
+          color: ls.bg, deptName: m.deptName, deptId: m.deptId, counts: "leave",
+          nonOfficial: nonOff, onCall: false, leave: true,
+        });
+        return;
+      }
       // One entry per duty, so a split shift shows both.
       const dayEntries = entriesOf((m.cells[dateStr] || {})[m.staffId]);
       // Only the first duty unless this department uses split duties.
@@ -249,6 +276,8 @@ export default function Dashboard({
           post: entry.post || "",
           color: code ? code.color : T.mist,
           deptName: m.deptName,
+          deptId: m.deptId,
+          counts: code ? code.counts : "",
           nonOfficial: nonOff,
           onCall,
         });
@@ -283,73 +312,39 @@ export default function Dashboard({
   const prevMonth = () => goToMonth(view.month === 0 ? view.year - 1 : view.year, view.month === 0 ? 11 : view.month - 1);
   const nextMonth = () => goToMonth(view.month === 11 ? view.year + 1 : view.year, view.month === 11 ? 0 : view.month + 1);
 
-  const logout = async () => {
-    if (!window.confirm("Sign out of EasyDutyRota?")) return;
-    await supabase.auth.signOut();
-    window.location.reload();
+  /* Left and right arrow keys change the month on Home — unless the person
+     is typing somewhere, or holding a modifier (browser shortcuts). The ref
+     always holds this render's functions, so the listener never goes stale. */
+  const monthNav = useRef({});
+  monthNav.current = { prev: prevMonth, next: nextMonth };
+  useEffect(() => {
+    if (screen !== "home") return undefined;
+    const onKey = (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const t = e.target;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      e.preventDefault();
+      if (e.key === "ArrowLeft") monthNav.current.prev(); else monthNav.current.next();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [screen]);
+  // A sideways swipe on the calendar changes the month on a phone.
+  const swipe = useRef(null);
+  const onCalTouchStart = (e) => {
+    const p = e.touches[0];
+    swipe.current = p ? { x: p.clientX, y: p.clientY } : null;
   };
-
-  /* ── Sidebar pieces ── */
-  const SectionHead = ({ icon: Icon, children, note, soon = false }) => (
-    <div style={{ marginBottom: 8 }}>
-      <div className="dr-dash-sec" style={{
-        background: T.lagoon, color: "#fff", borderRadius: 10, padding: "11px 14px",
-        fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 14.5, fontWeight: 600,
-        display: "flex", alignItems: "center", gap: 8,
-      }}>
-        <Icon size={16} />
-        <span style={{ flex: 1 }}>{children}</span>
-        {soon && <span style={{
-          fontSize: 10.5, fontWeight: 700, color: "#fff", letterSpacing: 0.2,
-          background: "rgba(255,255,255,0.22)", border: "1px solid rgba(255,255,255,0.35)",
-          borderRadius: 999, padding: "1px 8px",
-        }}>Soon</span>}
-      </div>
-      {note && <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.72)", padding: "6px 2px 0" }}>{note}</div>}
-    </div>
-  );
-
-  const DeptRow = ({ id, name, tag }) => (
-    <button
-      className="dr-dash-item"
-      onClick={() => onOpenDepartment && onOpenDepartment(id)}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-        width: "100%", textAlign: "left", cursor: "pointer", marginBottom: 7,
-        background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 10,
-        padding: "10px 13px", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600, color: T.ink,
-      }}
-    >
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
-      {tag && <span style={{
-        fontSize: 11, fontWeight: 700, color: T.lagoon, background: T.mist,
-        border: `1px solid ${T.line}`, borderRadius: 999, padding: "2px 8px", flexShrink: 0,
-      }}>{tag}</span>}
-    </button>
-  );
-
-  const MenuRow = ({ icon: Icon, label, onClick, soon = false, danger = false }) => (
-    <button
-      className={soon ? undefined : "dr-dash-item"}
-      onClick={soon ? undefined : onClick}
-      disabled={soon}
-      title={soon ? "Coming soon" : undefined}
-      style={{
-        display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-        cursor: soon ? "default" : "pointer", marginBottom: 7,
-        background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 9,
-        padding: "10px 13px", fontFamily: "inherit", fontSize: 13.5, fontWeight: 600,
-        color: soon ? "rgba(255,255,255,0.6)" : (danger ? "#FFB4A6" : "#fff"), opacity: soon ? 0.7 : 1,
-      }}
-    >
-      <Icon size={15} style={{ flexShrink: 0 }} />
-      <span style={{ flex: 1 }}>{label}</span>
-      {soon && <span style={{
-        fontSize: 10.5, fontWeight: 700, color: "rgba(255,255,255,0.85)", background: "rgba(255,255,255,0.18)",
-        border: `1px solid ${T.line}`, borderRadius: 999, padding: "1px 7px",
-      }}>Soon</span>}
-    </button>
-  );
+  const onCalTouchEnd = (e) => {
+    const start = swipe.current; swipe.current = null;
+    const p = e.changedTouches[0];
+    if (!start || !p) return;
+    const dx = p.clientX - start.x, dy = p.clientY - start.y;
+    // Clearly sideways and long enough, so a scroll down the page never flips the month.
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dx < 0) nextMonth(); else prevMonth();
+  };
 
   if (screen === "account") {
     return <Account onBack={() => setScreen("home")} />;
@@ -371,430 +366,427 @@ export default function Dashboard({
     );
   }
 
+  /* ── Home, liquid glass ──
+     Everything below reads the same memberships as the calendar, so it can
+     never show a duty the person couldn't already see. Read-only. */
+  const todayStr = dstr(today);
+  const greeting = (() => {
+    const h = today.getHours();
+    return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  })();
+  const WORKED = (c) => DUTY_CATS.includes(c);
+
+  // Who else works the same shift today, in the same department.
+  const onWithMe = (deptId, dateStr, counts) => {
+    if (!WORKED(counts)) return [];
+    const m = myMemberships.find((x) => x.deptId === deptId);
+    if (!m) return [];
+    return (m.staff || []).filter((s) => {
+      if (s.id === m.staffId || !isEmployedOn(s, dateStr) || leaveOn(s, dateStr)) return false;
+      return rotaEntriesOf((m.cells[dateStr] || {})[s.id])
+        .some((e) => (m.codes.find((c) => c.id === e.code) || {}).counts === counts);
+    }).map((s) => s.name).filter(Boolean);
+  };
+
+  const todayInfo = dayInfo(todayStr);
+  const todayDuties = todayInfo.duties.filter((d) => !d.onCallOnly);
+  const lead = todayDuties.find((d) => WORKED(d.counts)) || todayDuties[0] || null;
+  const leadWith = lead ? onWithMe(lead.deptId, todayStr, lead.counts) : [];
+  const leadPost = lead && lead.postName;
+  const manyDepts = myMemberships.length > 1;
+
+  // The next four days, whatever is on them.
+  const upcoming = [1, 2, 3, 4].map((n) => {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + n);
+    const ds = dstr(d);
+    const info = dayInfo(ds);
+    const first = info.duties.find((x) => !x.onCallOnly) || null;
+    return { ds, d, first, nonOfficial: info.anyNonOfficial, more: Math.max(0, info.duties.filter((x) => !x.onCallOnly).length - 1) };
+  });
+
+  /* This month, counted with the rota's own rules (rotaCounts.js), so the
+     numbers match the per-person totals on each department's rota. */
+  const monthDays = [];
+  for (let d = new Date(today.getFullYear(), today.getMonth(), 1); d.getMonth() === today.getMonth(); d.setDate(d.getDate() + 1)) {
+    monthDays.push(dstr(d));
+  }
+  const monthTotals = { morning: 0, afternoon: 0, evening: 0, night: 0, off: 0 };
+  myMemberships.forEach((m) => {
+    const t = weekTotalsFor({ codes: m.codes, cells: m.cells, nonOfficial: m.nonOfficial, fridayRule: m.fridayRule }, m.me, monthDays);
+    Object.keys(monthTotals).forEach((k) => { monthTotals[k] += t[k] || 0; });
+  });
+  const showEvening = monthTotals.evening > 0 || myMemberships.some((m) => m.eveningEnabled);
+  // Non-official days worked: each DATE once, however many departments or duties.
+  const nonOffWorked = monthDays.filter((ds) => myMemberships.some((m) => {
+    if (!isNonOfficial(m, ds) || !isEmployedOn(m.me, ds) || leaveOn(m.me, ds)) return false;
+    return rotaEntriesOf((m.cells[ds] || {})[m.staffId])
+      .some((e) => WORKED((m.codes.find((c) => c.id === e.code) || {}).counts));
+  }));
+
+  const initialsOf = (name) => (name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+  const AVATARS = [["#FDE3BF", "#6B3E00"], ["#D7ECFB", "#0B3A5E"], ["#E3F3DA", "#24501A"], ["#EDE5FB", "#45297A"], ["#FBE1DD", "#6E2016"]];
+  const chip = (color, extra = {}) => ({
+    display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box",
+    fontWeight: 800, background: color || "#fff", color: textOn(color || "#FFFFFF"),
+    border: "1px solid rgba(14,58,71,0.12)", ...extra,
+  });
+  const card = {
+    boxSizing: "border-box", borderRadius: 20, background: "rgba(255,255,255,0.74)",
+    border: "1px solid rgba(255,255,255,0.9)", boxShadow: "0 8px 24px rgba(14,58,71,0.07)",
+  };
+  const eyebrow = { fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: T.inkSoft };
+  const H = "'Plus Jakarta Sans', Inter, sans-serif";
+
+  /* A department: its initials. On a
+     phone only that badge shows (the name is in its label and tooltip). */
+  const DeptCard = ({ d, i, badge, sub }) => {
+    return (
+      <button type="button" className="edr-home-dept" title={d.name} aria-label={`Open ${d.name}`}
+        onClick={() => onOpenDepartment && onOpenDepartment(d.id)} style={{
+          ...card, borderRadius: 18, display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+          textAlign: "left", fontFamily: "inherit", color: T.ink, cursor: "pointer", minWidth: 0,
+        }}>
+        <span className="edr-dept-badge" aria-hidden="true" style={{ flex: "none", width: 34, height: 34, borderRadius: "50%", overflow: "hidden",
+          display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12,
+          background: AVATARS[i % AVATARS.length][0], color: AVATARS[i % AVATARS.length][1] }}>
+          {initialsOf(d.name)}
+        </span>
+        <span className="edr-dept-text" style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, flex: 1 }}>
+          <span style={{ fontWeight: 600, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+          {sub && <span style={{ fontSize: 11.5, color: T.inkSoft }}>{sub}</span>}
+        </span>
+        <span className="edr-dept-role">{badge}</span>
+      </button>
+    );
+  };
+
   return (
-    <div className="dr-fade-in dr-theme" style={{
-      fontFamily: "Inter, system-ui, sans-serif", color: "#fff",
-      minHeight: "100vh", position: "relative", overflow: "hidden",
-      /* The sign-in page's background, brought inside: a deep blue-teal
-         gradient with a few large soft-focus blobs drifting over it. The
-         blobs are what the frosted panels pick up — without something
-         behind it, glass is just a pale rectangle. */
-      background: "linear-gradient(140deg,#1B6F8C 0%,#1E7D96 35%,#2A6FA8 70%,#3B6FB5 100%)",
-      backgroundAttachment: "fixed",
-    }}>
-      {/* Decorative only. Absolute rather than fixed: a fixed layer covers the
-         whole viewport, including the top bar this component does not own, and
-         a blurred blob drifting over it washed out the My plan and Logout
-         buttons. Absolute keeps the blobs inside the dashboard where they
-         belong. */}
-      <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" }}>
-        <span style={{ position: "absolute", width: 420, height: 420, borderRadius: "50%", background: "#7FD4C1", filter: "blur(90px)", opacity: 0.5, top: -120, right: -80 }} />
-        <span style={{ position: "absolute", width: 360, height: 360, borderRadius: "50%", background: "#8FA8E8", filter: "blur(90px)", opacity: 0.45, bottom: -110, right: 40 }} />
-        <span style={{ position: "absolute", width: 300, height: 300, borderRadius: "50%", background: "#E8C07F", filter: "blur(85px)", opacity: 0.36, bottom: 80, left: -110 }} />
-        <span style={{ position: "absolute", width: 380, height: 380, borderRadius: "50%", background: "#6FC9E8", filter: "blur(90px)", opacity: 0.4, top: 120, left: -140 }} />
-      </div>
+    <div className="dr-fade-in edr-home" style={{ fontFamily: "Inter, system-ui, sans-serif", color: T.ink }}>
       <style>{`
-        /* ── Liquid glass ──
-           Frosted surfaces for the frame: the card, the panel, the sidebar
-           rows. A light top edge makes each surface look like it catches the
-           light from above, which is what stops it reading as a flat grey box.
-
-           The duty chips inside the calendar are deliberately left solid.
-           Their job is being read at a glance, and frosting them would wash
-           the colours into each other — the one thing on this screen that
-           must stay crisp. Glass around the data, not over it. */
-        .dr-glass {
-          background: rgba(255,255,255,0.14);
-          -webkit-backdrop-filter: blur(22px) saturate(140%);
-          backdrop-filter: blur(22px) saturate(140%);
-          border: 1px solid rgba(255,255,255,0.30);
-          box-shadow: 0 10px 34px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.40);
+        .edr-home-dept:hover { background: rgba(255,255,255,0.9) !important; }
+        .edr-day:hover { border-color: #1F7F9F !important; }
+        /* Left: Today, Next, calendar, details. Right: this month. */
+        .edr-home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 14px; align-items: start; margin-bottom: 18px; }
+        .edr-home-right { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+        .edr-home-left { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+        .edr-home-top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 12px; }
+        .edr-rings { display: flex; flex-direction: column; gap: 10px; }
+        @keyframes edrRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        @keyframes edrRing { from { stroke-dashoffset: var(--edr-ring-c); } }
+        @media (prefers-reduced-motion: no-preference) {
+          .edr-home > * { animation: edrRise 340ms cubic-bezier(0.23, 1, 0.32, 1) backwards; }
+          .edr-home > *:nth-child(3) { animation-delay: 60ms; }
+          .edr-home > *:nth-child(4) { animation-delay: 120ms; }
+          .edr-home > *:nth-child(n+5) { animation-delay: 180ms; }
+          .edr-ring-arc { animation: edrRing 700ms cubic-bezier(0.23, 1, 0.32, 1) 120ms backwards; }
         }
-        .dr-glass-soft {
-          background: rgba(255,255,255,0.13);
-          -webkit-backdrop-filter: blur(14px) saturate(130%);
-          backdrop-filter: blur(14px) saturate(130%);
-          border: 1px solid rgba(255,255,255,0.26);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
+        @media (max-width: 1080px) {
+          .edr-home-grid { grid-template-columns: minmax(0, 1fr); }
+          .edr-home-right { position: static; }
+          /* Stacked (phone, narrow window): the tapped day comes straight after
+             the calendar, then this month. */
+          .edr-daydetails { order: -1; }
+          .edr-rings { flex-direction: row; flex-wrap: wrap; justify-content: space-between; }
         }
-        /* Without backdrop-filter a translucent panel over this background is
-           unreadable, so the surfaces fall back to a solid deep blue. */
-        @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-          .dr-glass { background: rgba(16,74,96,0.92); }
-          .dr-glass-soft { background: rgba(16,74,96,0.86); }
-        }
-
-        /* ── Text on the dark background ──
-           The screen was built for dark ink on white, so every colour below is
-           inverted here rather than edited in thirty-five places inline. Scoped
-           to .dr-theme so nothing else in the app is touched.
-
-           The duty chips and the rows inside the day panel are deliberately
-           excluded: they carry their own colours and must stay crisp. */
-        .dr-theme .dr-dash-title { color: #fff !important; }
-        .dr-theme .dr-dash-sub { color: rgba(255,255,255,0.75) !important; }
-        .dr-theme .dr-dash-month { color: #fff !important; }
-        .dr-theme .dr-dash-dow { color: rgba(255,255,255,0.7) !important; }
-        .dr-theme .dr-dash-pdate { color: #fff !important; }
-        .dr-theme .dr-dash-daynum { color: rgba(255,255,255,0.82) !important; }
-        .dr-theme .dr-dash-item { color: #fff !important; }
-        /* The section headings sat at the same tone as the rows under them, so
-           a heading looked like one more item in the list. Mint sets them apart
-           and ties them to the other markers in this theme — today, the selected
-           day, the TODAY badge — rather than introducing another colour. */
-        .dr-theme .dr-dash-sec {
-          background: linear-gradient(135deg, rgba(11,58,79,0.62), rgba(11,58,79,0.40)) !important;
-          border: 1px solid rgba(255,255,255,0.22) !important;
-          color: #FFFFFF !important;
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.18) !important;
-          letter-spacing: 0.2px;
-        }
-        /* The icon keeps the mint so the heading still belongs to this theme
-           while the bar itself sits back and lets the department names lead. */
-        .dr-theme .dr-dash-sec svg { color: #8FE3D2; }
-        .dr-theme .dr-dash-item:hover {
-          background: rgba(255,255,255,0.24) !important;
-          border-color: rgba(255,255,255,0.45) !important;
-        }
-        .dr-dash-item { transition: background 140ms ease, border-color 140ms ease, transform 140ms ease; }
-        .dr-dash-item:hover { background: rgba(255,255,255,0.78); border-color: rgba(13,79,97,0.3); }
-        .dr-dash-item:active { transform: scale(0.99); }
-        .dr-dash-item:focus-visible { outline: 2px solid ${T.lagoon}; outline-offset: 2px; }
-        @media (prefers-reduced-motion: reduce) { .dr-dash-item { transition: none; } }
-        @media (max-width: 900px) {
-          .dr-dash-wrap { grid-template-columns: 1fr !important; gap: 16px !important; }
-          /* The calendar is why an employee opens this on a phone, so it
-             comes first; the organisation and account menus follow. */
-          .dr-dash-main { order: 1; }
-          .dr-dash-side { order: 2; }
-        }
-        /* Phone typography. The desktop sizes are comfortable on a wide
-           screen and shouty on a 380px one, so everything steps down and
-           the padding tightens to give the grid its width back. */
+        @media (max-width: 899px) { .edr-home { padding: 12px 10px 24px; } }
+        /* Phone: everything a size smaller, departments as badges only. */
         @media (max-width: 640px) {
-          .dr-dash-main { padding: 14px 11px 18px !important; border-radius: 11px !important; }
-          .dr-dash-title { font-size: 18px !important; margin-bottom: 2px !important; }
-          .dr-dash-sub { font-size: 11.5px !important; margin-bottom: 13px !important; }
-          .dr-dash-month { font-size: 14px !important; min-width: 128px !important; }
-          .dr-dash-dow { font-size: 9px !important; padding: 2px 0 !important; }
-          .dr-dash-day { padding: 3px 3px !important; border-radius: 7px !important; }
-          .dr-dash-code { font-size: 10px !important; }
-          .dr-dash-task { font-size: 8.5px !important; }
-          .dr-dash-panel { padding: 11px 12px !important; margin-top: 14px !important; }
-          .dr-dash-pdate { font-size: 13px !important; }
-          .dr-dash-sec { font-size: 13px !important; padding: 9px 12px !important; }
-          .dr-dash-item { font-size: 12.5px !important; padding: 9px 11px !important; }
-        }
-        /* Fit the whole month on one screen. A phone user wants to see the
-           shape of their month at a glance, not scroll through it, so the
-           cells lose their padding and the duty chips become compact bars.
-           Text stays legible; what goes is the space around it. */
-        @media (max-width: 640px) {
-          .dr-dash-grid { gap: 2px !important; }
-          .dr-dash-day {
-            min-height: 0 !important; padding: 2px 2px 3px !important;
-            border-radius: 5px !important; overflow: hidden;
-          }
-          .dr-dash-daynum { font-size: 9.5px !important; min-width: 15px !important; height: 15px !important; }
-          .dr-dash-oc { font-size: 7.5px !important; padding: 1px 2.5px !important; }
-          .dr-dash-duty {
-            padding: 1px 3px !important; margin-bottom: 2px !important;
-            border-radius: 4px !important;
-          }
-          .dr-dash-code { font-size: 9px !important; line-height: 1.15 !important; }
-          .dr-dash-task { font-size: 7.5px !important; line-height: 1.15 !important; }
+          .edr-home h1 { font-size: 19px !important; }
+          .edr-home-sub, .edr-home-date { display: none !important; }
+          .edr-home-top { gap: 8px; }
+          .edr-cal { padding: 10px 6px !important; border-radius: 16px !important; }
+          .edr-cal-grid { gap: 3px !important; }
+          .edr-day { min-height: 44px !important; padding: 3px !important; border-radius: 8px !important; gap: 2px !important; }
+          .edr-num { font-size: 10.5px !important; height: 16px !important; min-width: 16px !important; }
+          .edr-day .edr-daychip { height: 16px !important; font-size: 9.5px !important; border-radius: 5px !important; }
+          .edr-today-code { min-width: 52px !important; height: 52px !important; font-size: 22px !important; border-radius: 15px !important; }
+          .edr-cal-dow { font-size: 10px !important; }
+          .edr-rings { gap: 4px; }
+          .edr-ring-row { flex-direction: column !important; gap: 2px !important; }
+          .edr-dept-grid { grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)) !important; gap: 8px !important; }
+          .edr-home-dept { justify-content: center; padding: 6px !important; border-radius: 14px !important; }
+          .edr-dept-text, .edr-dept-role { display: none !important; }
+          .edr-dept-badge { width: 36px !important; height: 36px !important; }
+          .edr-home h2 { font-size: 15px !important; }
         }
       `}</style>
 
-      <div className="dr-dash-wrap" style={{
-        position: "relative", zIndex: 1,
-        display: "grid", gridTemplateColumns: "310px 1fr", gap: 26,
-        maxWidth: 1250, margin: "0 auto", padding: "24px 22px 44px",
-        alignItems: "start",
-      }}>
-        {/* ── Sidebar ── */}
-        <aside className="dr-dash-side" style={{ display: "flex", flexDirection: "column" }}>
-          <SectionHead icon={LayoutDashboard} note={orgName || "You can name your organisation in Settings."}>
-            My Organisation
-          </SectionHead>
-          {owned.length === 0
-            ? <div style={{
-                fontSize: 12.5, color: "rgba(255,255,255,0.75)", border: "1px dashed rgba(255,255,255,0.32)",
-                borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
-              }}>
-                No departments of your own yet.
-              </div>
-            : owned.map((d) => <DeptRow key={d.id} id={d.id} name={d.name} />)}
-          {canAddDepartment && onAddDepartment && (
-            <button
-              className="dr-dash-item"
-              onClick={onAddDepartment}
-              style={{
-                display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
-                cursor: "pointer", marginBottom: 7, background: "rgba(255,255,255,0.16)",
-                border: `1px dashed ${T.line}`, borderRadius: 9, padding: "10px 13px",
-                fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: T.lagoon,
-              }}
-            ><Plus size={15} /> Add a department</button>
-          )}
+      {/* Greeting */}
+      <header style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <h1 style={{ margin: 0, fontFamily: H, fontWeight: 800, fontSize: 24, letterSpacing: "-0.02em" }}>{greeting}, {displayName}</h1>
+          <p className="edr-home-sub" style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>Your duties from every department, in one place.</p>
+        </div>
+        <span className="edr-home-date" style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 999,
+          background: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.95)", fontSize: 12.5, fontWeight: 500 }}>
+          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: "#7DBE5C" }} />
+          {niceFullDate(todayStr)}
+        </span>
+      </header>
 
-          {/* Who can get into this organisation. Owners only — a member has
-              no business seeing, or removing, anyone else's access. */}
-          {owned.length > 0 && (
-            <MenuRow icon={Users} label="Members" onClick={() => setScreen("members")} />
-          )}
+      <div className="edr-home-grid">
+      <div className="edr-home-left">
 
-          <div style={{ height: 14 }} />
-
-          <SectionHead
-            icon={Users}
-            note={memberships.length === 0 ? null : "Departments shared with you."}
-          >My Membership</SectionHead>
-          {memberships.length === 0
-            ? <div style={{
-                fontSize: 12.5, color: "rgba(255,255,255,0.75)", border: "1px dashed rgba(255,255,255,0.32)",
-                borderRadius: 9, padding: "12px 14px", lineHeight: 1.6, marginBottom: 7,
-              }}>
-                No departments have been shared with you yet. When someone invites you to their department, it will appear here.
-              </div>
-            : memberships.map((d) => (
-                <DeptRow key={d.id} id={d.id} name={d.name} tag={roleLabel(d.role)} />
-              ))}
-
-          <div style={{ height: 14 }} />
-
-          <SectionHead icon={Settings}>Settings</SectionHead>
-          <MenuRow icon={User} label="Your account" onClick={() => setScreen("account")} />
-          <MenuRow icon={CreditCard} label="Subscription history" onClick={() => setScreen("history")} />
-
-          <div style={{ height: 14 }} />
-
-          <SectionHead icon={CreditCard}>My Plans</SectionHead>
-          <MenuRow icon={CreditCard} label="View my plan" onClick={onOpenPlans} soon={!onOpenPlans} />
-
-          <div style={{ height: 14 }} />
-          <MenuRow icon={LogOut} label="Log out" onClick={logout} danger />
-        </aside>
-
-        {/* ── Calendar ── */}
-        <main className="dr-dash-main dr-glass" style={{
-          borderRadius: 16, padding: "22px 22px 26px",
-        }}>
-          <h1 className="dr-dash-title" style={{
-            fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 25, fontWeight: 700, color: T.lagoon,
-            textAlign: "center", margin: "0 0 4px", letterSpacing: -0.3,
-          }}>Welcome, {displayName}!</h1>
-          <p className="dr-dash-sub" style={{ textAlign: "center", color: T.inkSoft, fontSize: 13, margin: "0 0 20px" }}>
-            Your duties across every department, in one place.
-          </p>
-
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginBottom: 14 }}>
-            <button className="dr-dash-item" onClick={prevMonth} aria-label="Previous month" style={navBtn}><ChevronLeft size={18} /></button>
-            <div className="dr-dash-month" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16.5, fontWeight: 600, minWidth: 180, textAlign: "center" }}>
-              {MONTHS[view.month]} {view.year}
-            </div>
-            <button className="dr-dash-item" onClick={nextMonth} aria-label="Next month" style={navBtn}><ChevronRight size={18} /></button>
-          </div>
-
-          <div className="dr-dash-grid" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, marginBottom: 4 }}>
-            {DAY_NAMES.map((d) => (
-              <div key={d} className="dr-dash-dow" style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: T.inkSoft, letterSpacing: 0.5, padding: "4px 0" }}>{d}</div>
-            ))}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {grid.map((week, wi) => (
-              <div key={wi} className="dr-dash-grid" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
-                {week.map((date) => {
-                  const ds = dstr(date);
-                  const inMonth = date.getMonth() === view.month;
-                  const isToday = sameDay(date, today);
-                  const isSelected = ds === selected;
-                  /* Neighbouring-month days carry their duties too. A shift on
-                     the 30th of August is still a shift, and leaving those cells
-                     blank made the start of a month look emptier than it is. They
-                     are faded so the month in view still reads as the subject. */
-                  const info = dayInfo(ds);
-                  const duties = info.duties.filter((d) => !d.onCallOnly);
-                  return (
-                    <button
-                      key={ds}
-                      onClick={() => {
-                        // Tapping a day from the month either side moves the
-                        // calendar there, rather than describing a day that is
-                        // barely visible at the edge of the grid.
-                        if (!inMonth) setView({ year: date.getFullYear(), month: date.getMonth() });
-                        setSelected(ds);
-                      }}
-                      aria-label={niceFullDate(ds)}
-                      className="dr-dash-day"
-                      style={{
-                        position: "relative",
-                        textAlign: "left", fontFamily: "inherit", cursor: "pointer",
-                        minHeight: duties.length ? 58 : 38, borderRadius: 10, padding: "5px 6px",
-                        /* Deliberately NOT frosted. Glass belongs on the few big
-                           surfaces — the card and the panel below — the way it
-                           works on the sign-in page. Giving all 42 cells their own
-                           frosted panel made every empty day look like something
-                           worth reading, and the month stopped being scannable.
-
-                           So: a day with duties gets a quiet white card, a day
-                           without gets nothing at all beyond its number, and the
-                           gold of a non-official day still shows through. */
-                        background: !inMonth ? "transparent"
-                          : info.anyNonOfficial ? "rgba(243,217,164,0.26)"
-                          : duties.length ? "rgba(255,255,255,0.12)"
-                          : "transparent",
-                        /* Faded rather than hidden: enough to read, not enough to
-                           be mistaken for part of this month. Days with a duty stay
-                           a little clearer than empty ones. */
-                        /* Lagoon is too dark to read as a highlight here, so the
-                           selected and today markers use the pale mint from the
-                           sign-in palette instead. */
-                        border: isSelected
-                          ? "2px solid #8FE3D2"
-                          : isToday
-                            ? "1.5px solid rgba(143,227,210,0.75)"
-                            : (inMonth && (duties.length || info.anyNonOfficial))
-                              ? "1px solid rgba(255,255,255,0.22)"
-                              : "1px solid transparent",
-                        boxShadow: isSelected ? "0 4px 18px rgba(143,227,210,0.28)" : "none",
-                        opacity: inMonth ? 1 : (duties.length ? 0.45 : 0.3),
-                      }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: duties.length ? 4 : 0 }}>
-                        <span className="dr-dash-daynum" style={{
-                          display: "inline-flex", alignItems: "center", justifyContent: "center",
-                          minWidth: 19, height: 19, borderRadius: 999, padding: "0 5px",
-                          fontSize: 11, fontWeight: 700, lineHeight: 1,
-                          background: isToday ? "#8FE3D2" : "transparent",
-                          color: isToday ? "#0E4C4A" : (info.anyNonOfficial ? "#F3D9A4" : "rgba(255,255,255,0.82)"),
-                        }}>{pad(date.getDate())}</span>
-                        {/* On call is a state, not a duty, so it gets a mark
-                            rather than a block of its own. */}
-                        {/* Pinned to the corner rather than sitting beside the
-                            date: in a narrow cell the two competed for width and
-                            this was the one that got clipped. */}
-                        {info.anyOnCall && (
-                          <span title="On call" className="dr-dash-oc" style={{
-                            position: "absolute", top: 2, right: 2,
-                            fontSize: 8.5, fontWeight: 800, letterSpacing: 0.2, lineHeight: 1,
-                            color: "#5C3F08", background: "#F3D9A4",
-                            borderRadius: 4, padding: "2px 3px",
-                          }}>OC</span>
-                        )}
-                      </div>
-                      {/* The cell carries the duty and its task only. Which
-                          department, and what the code means, are in the panel
-                          below — a month grid has no room to say everything. */}
-                      {duties.map((duty, i) => (
-                        <div key={i} className="dr-dash-duty" style={{
-                          background: duty.color, color: textOn(duty.color),
-                          borderRadius: 6, padding: "3px 6px", marginBottom: 3,
-                          overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)",
-                        }}>
-                          <div className="dr-dash-code" style={{ fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{duty.text}</div>
-                          {duty.postName && (
-                            <div className="dr-dash-task" style={{
-                              fontSize: 9.5, fontWeight: 500, lineHeight: 1.3, opacity: 0.9,
-                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                            }}>{duty.postName}</div>
-                          )}
-                        </div>
-                      ))}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-
-          {/* ── The day in detail ──
-              The grid can only carry a code and a task. Everything else that
-              matters — which department, what the code actually means, whether
-              the day counts for payment, whether they are on call — lives here,
-              for whichever day is tapped. Opens on today. */}
-          <div className="dr-dash-panel dr-glass-soft" style={{
-            marginTop: 18, borderRadius: 14, padding: "14px 16px",
-            background: selectedInfo.anyNonOfficial ? "rgba(243,217,164,0.22)" : undefined,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
-              <span className="dr-dash-pdate" style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 15, fontWeight: 600 }}>
-                {niceFullDate(selected)}
+      {/* Today · Next — two small cards side by side */}
+      <section aria-label="Today" className="edr-home-top">
+        {/* Filled in the side menu's deep lagoon, so today stands out; white
+            text on it passes contrast comfortably. */}
+        <div style={{ borderRadius: 18, padding: "12px 14px", display: "flex", alignItems: "center", gap: 14, minWidth: 0, boxSizing: "border-box",
+          color: "#FFFFFF", background: "linear-gradient(135deg, #0E3A47 0%, #0D4F61 55%, #1F7F9F 100%)",
+          border: todayInfo.anyNonOfficial ? "2px solid #E6C27A" : "1px solid rgba(255,255,255,0.12)",
+          boxShadow: "0 10px 24px rgba(13,79,97,0.25)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flex: 1 }}>
+            <span style={{ ...eyebrow, color: "#9FD7E6", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              Today
+              {todayInfo.anyNonOfficial && <span style={{ padding: "1px 7px", borderRadius: 999, background: "#FFE3A3", color: "#5C3B00", letterSpacing: 0, textTransform: "none", fontWeight: 700 }}>Non-official</span>}
+              {todayInfo.anyOnCall && <span style={{ padding: "1px 7px", borderRadius: 999, background: "#F3D9A4", color: "#5C3F08", letterSpacing: 0, textTransform: "none", fontWeight: 700 }}>On call</span>}
+            </span>
+            <span style={{ fontFamily: H, fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>{lead ? (lead.label || lead.text) : "Nothing rostered"}</span>
+            <span style={{ fontSize: 12, color: "#CDEBF4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {lead ? [lead.deptName, leadPost].filter(Boolean).join(" · ") : (myMemberships.length ? "No duty in your name today" : "Duties appear when a staff row carries your login email")}
+            </span>
+            {lead && WORKED(lead.counts) && (
+              <span title={leadWith.join(", ")} style={{ fontSize: 12, fontStyle: "italic", color: "#9FE3EE", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {leadWith.length ? `With ${leadWith.slice(0, 4).join(", ")}${leadWith.length > 4 ? ` +${leadWith.length - 4}` : ""}` : "Nobody else on this shift"}
               </span>
-              {selected === dstr(today) && (
-                <span style={{
-                  fontSize: 10.5, fontWeight: 700, color: "#0E4C4A", background: "#8FE3D2",
-                  borderRadius: 999, padding: "2px 9px",
-                }}>TODAY</span>
-              )}
-              {selectedInfo.anyNonOfficial && (
-                <span style={{
-                  fontSize: 10.5, fontWeight: 700, color: "#5C3F08", background: "#F3D9A4",
-                  border: "1px solid rgba(255,255,255,0.35)", borderRadius: 999, padding: "2px 9px",
-                }}>NON-OFFICIAL DAY</span>
-              )}
-              {selectedInfo.anyOnCall && (
-                <span style={{
-                  fontSize: 10.5, fontWeight: 700, color: "#5C3F08", background: "#F3D9A4",
-                  border: "1px solid rgba(255,255,255,0.35)", borderRadius: 999, padding: "2px 9px",
-                }}>ON CALL</span>
-              )}
-            </div>
-
-            {selectedInfo.duties.length === 0 ? (
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.78)" }}>
-                No duty scheduled{selectedInfo.anyNonOfficial ? " — this is a non-official day." : "."}
-              </div>
-            ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                {selectedInfo.duties.map((d, i) => (
-                  <div key={i} style={{
-                    display: "flex", alignItems: "flex-start", gap: 11,
-                    /* Solid, not glass: this row carries the duty colour chip
-                       and the post name, and both need to stay crisp. */
-                    background: "#fff", border: `1px solid ${T.line}`,
-                    borderRadius: 9, padding: "10px 12px",
-                  }}>
-                    <span style={{
-                      flexShrink: 0, minWidth: 40, textAlign: "center",
-                      background: d.onCallOnly ? "#FBF1DC" : d.color,
-                      color: d.onCallOnly ? "#A5731B" : textOn(d.color),
-                      border: "1px solid rgba(0,0,0,0.07)", borderRadius: 7,
-                      padding: "6px 8px", fontSize: 12.5, fontWeight: 800, lineHeight: 1.2,
-                    }}>{d.onCallOnly ? "OC" : d.text}</span>
-                    <div style={{ minWidth: 0 }}>
-                      {/* This row is solid white so the duty colour stays crisp,
-                         which means its text must set a dark colour explicitly.
-                         Without it the line inherits the white used everywhere
-                         else on this theme and disappears. */}
-                      <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35, color: T.ink }}>
-                        {d.onCallOnly ? "On call" : (d.label || d.text)}
-                        {d.postName && <span style={{ fontWeight: 500, color: T.inkSoft }}> — {d.postName}</span>}
-                      </div>
-                      <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 2 }}>
-                        {d.deptName}
-                        {d.onCall && !d.onCallOnly && " · on call"}
-                        {d.nonOfficial && " · counts as non-official day duty"}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            )}
+            {todayDuties.length > 1 && <span style={{ fontSize: 11.5, color: "#CDEBF4" }}>+{todayDuties.length - 1} more today</span>}
+            {lead && (
+              <button type="button" onClick={() => onOpenDepartment && onOpenDepartment(lead.deptId)} style={{
+                alignSelf: "flex-start", marginTop: 4, height: 28, padding: "0 12px", borderRadius: 999, border: "none",
+                background: "#FFFFFF", color: "#0D4F61", fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Open rota</button>
             )}
           </div>
+          {lead
+            ? <span className="edr-today-code" style={chip(lead.color, { flex: "none", minWidth: 74, height: 74, padding: "0 8px", borderRadius: 20, fontFamily: H, fontSize: lead.text.length > 3 ? 18 : 34, border: "2px solid rgba(255,255,255,0.85)", boxShadow: "0 6px 16px rgba(0,0,0,0.18)" })}>{lead.text}</span>
+            : <span className="edr-today-code" style={{ flex: "none", width: 74, height: 74, borderRadius: 20, border: "1.5px dashed rgba(255,255,255,0.45)", display: "flex", alignItems: "center", justifyContent: "center", color: "#CDEBF4", fontSize: 22 }}>—</span>}
+        </div>
 
-          <p style={{ textAlign: "center", color: "rgba(255,255,255,0.7)", fontSize: 11.5, margin: "20px 0 0", lineHeight: 1.6 }}>
-            A duty appears here when a staff row in that department carries your
-            login email. This view is read-only — open a department to make changes.
-          </p>
-        </main>
+        <div style={{ ...card, borderRadius: 18, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+          <span style={eyebrow}>Next</span>
+          {upcoming.slice(0, 3).map((u) => (
+            <div key={u.ds} title={`${niceFullDate(u.ds)}: ${u.first ? (u.first.label || u.first.text) + (manyDepts ? ` · ${u.first.deptName}` : "") : "nothing rostered"}${u.nonOfficial ? " · non-official day" : ""}`}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "3px 4px 3px 12px", borderRadius: 999,
+                border: u.nonOfficial ? "1.5px solid #E6C27A" : "1.5px solid rgba(14,58,71,0.22)",
+                background: u.nonOfficial ? "rgba(255,240,207,0.7)" : "rgba(255,255,255,0.5)" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: u.nonOfficial ? "#7A4F00" : T.ink, whiteSpace: "nowrap" }}>
+                {u.d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" })}
+              </span>
+              {u.first
+                ? <span style={chip(u.first.color, { minWidth: 44, height: 24, padding: "0 8px", borderRadius: 999, fontSize: 11, whiteSpace: "nowrap" })}>{u.first.text}{u.more ? "+" : ""}</span>
+                : <span style={{ minWidth: 44, height: 24, borderRadius: 999, border: `1px dashed ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center", color: T.inkSoft, fontSize: 11 }}>—</span>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Calendar — a box per day, only the codes inside */}
+      <section className="edr-cal" aria-labelledby="edr-cal-h" onTouchStart={onCalTouchStart} onTouchEnd={onCalTouchEnd}
+        style={{ touchAction: "pan-y", ...card, borderRadius: 20, display: "flex", flexDirection: "column", gap: 10, padding: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button type="button" onClick={prevMonth} aria-label="Previous month" style={roundBtn}><ChevronLeft size={16} /></button>
+            <h2 id="edr-cal-h" style={{ margin: "0 4px", fontFamily: H, fontSize: 16, fontWeight: 700, minWidth: 130, textAlign: "center" }}>{MONTHS[view.month]} {view.year}</h2>
+            <button type="button" onClick={nextMonth} aria-label="Next month" style={roundBtn}><ChevronRight size={16} /></button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, fontSize: 11.5, color: T.inkSoft }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: 3, background: "#FFF0CF", border: "1px solid #E6C27A" }} />Non-official</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: 3, border: "2px solid #0D4F61", boxSizing: "border-box" }} />Today</span>
+          </div>
+        </div>
+        <div className="edr-cal-grid" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
+          {DAY_NAMES.map((d) => (
+            <div key={d} className="edr-cal-dow" style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: "#1F7F9F" }}>
+              {d.charAt(0) + d.slice(1).toLowerCase()}
+            </div>
+          ))}
+          {grid.filter((week) => week.some((d) => d.getMonth() === view.month)).flat().map((date) => {
+            const ds = dstr(date);
+            const inMonth = date.getMonth() === view.month;
+            const isToday = sameDay(date, today);
+            const isSelected = ds === selected;
+            const info = dayInfo(ds);
+            const duties = info.duties.filter((d) => !d.onCallOnly);
+            const nonOff = info.anyNonOfficial && inMonth;
+            return (
+              <button key={ds} type="button" className="edr-day" aria-pressed={isSelected}
+                aria-label={niceFullDate(ds) + (duties.length ? ", " + duties.map((d) => d.label || d.text).join(", ") : "") + (info.anyNonOfficial ? ", non-official day" : "")}
+                onClick={() => {
+                  if (!inMonth) setView({ year: date.getFullYear(), month: date.getMonth() });
+                  setSelected(ds);
+                }}
+                style={{
+                  position: "relative", minHeight: 58, minWidth: 0, boxSizing: "border-box", padding: "5px 5px 6px", borderRadius: 12,
+                  display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4, textAlign: "left",
+                  fontFamily: "inherit", color: "inherit", cursor: "pointer", opacity: inMonth ? 1 : 0.4,
+                  background: isSelected ? "#E3F2F7" : nonOff ? "rgba(255,240,207,0.95)" : "rgba(255,255,255,0.8)",
+                  border: isSelected ? "2px solid #1F7F9F" : isToday ? "2px solid #0D4F61" : nonOff ? "1px solid #E6C27A" : "1px solid rgba(14,58,71,0.10)",
+                  boxShadow: isSelected ? "0 6px 16px rgba(13,79,97,0.18)" : "none",
+                }}>
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
+                  <span className="edr-num" style={{
+                    minWidth: 20, height: 20, padding: "0 5px", borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 12, fontWeight: isToday ? 700 : 600, fontVariantNumeric: "tabular-nums",
+                    background: isToday ? "#0D4F61" : "transparent", color: isToday ? "#fff" : nonOff ? "#7A4F00" : T.ink,
+                  }}>{date.getDate()}</span>
+                  {info.anyOnCall && <span title="On call" style={{ fontSize: 8.5, fontWeight: 800, color: "#5C3F08", background: "#F3D9A4", borderRadius: 4, padding: "2px 3px", lineHeight: 1 }}>OC</span>}
+                </span>
+                {duties.slice(0, 2).map((duty, i) => (
+                  <span key={i} className="edr-daychip" style={chip(duty.color, { height: 20, borderRadius: 6, padding: "0 4px", fontSize: 11, overflow: "hidden", whiteSpace: "nowrap" })}>{duty.text}</span>
+                ))}
+                {duties.length > 2 && <span style={{ fontSize: 9.5, color: T.inkSoft, textAlign: "center" }}>+{duties.length - 2}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </section>
       </div>
+
+      {/* Right: this month, then the day you tapped (beside the calendar) */}
+      <div className="edr-home-right">
+      <aside className="edr-month" aria-label="This month" style={{ ...card, borderRadius: 20, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+        <span style={eyebrow}>This month · {MONTHS[today.getMonth()]}</span>
+        <div className="edr-rings">
+          {[
+            ["M", monthTotals.morning, "#F4B860", "#F7C35F", "#4A3300"],
+            ["A", monthTotals.afternoon, "#8FBF6B", "#9BD08A", "#1D3B12"],
+            ...(showEvening ? [["E", monthTotals.evening, "#8E7CC3", "#C9B8EC", "#2E1F55"]] : []),
+            ["N", monthTotals.night, "#6FA8DC", "#7FB2E5", "#0B2A4A"],
+            ["OFF", monthTotals.off, "#9FB6BD", "#FFFFFF", "#24505C"],
+          ].map(([label, n, ring, chipBg, chipFg]) => {
+            const r = 20, c = 2 * Math.PI * r;
+            const share = Math.min(1, n / monthDays.length);
+            return (
+              <div key={label} className="edr-ring-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+                title={`${n} ${label} this month (of ${monthDays.length} days)`}>
+                <span style={{ minWidth: 34, height: 24, padding: "0 6px", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11.5, fontWeight: 800, background: chipBg, color: chipFg, border: label === "OFF" ? "1px solid #9FB6BD" : "none" }}>{label}</span>
+                <svg width="50" height="50" viewBox="0 0 50 50" role="img" aria-label={`${label}: ${n}`}>
+                  <circle cx="25" cy="25" r={r} fill="none" stroke="#E4EEF2" strokeWidth="6" />
+                  <circle className="edr-ring-arc" cx="25" cy="25" r={r} fill="none" stroke={ring} strokeWidth="6" strokeLinecap="round"
+                    strokeDasharray={c} strokeDashoffset={c * (1 - share)} transform="rotate(-90 25 25)"
+                    style={{ "--edr-ring-c": c }} />
+                  <text x="25" y="29.5" textAnchor="middle" fontSize="13" fontWeight="800" fill="#0E3A47" fontFamily="Inter, sans-serif">{n}</text>
+                </svg>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span style={{ ...eyebrow, color: "#7A4F00" }}>Non-official days</span>
+          <span style={{ fontFamily: H, fontSize: 26, fontWeight: 800, color: "#5C3B00", lineHeight: 1 }}>{nonOffWorked.length}</span>
+        </div>
+      </aside>
+
+      {selected && (
+        <section aria-label="Day details" className="edr-daydetails" style={{
+          ...card, borderRadius: 18, display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px",
+          background: selectedInfo.anyNonOfficial ? "rgba(255,244,222,0.9)" : card.background,
+          border: selectedInfo.anyNonOfficial ? "1px solid #E6C27A" : card.border,
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: selectedInfo.anyNonOfficial ? "#A06A00" : "#1F7F9F" }}>
+                {selectedInfo.anyNonOfficial ? "Non-official day" : selected === todayStr ? "Today" : "Official day"}{selectedInfo.anyOnCall ? " · On call" : ""}
+              </span>
+              <h3 style={{ margin: 0, fontFamily: H, fontSize: 14.5, fontWeight: 800 }}>{niceFullDate(selected)}</h3>
+            </div>
+            <button type="button" aria-label="Close day details" onClick={() => setSelected(null)} style={{
+              flex: "none", width: 26, height: 26, padding: 0, borderRadius: "50%", border: "none", background: "rgba(14,58,71,0.08)", color: T.ink,
+              display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={12} /></button>
+          </div>
+          {selectedInfo.duties.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: T.inkSoft }}>No duty scheduled{selectedInfo.anyNonOfficial ? " — non-official day." : "."}</div>
+          ) : selectedInfo.duties.map((d, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 12, background: "rgba(255,255,255,0.85)" }}>
+              <span style={d.onCallOnly
+                ? { flex: "none", minWidth: 40, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "#FBF1DC", color: "#A5731B", fontWeight: 800, fontSize: 12 }
+                : chip(d.color, { flex: "none", minWidth: 40, height: 30, padding: "0 6px", borderRadius: 8, fontSize: d.text.length > 3 ? 10 : 13 })}>
+                {d.onCallOnly ? "OC" : d.text}
+              </span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{d.onCallOnly ? "On call" : (d.label || d.text)}</span>
+                <span style={{ fontSize: 11.5, color: T.inkSoft }}>
+                  {[d.postName, d.deptName].filter(Boolean).join(" · ")}{d.onCall && !d.onCallOnly ? " · on call" : ""}
+                </span>
+                {d.nonOfficial && WORKED(d.counts) && <span style={{ fontSize: 11, color: "#7A4F00", fontWeight: 600 }}>Counts for non-official payment</span>}
+              </span>
+            </div>
+          ))}
+        </section>
+      )}
+
+      </div>
+      </div>
+
+      {/* Your departments */}
+      <section aria-labelledby="edr-own-h" style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <h2 id="edr-own-h" style={{ margin: 0, fontFamily: H, fontSize: 17, fontWeight: 700 }}>Your departments</h2>
+            <span style={{ fontSize: 12, color: T.inkSoft }}>{orgName ? `${orgName} · you own these` : "You own these"}</span>
+          </div>
+          {owned.length > 0 && (
+            <button type="button" onClick={() => setScreen("members")} style={{
+              display: "flex", alignItems: "center", gap: 6, height: 34, padding: "0 14px", borderRadius: 999, border: "none",
+              background: "linear-gradient(90deg, #0D4F61, #1F7F9F)", color: "#fff", fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+              cursor: "pointer" }}><Users size={15} /> Members</button>
+          )}
+        </div>
+        <div className="edr-dept-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
+          {owned.map((d, i) => (
+            <DeptCard key={d.id} d={d} i={i} badge={<span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#0D4F61", color: "#fff" }}>Owner</span>} />
+          ))}
+          {owned.length === 0 && !(canAddDepartment && onAddDepartment) && (
+            <div style={{ fontSize: 12.5, color: T.inkSoft, border: `1px dashed ${T.line}`, borderRadius: 16, padding: 12 }}>No departments of your own yet.</div>
+          )}
+          {canAddDepartment && onAddDepartment && (
+            <button type="button" onClick={onAddDepartment} title="Add a department" aria-label="Add a department" className="edr-home-dept" style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 54, borderRadius: 18,
+              border: "1.5px dashed rgba(13,79,97,0.45)", background: "rgba(255,255,255,0.3)", color: "#0D4F61",
+              fontFamily: "inherit", fontWeight: 600, fontSize: 13, cursor: "pointer" }}><Plus size={16} /><span className="edr-dept-text">Add a department</span></button>
+          )}
+        </div>
+      </section>
+
+      {/* Shared with you */}
+      <section aria-labelledby="edr-shared-h" style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <h2 id="edr-shared-h" style={{ margin: 0, fontFamily: H, fontSize: 17, fontWeight: 700 }}>Your shared departments</h2>
+          <span style={{ fontSize: 12, color: T.inkSoft }}>Owned by someone else and shared with you</span>
+        </div>
+        {memberships.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: T.inkSoft, border: `1px dashed ${T.line}`, borderRadius: 16, padding: 12, lineHeight: 1.5 }}>
+            No departments have been shared with you yet. When someone invites you to their department, it will appear here.
+          </div>
+        ) : (
+          <div className="edr-dept-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10 }}>
+            {memberships.map((d, i) => (
+              <DeptCard key={d.id} d={d} i={i + owned.length}
+                badge={<span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "rgba(255,255,255,0.85)", border: "1px solid rgba(14,58,71,0.25)", color: T.ink }}>{roleLabel(d.role)}</span>}
+                sub={String(d.role || "").toLowerCase() === "employee" ? "View only" : null} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Account and billing history. Until the redesigned Your account
+          screen (step 6) gathers these together, both are reached from here
+          on every screen size — the side menu's Your account opens the first. */}
+      <section aria-label="Your account" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <button type="button" onClick={() => setScreen("account")} style={pillBtn}><User size={15} /> Your account</button>
+        <button type="button" onClick={() => setScreen("history")} style={pillBtn}><CreditCard size={15} /> Subscription history</button>
+      </section>
     </div>
   );
 }
 
-const navBtn = {
-  display: "flex", alignItems: "center", justifyContent: "center",
-  width: 34, height: 34, borderRadius: 9, cursor: "pointer",
-  background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", color: "#fff",
+const roundBtn = {
+  width: 34, height: 34, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.95)", background: "rgba(255,255,255,0.7)",
+  color: "#0E3A47", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0,
+};
+const pillBtn = {
+  display: "flex", alignItems: "center", gap: 6, minHeight: 36, padding: "0 14px", borderRadius: 999,
+  border: "1px solid rgba(14,58,71,0.18)", background: "rgba(255,255,255,0.7)", color: "#0E3A47",
+  fontFamily: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer",
 };

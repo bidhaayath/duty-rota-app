@@ -305,6 +305,8 @@ const T = {
 };
 
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+// The redesign's page background: soft blue light over the pale page colour.
+const PAGE_BG = "radial-gradient(700px 500px at 8% 4%, #A6DCF0 0%, rgba(166,220,240,0) 70%), radial-gradient(600px 600px at 100% 38%, #9FCDE0 0%, rgba(159,205,224,0) 70%), radial-gradient(700px 500px at 50% 100%, #BDE6F1 0%, rgba(189,230,241,0) 70%), " + T.mist;
 const LEAVE_STYLES = {
   annual:       { label: "Annual Leave",     abbrev: "AL",  bg: "#D8EEE9", fg: "#0B6A60", icon: Plane },
   maternity:    { label: "Maternity",        abbrev: "MAT", bg: "#E9E9E9", fg: "#5A6B72", icon: Baby },
@@ -1367,19 +1369,158 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     return () => { alive = false; };
   }, []);
 
+  // The department dropdown, shared by the phone header and the side menu.
+  // Only one of the two is ever on screen (the other is display: none).
+  const deptMenuBody = (
+    <>
+            <div
+              onClick={() => setDeptMenuOpen(false)}
+              style={{ position: "fixed", inset: 0, zIndex: 59, pointerEvents: deptMenuOpen ? "auto" : "none" }}
+            />
+            <div
+              className="dr-deptmenu-panel"
+              inert={!deptMenuOpen}
+              style={{
+                position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
+                background: "rgba(255,255,255,0.8)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", color: T.ink, borderRadius: 16, border: "1px solid rgba(255,255,255,0.9)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 12px 30px rgba(14,58,71,0.18)", overflow: "hidden",
+                transformOrigin: "top left",
+                opacity: deptMenuOpen ? 1 : 0,
+                transform: deptMenuOpen ? "scale(1) translateY(0)" : "scale(0.96) translateY(-4px)",
+                pointerEvents: deptMenuOpen ? "auto" : "none",
+              }}
+            >
+                  {(() => {
+                    // Never waits on my_departments(), so nothing moves between
+                    // the two groups when it lands.
+                    const owned = departments.filter(allowance.showsAsMine);
+                    const member = departments.filter((d) => !allowance.showsAsMine(d));
+                    const renderDept = (d) => {
+                      const ro = allowance.isLocked(d.id);
+                      return (
+                        <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
+                          fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                          padding: "10px 14px", border: "none", background: d.id === deptId ? "rgba(13,79,97,0.08)" : "transparent",
+                          fontSize: 13.5, fontWeight: d.id === deptId ? 700 : 500, cursor: "pointer", textAlign: "left",
+                        }}>
+                          {d.id === deptId ? <Check size={14} color={T.lagoon} /> : <span style={{ width: 14 }} />}
+                          <span style={{ flex: 1 }}>{d.name}</span>
+                          {ro && <span title="View-only on your current plan" style={{ fontSize: 11, color: "#A5731B", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 999, padding: "1px 7px", fontWeight: 700 }}>🔒 View only</span>}
+                        </button>
+                      );
+                    };
+                    return (
+                      <>
+                        {owned.length > 0 && (
+                          <div style={{ padding: "8px 14px 4px", fontSize: 11, fontWeight: 700, color: T.inkSoft, textTransform: "uppercase", letterSpacing: 0.4 }}>My Organisation</div>
+                        )}
+                        {owned.map(renderDept)}
+                        {member.length > 0 && (
+                          <div style={{ padding: "8px 14px 4px", fontSize: 11, fontWeight: 700, color: T.inkSoft, textTransform: "uppercase", letterSpacing: 0.4 }}>My Membership</div>
+                        )}
+                        {member.map(renderDept)}
+                      </>
+                    );
+                  })()}
+                  <div style={{ borderTop: `1px solid ${T.line}` }}>
+                    {canManageDepts && (
+                      <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
+                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
+                        fontWeight: 600, color: T.lagoon, cursor: "pointer", textAlign: "left",
+                      }}><Plus size={14} /> Add department</button>
+                    )}
+                    {!viewOnlyRole && isOwnerLevel && (
+                      <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
+                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
+                        fontWeight: 600, cursor: "pointer", textAlign: "left",
+                      }}><Pencil size={14} /> Rename this department</button>
+                    )}
+                    {/* Only once the role is actually known — an owner whose
+                        role lookups failed is not "a member". */}
+                    {ownerRole.known && !isOwnerLevel && (
+                      <div style={{ padding: "10px 14px", fontSize: 12, color: T.inkSoft, lineHeight: 1.5, borderTop: `1px solid ${T.line}` }}>
+                        You're a member of this department. Only its owner can add or delete departments here.
+                      </div>
+                    )}
+                    {canManageDepts && allowance.canDelete(deptId) && (
+                      <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
+                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
+                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
+                        fontWeight: 600, color: T.coral, cursor: "pointer", textAlign: "left",
+                      }}><Trash2 size={14} /> Delete this department</button>
+                    )}
+                  </div>
+                </div>
+    </>
+  );
+  const deptName = (departments.find((d) => d.id === deptId) || {}).name || "Department";
+  const sideDeptSwitcher = departments.length > 0 ? (
+    <div style={{ position: "relative" }}>
+      <button type="button" className="dr-deptbtn edr-navbtn" onClick={() => setDeptMenuOpen((o) => !o)}
+        aria-expanded={deptMenuOpen} title={`Switch department — viewing ${deptName}`} style={{
+          fontFamily: "inherit", display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 52,
+          padding: "8px 12px", borderRadius: 16, background: "rgba(255,255,255,0.08)",
+          border: "1px solid rgba(255,255,255,0.14)", color: "#FFFFFF", textAlign: "left", cursor: "pointer",
+        }}>
+        <Users size={18} aria-hidden="true" style={{ flex: "none", color: "#5FC4D6" }} />
+        <span className="edr-hide" style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 11, color: "#9FC6D2", letterSpacing: "0.04em", textTransform: "uppercase" }}>Viewing</span>
+          <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deptName}</span>
+        </span>
+        <ChevronDown size={16} aria-hidden="true" className="edr-hide dr-deptmenu-chevron" style={{ flex: "none", transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
+      </button>
+      {deptMenuBody}
+    </div>
+  ) : null;
+  // Side menu order from the redesign. Statistics, Staff Records and
+  // Insights sit together under Reports, with a switch at the top of the page.
+  const REPORT_TABS = [["stats", "Statistics"], ["records", "Staff Records"], ["insights", "Insights"]];
+  const inReports = REPORT_TABS.some(([id]) => id === tab);
+  const sideItems = [
+    { id: "dashboard", label: "Home", icon: HomeIcon },
+    { id: "rota", label: "Rota", icon: CalendarRange },
+    { id: "codes", label: "Duty Codes", icon: Palette },
+    { id: "staff", label: "Staff", icon: Users },
+    { id: "requests", label: "Duty Requests", icon: MessageCircle },
+    { id: "smart", label: "Smart Roster", icon: Wand2 },
+    { id: "reports", label: "Reports", icon: BarChart3 },
+    { id: "settings", label: "Settings", icon: Settings },
+    { id: "sep", divider: true },
+    { id: "help", label: "Help", icon: HelpCircle },
+    { id: "account", label: "Your account", icon: User },
+  ];
+  // Home and its own screens (Your account, Subscription history, Members).
+  const HOME_TABS = { dashboard: "home", account: "account", history: "history", members: "members" };
+  const onHome = tab in HOME_TABS;
+  const sideActive = inReports ? "reports" : tab === "history" ? "account" : tab === "members" ? "dashboard" : tab;
+
   /* On laptops the side menu carries My plan and Log out, so App's top bar
-     steps aside while a department screen with the menu is showing. Only
-     then: Home, loading, the print view and the "nothing shared yet" screen
+     steps aside while the menu is showing (Home and every department
+     screen). Loading, the print view and the "nothing shared yet" screen
      keep the top bar, so Log out is always somewhere on screen. */
-  const sideMenuShown = tab !== "dashboard" && !printView && !!data && !(viewOnlyRole && departments.length === 0);
+  const sideMenuShown = !printView && (onHome || (!!data && !(viewOnlyRole && departments.length === 0)));
   useEffect(() => {
     document.body.classList.toggle("edr-has-side", sideMenuShown);
     return () => document.body.classList.remove("edr-has-side");
   }, [sideMenuShown]);
 
-  if (tab === "dashboard") {
+  const sideMenu = (
+    <SideMenu items={sideItems} activeId={sideActive}
+      onSelect={(id) => setTab(id === "reports" ? "stats" : id)}
+      deptSwitcher={sideDeptSwitcher} email={userEmail}
+      onOpenPlans={onOpenBilling} onOpenAdmin={onOpenAdmin} />
+  );
+  if (onHome) {
     return (
+      <div key="dr-home" className="dr-app" style={{ fontFamily: "Inter, system-ui, sans-serif", background: PAGE_BG, minHeight: "100vh", color: T.ink }}>
+      <div className="edr-shell">
+      {sideMenu}
+      <div className="edr-content">
       <Dashboard
+        screen={HOME_TABS[tab]}
+        onScreen={(next) => setTab(next === "home" ? "dashboard" : next)}
         departments={departments}
         isMyDept={allowance.showsAsMine}
         deptPerms={deptPerms}
@@ -1390,6 +1531,9 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         onOpenDepartment={(id) => { switchDept(id); setTab("rota"); }}
         onOpenPlans={onOpenBilling}
       />
+      </div>
+      </div>
+      </div>
     );
   }
 
@@ -1925,130 +2069,9 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   ];
 
 
-  // The department dropdown, shared by the phone header and the side menu.
-  // Only one of the two is ever on screen (the other is display: none).
-  const deptMenuBody = (
-    <>
-            <div
-              onClick={() => setDeptMenuOpen(false)}
-              style={{ position: "fixed", inset: 0, zIndex: 59, pointerEvents: deptMenuOpen ? "auto" : "none" }}
-            />
-            <div
-              className="dr-deptmenu-panel"
-              inert={!deptMenuOpen}
-              style={{
-                position: "absolute", top: "115%", left: 0, zIndex: 60, minWidth: 240,
-                background: "rgba(255,255,255,0.8)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)", color: T.ink, borderRadius: 16, border: "1px solid rgba(255,255,255,0.9)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 12px 30px rgba(14,58,71,0.18)", overflow: "hidden",
-                transformOrigin: "top left",
-                opacity: deptMenuOpen ? 1 : 0,
-                transform: deptMenuOpen ? "scale(1) translateY(0)" : "scale(0.96) translateY(-4px)",
-                pointerEvents: deptMenuOpen ? "auto" : "none",
-              }}
-            >
-                  {(() => {
-                    // Never waits on my_departments(), so nothing moves between
-                    // the two groups when it lands.
-                    const owned = departments.filter(allowance.showsAsMine);
-                    const member = departments.filter((d) => !allowance.showsAsMine(d));
-                    const renderDept = (d) => {
-                      const ro = allowance.isLocked(d.id);
-                      return (
-                        <button key={d.id} onClick={() => { setDeptMenuOpen(false); switchDept(d.id); }} style={{
-                          fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                          padding: "10px 14px", border: "none", background: d.id === deptId ? "rgba(13,79,97,0.08)" : "transparent",
-                          fontSize: 13.5, fontWeight: d.id === deptId ? 700 : 500, cursor: "pointer", textAlign: "left",
-                        }}>
-                          {d.id === deptId ? <Check size={14} color={T.lagoon} /> : <span style={{ width: 14 }} />}
-                          <span style={{ flex: 1 }}>{d.name}</span>
-                          {ro && <span title="View-only on your current plan" style={{ fontSize: 11, color: "#A5731B", background: "#FBF1DC", border: "1px solid #E7D9B8", borderRadius: 999, padding: "1px 7px", fontWeight: 700 }}>🔒 View only</span>}
-                        </button>
-                      );
-                    };
-                    return (
-                      <>
-                        {owned.length > 0 && (
-                          <div style={{ padding: "8px 14px 4px", fontSize: 11, fontWeight: 700, color: T.inkSoft, textTransform: "uppercase", letterSpacing: 0.4 }}>My Organisation</div>
-                        )}
-                        {owned.map(renderDept)}
-                        {member.length > 0 && (
-                          <div style={{ padding: "8px 14px 4px", fontSize: 11, fontWeight: 700, color: T.inkSoft, textTransform: "uppercase", letterSpacing: 0.4 }}>My Membership</div>
-                        )}
-                        {member.map(renderDept)}
-                      </>
-                    );
-                  })()}
-                  <div style={{ borderTop: `1px solid ${T.line}` }}>
-                    {canManageDepts && (
-                      <button onClick={() => { setDeptMenuOpen(false); addDepartment(); }} style={{
-                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
-                        fontWeight: 600, color: T.lagoon, cursor: "pointer", textAlign: "left",
-                      }}><Plus size={14} /> Add department</button>
-                    )}
-                    {!viewOnlyRole && isOwnerLevel && (
-                      <button onClick={() => { setDeptMenuOpen(false); renameDepartment(); }} style={{
-                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
-                        fontWeight: 600, cursor: "pointer", textAlign: "left",
-                      }}><Pencil size={14} /> Rename this department</button>
-                    )}
-                    {/* Only once the role is actually known — an owner whose
-                        role lookups failed is not "a member". */}
-                    {ownerRole.known && !isOwnerLevel && (
-                      <div style={{ padding: "10px 14px", fontSize: 12, color: T.inkSoft, lineHeight: 1.5, borderTop: `1px solid ${T.line}` }}>
-                        You're a member of this department. Only its owner can add or delete departments here.
-                      </div>
-                    )}
-                    {canManageDepts && allowance.canDelete(deptId) && (
-                      <button onClick={() => { setDeptMenuOpen(false); deleteDepartment(); }} style={{
-                        fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, width: "100%",
-                        padding: "10px 14px", border: "none", background: "transparent", fontSize: 13,
-                        fontWeight: 600, color: T.coral, cursor: "pointer", textAlign: "left",
-                      }}><Trash2 size={14} /> Delete this department</button>
-                    )}
-                  </div>
-                </div>
-    </>
-  );
-  const deptName = (departments.find((d) => d.id === deptId) || {}).name || "Department";
-  const sideDeptSwitcher = departments.length > 0 ? (
-    <div style={{ position: "relative" }}>
-      <button type="button" className="dr-deptbtn edr-navbtn" onClick={() => setDeptMenuOpen((o) => !o)}
-        aria-expanded={deptMenuOpen} title={`Switch department — viewing ${deptName}`} style={{
-          fontFamily: "inherit", display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 52,
-          padding: "8px 12px", borderRadius: 16, background: "rgba(255,255,255,0.6)",
-          border: "1px solid rgba(255,255,255,0.95)", color: T.ink, textAlign: "left", cursor: "pointer",
-        }}>
-        <Users size={18} aria-hidden="true" style={{ flex: "none", color: T.lagoon }} />
-        <span className="edr-hide" style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 11, color: T.inkSoft, letterSpacing: "0.04em", textTransform: "uppercase" }}>Viewing</span>
-          <span style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deptName}</span>
-        </span>
-        <ChevronDown size={16} aria-hidden="true" className="edr-hide dr-deptmenu-chevron" style={{ flex: "none", transform: deptMenuOpen ? "rotate(180deg)" : "none" }} />
-      </button>
-      {deptMenuBody}
-    </div>
-  ) : null;
-  // Side menu order from the redesign. Statistics, Staff Records and
-  // Insights sit together under Reports, with a switch at the top of the page.
-  const REPORT_TABS = [["stats", "Statistics"], ["records", "Staff Records"], ["insights", "Insights"]];
-  const inReports = REPORT_TABS.some(([id]) => id === tab);
-  const sideItems = [
-    { id: "dashboard", label: "Home", icon: HomeIcon },
-    { id: "rota", label: "Rota", icon: CalendarRange },
-    { id: "codes", label: "Duty Codes", icon: Palette },
-    { id: "staff", label: "Staff", icon: Users },
-    { id: "requests", label: "Duty Requests", icon: MessageCircle },
-    { id: "smart", label: "Smart Roster", icon: Wand2 },
-    { id: "reports", label: "Reports", icon: BarChart3 },
-    { id: "settings", label: "Settings", icon: Settings },
-    { id: "sep", divider: true },
-    { id: "help", label: "Help", icon: HelpCircle },
-  ];
 
   return (
-    <div key="dr-app" className="dr-fade-in dr-app" style={{ fontFamily: "Inter, system-ui, sans-serif", background: "radial-gradient(700px 500px at 8% 4%, #A6DCF0 0%, rgba(166,220,240,0) 70%), radial-gradient(600px 600px at 100% 38%, #9FCDE0 0%, rgba(159,205,224,0) 70%), radial-gradient(700px 500px at 50% 100%, #BDE6F1 0%, rgba(189,230,241,0) 70%), " + T.mist, minHeight: "100vh", color: T.ink }}>
+    <div key="dr-app" className="dr-fade-in dr-app" style={{ fontFamily: "Inter, system-ui, sans-serif", background: PAGE_BG, minHeight: "100vh", color: T.ink }}>
       <style>{globalCss}</style>
 
       <header className="dr-header" style={{ background: T.ink, color: "#fff", padding: "18px 22px 0" }}>
@@ -2094,10 +2117,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
       </header>
 
       <div className="edr-shell">
-      <SideMenu items={sideItems} activeId={inReports ? "reports" : tab}
-        onSelect={(id) => setTab(id === "reports" ? "stats" : id)}
-        deptSwitcher={sideDeptSwitcher} email={userEmail}
-        onOpenPlans={onOpenBilling} onOpenAdmin={onOpenAdmin} />
+      {sideMenu}
       <div className="edr-content">
       <div className="edr-pagehead no-print">
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
