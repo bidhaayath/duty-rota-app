@@ -62,17 +62,19 @@ const safeFileName = (s) =>
  *                 days, in order; key is designation/contact/email/recc
  *   rows        [{ num, name, designation, contact, email, recc,
  *                  cells, totals, nonOfficialDuty }]
- *                 cells: [{ span, text, sub, post, second, secondPost, bg, fg, muted }]
+ *                 cells: [{ span, text, sub, post, second, secondPost, brk, bg, fg, muted }]
+ *                   brk: "Break 12:00–13:00", "" when none; drawn last, in its own colour
  *                   sub: a leave span's date range, "" when not shown
  *                 totals: [number] aligned with totalHeads
  *   onCall      [string]  one per day, "" when nobody
+ *   legend      string    "Legend: M = Morning duty (08:00–16:00) · …", under the grid
  *   staff       [{ name, designation, email, contact, recc, licence,
  *                  employmentRole, startDate, endDate, status }]
  */
 export async function exportRotaToExcel(model) {
   const {
     orgName = "", deptName = "Rota", rangeLabel = "",
-    days = [], totalHeads = [], extras = [], rows = [], onCall = [], staff = [], coverage = [],
+    days = [], totalHeads = [], extras = [], rows = [], onCall = [], staff = [], coverage = [], legend = "",
   } = model || {};
   /* Ticked staff details sit in columns 3 .. 2+E, so the days and totals
      move right by E. With designation as its own column the name cell
@@ -141,15 +143,25 @@ export async function exportRotaToExcel(model) {
   }
 
   /* Staff rows. */
+  /* Day columns widen a little when cells carry times or breaks, so
+     "07:30–15:30" and "Break 10:00–11:00" each fit on one line. */
+  const busy = rows.some((r) => r.cells.some((c) => (c.span || 1) === 1 && (c.sub || c.brk)));
+  const dayWidth = busy ? 16 : 11;
+  const dayChars = busy ? 17 : 12;
+
   rows.forEach((r, ri) => {
     const row = ws.getRow(HEAD + 1 + ri);
     /* Tall enough for the busiest cell in the row: a duty, its post, a second
        duty and its post is four lines. An email counts as two, so a long
        address wraps and stays readable instead of being clipped. */
+    // A line longer than the column wraps onto another, so it counts twice.
+    const linesOf = (t) => (t ? Math.ceil(String(t).length / dayChars) : 0);
     const maxLines = r.cells.reduce((n, c) => Math.max(n,
-      (c.text ? 1 : 0) + (c.sub ? 1 : 0) + (c.post ? 1 : 0) + (c.second ? 1 : 0) + (c.secondPost ? 1 : 0)),
+      (c.span || 1) > 1
+        ? (c.text ? 1 : 0) + (c.sub ? 1 : 0)
+        : linesOf(c.text) + linesOf(c.sub) + linesOf(c.post) + linesOf(c.second) + linesOf(c.secondPost) + linesOf(c.brk)),
       hasEmail && r.email ? 2 : 1);
-    row.height = maxLines > 1 ? 12 + maxLines * 11 : 20;
+    row.height = maxLines > 1 ? 8 + maxLines * 13.5 : 20;
 
     row.getCell(1).value = r.num;
     row.getCell(1).font = { size: 9, color: { argb: "FF4A6570" } };
@@ -185,13 +197,26 @@ export async function exportRotaToExcel(model) {
       if (seg.post) lines.push(seg.post);
       if (seg.second) lines.push(seg.second);
       if (seg.secondPost) lines.push(seg.secondPost);
-      cell.value = lines.join("\n");
-      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: lines.length > 1 };
-      cell.font = {
+      const font = {
         bold: !seg.muted, size: 10,
         italic: !!seg.muted,
         color: { argb: argb(seg.fg, "FF142B33") },
       };
+      if (seg.brk) {
+        /* Excel cannot shade one line of a cell, so the break gets its own
+           colour instead: deep purple, or light yellow on a dark duty colour
+           (where the duty's own text is white). */
+        const onDark = /^#?f{6}$/i.test(String(seg.fg || "").trim());
+        const brkFont = { bold: true, italic: true, size: 9, color: { argb: onDark ? "FFFFF0A8" : "FF5B1A8C" } };
+        cell.value = { richText: [
+          ...(lines.length ? [{ text: lines.join("\n") + "\n", font }] : []),
+          { text: seg.brk, font: brkFont },
+        ] };
+      } else {
+        cell.value = lines.join("\n");
+      }
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: lines.length > 1 || !!seg.brk };
+      cell.font = font;
       if (seg.bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: argb(seg.bg) } };
       for (let k = 0; k < span; k++) row.getCell(col + k).border = BORDER;
       col += span;
@@ -264,10 +289,24 @@ export async function exportRotaToExcel(model) {
     });
   }
 
+  /* The legend, one merged cell under everything: each code and its hours,
+     as on the printed rota. */
+  if (legend) {
+    const r = HEAD + 1 + rows.length + (onCall.some((x) => x) ? 1 : 0) + 1 + coverage.length + 1;
+    ws.mergeCells(r, 1, r, lastCol);
+    const cell = ws.getCell(r, 1);
+    cell.value = legend;
+    cell.font = { size: 9, color: { argb: "FF555555" } };
+    cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+    // Roughly how many characters fit across the merged width.
+    const across = 34 + E * 20 + days.length * 11 + totalHeads.length * 5.5 + 13;
+    ws.getRow(r).height = Math.max(1, Math.ceil((legend.length * 1.15) / across)) * 13 + 4;
+  }
+
   ws.getColumn(1).width = 4;
   ws.getColumn(2).width = 30;
   extras.forEach((x, i) => { ws.getColumn(3 + i).width = x.key === "email" ? 28 : 20; });
-  for (let i = 0; i < days.length; i++) ws.getColumn(3 + E + i).width = 11;
+  for (let i = 0; i < days.length; i++) ws.getColumn(3 + E + i).width = dayWidth;
   for (let i = 0; i < totalHeads.length; i++) ws.getColumn(3 + E + days.length + i).width = 5.5;
   ws.getColumn(lastCol).width = 13;
 
