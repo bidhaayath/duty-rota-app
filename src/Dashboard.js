@@ -265,6 +265,8 @@ export default function Dashboard({
           postName: post ? post.name : "",
           text: code ? code.code : "?",
           label: code ? (code.label || "") : "",
+          // The duty's hours, when the code has them (Duty Codes → Starts / Ends).
+          time: code && code.start && code.end ? `${code.start}–${code.end}` : "",
           // The post id from the department list, resolved to a name below.
           post: entry.post || "",
           color: code ? code.color : T.mist,
@@ -536,7 +538,7 @@ export default function Dashboard({
             </span>
             <span style={{ fontFamily: H, fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>{lead ? (lead.label || lead.text) : "Nothing rostered"}</span>
             <span style={{ fontSize: 12, color: "#CDEBF4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {lead ? [lead.deptName, leadPost].filter(Boolean).join(" · ") : (myMemberships.length ? "No duty in your name today" : "Duties appear when a staff row carries your login email")}
+              {lead ? [lead.time, lead.deptName, leadPost].filter(Boolean).join(" · ") : (myMemberships.length ? "No duty in your name today" : "Duties appear when a staff row carries your login email")}
             </span>
             {lead && WORKED(lead.counts) && (
               <span title={leadWith.join(", ")} style={{ fontSize: 12, fontStyle: "italic", color: "#9FE3EE", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -558,13 +560,16 @@ export default function Dashboard({
         <div style={{ ...card, borderRadius: 18, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
           <span style={eyebrow}>Next</span>
           {upcoming.slice(0, 3).map((u) => (
-            <div key={u.ds} title={`${niceFullDate(u.ds)}: ${u.first ? (u.first.label || u.first.text) + (manyDepts ? ` · ${u.first.deptName}` : "") : "nothing rostered"}${u.nonOfficial ? " · non-official day" : ""}`}
+            <div key={u.ds} title={`${niceFullDate(u.ds)}: ${u.first ? (u.first.label || u.first.text) + (u.first.time ? ` (${u.first.time})` : "") + (manyDepts ? ` · ${u.first.deptName}` : "") : "nothing rostered"}${u.nonOfficial ? " · non-official day" : ""}`}
               style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "3px 4px 3px 12px", borderRadius: 999,
                 border: u.nonOfficial ? "1.5px solid #E6C27A" : "1.5px solid rgba(14,58,71,0.22)",
                 background: u.nonOfficial ? "rgba(255,240,207,0.7)" : "rgba(255,255,255,0.5)" }}>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: u.nonOfficial ? "#7A4F00" : T.ink, whiteSpace: "nowrap" }}>
                 {u.d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" })}
               </span>
+              {u.first && u.first.time && (
+                <span style={{ marginLeft: "auto", fontSize: 11, color: T.inkSoft, whiteSpace: "nowrap" }}>{u.first.time}</span>
+              )}
               {u.first
                 ? <span style={chip(u.first.color, { minWidth: 44, height: 24, padding: "0 8px", borderRadius: 999, fontSize: 11, whiteSpace: "nowrap" })}>{u.first.text}{u.more ? "+" : ""}</span>
                 : <span style={{ minWidth: 44, height: 24, borderRadius: 999, border: `1px dashed ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center", color: T.inkSoft, fontSize: 11 }}>—</span>}
@@ -700,7 +705,7 @@ export default function Dashboard({
               <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{d.onCallOnly ? "On call" : (d.label || d.text)}</span>
                 <span style={{ fontSize: 11.5, color: T.inkSoft }}>
-                  {[d.postName, d.deptName].filter(Boolean).join(" · ")}{d.onCall && !d.onCallOnly ? " · on call" : ""}
+                  {[d.time, d.postName, d.deptName].filter(Boolean).join(" · ")}{d.onCall && !d.onCallOnly ? " · on call" : ""}
                 </span>
                 {d.nonOfficial && WORKED(d.counts) && <span style={{ fontSize: 11, color: "#7A4F00", fontWeight: 600 }}>Counts for non-official payment</span>}
               </span>

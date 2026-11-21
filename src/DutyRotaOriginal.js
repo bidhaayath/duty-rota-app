@@ -5,7 +5,8 @@ import {
   Users, LayoutDashboard, Settings, CalendarRange, Plus, Trash2,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Plane, Printer, BarChart3,
   AlertTriangle, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
-  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon
+  User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon,
+  Copy, ClipboardPaste
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -744,6 +745,19 @@ const weekSegments = (staff, days) => {
    a note, an exchange mark or a second duty stays its own cell. Tapping a
    band splits it back into cells for editing (`open` holds those keys).
    Nothing is saved; the cells and their counting are unchanged. */
+/* One code in an export legend: "M = Morning duty (08:00–16:00)", the
+   hours only when the code has them (Duty Codes → Starts / Ends). */
+const legendOf = (c) => `${c.code} = ${c.label || c.code}${c.start && c.end ? ` (${c.start}–${c.end})` : ""}`;
+/* A person's break on one day, kept beside the note:
+   cellMeta[date][staffId].breakTime = { start: "12:00", end: "13:00" }.
+   breakOf gives "12:00–13:00", or "" when there is none. */
+const breakOf = (data, date, staffId) => {
+  const b = cellMetaOf(data, date, staffId)?.breakTime;
+  return b && b.start && b.end ? `${b.start}–${b.end}` : "";
+};
+// A code's hours as one string, "07:30–15:30", or "" when it has none.
+const timeOf = (c) => (c && c.start && c.end ? `${c.start}–${c.end}` : "");
+
 const RUN_MIN = 4;
 // Exports always draw the bands (nothing is "tapped open" there).
 const NO_OPEN_RUNS = new Set();
@@ -1992,6 +2006,8 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
 
         const model = {
           orgName: viewData.orgName || "",
+          // The same legend as the printed rota, hours included.
+          legend: `Legend: ${viewData.codes.map(legendOf).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave`,
           deptName: viewData.title || "Rota",
           rangeLabel: rotaDays.length
             ? `${niceDate(rotaDays[0])} – ${niceDate(rotaDays[rotaDays.length - 1])}`
@@ -2033,8 +2049,12 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               return {
                 span: 1,
                 text: code ? code.code : "",
+                // The duty's hours on a small line under it, when the department shows them.
+                sub: viewData.showCodeTimes ? timeOf(code) : "",
+                // The break, on its own line at the foot of the cell, in its own colour.
+                brk: code && breakOf(viewData, seg.date, s.id) ? `Break ${breakOf(viewData, seg.date, s.id)}` : "",
                 post: pid ? nameOf(pid) : "",
-                second: secondCode ? secondCode.code : "",
+                second: secondCode ? `${secondCode.code}${viewData.showCodeTimes && timeOf(secondCode) ? ` ${timeOf(secondCode)}` : ""}` : "",
                 secondPost: (viewData.postsEnabled && second?.post) ? nameOf(second.post) : "",
                 bg: code ? code.color : (isNonOff(viewData, seg.date) ? "#FDF8EE" : "#FFFFFF"),
                 fg: code ? textOn(code.color) : "#4A6570",
@@ -2447,7 +2467,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             />
           )
         )}
-        {tab === "codes" && <DutyCodesTab data={data} update={update} />}
+        {tab === "codes" && <DutyCodesTab data={data} update={update} canEdit={!(editBlocked || currentDeptLocked || viewOnlyRole)} />}
         {tab === "settings" && <SettingsTab data={data} update={update} canUseLogo={features ? features.company_logo : true}
           orgName={effectiveOrgName} onSaveOrgName={onSaveOrgName} canEditOrgName={canEditOrgName && !viewOnlyRole && !locked && ownsThisOrg} />}
         {tab === "leave" && (
@@ -2490,12 +2510,16 @@ const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E4604E", 
 
 function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNote, onAddCode, eveningEnabled, exchange, onExchange,
   posts = [], postsEnabled = false, postId = "", onPickPost, postName = "",
-  splitEnabled = false, secondValue = "", secondPostId = "", secondPostName = "",
-  onPickSecond, onPickSecondPost, date = "", countDutiesIn = () => 0, onAddLeave }) {
+  splitEnabled = false, secondValue = "", secondPostId = "", secondPostName = "", showTime = false,
+  onPickSecond, onPickSecondPost, date = "", countDutiesIn = () => 0, onAddLeave,
+  breakTime = null, onBreak = null, onCopy = null, onPaste = null, clipLabel = "" }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState("pick"); // 'pick' | 'post' | 'second' | 'post2' | 'note' | 'add' | 'swap' | 'leave'
   const [noteText, setNoteText] = useState(note || "");
+  const [brk, setBrk] = useState({ start: "", end: "" });
+  const breakText = breakTime && breakTime.start && breakTime.end ? `${breakTime.start}–${breakTime.end}` : "";
+  const openBreak = () => { setBrk({ start: breakTime?.start || "", end: breakTime?.end || "" }); setMode("break"); };
   const [nc, setNc] = useState({ code: "", label: "", color: NEW_CODE_COLORS[0], counts: "morning" });
   const [lv, setLv] = useState({ type: "annual", label: "", start: "", end: "", clear: true });
   const [leaveErr, setLeaveErr] = useState("");
@@ -2634,16 +2658,26 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
     ["ml", "Medical leave (ML)"], ["leave", "Other leave"],
   ];
   const btnMini = { fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "6px 9px", borderRadius: 7, border: "none" };
+  // Hovering a duty shows what it is: "M · Morning duty · 08:00–16:00", then any note.
+  const cellTitle = [
+    ...[current, secondCode].filter(Boolean).map((c) =>
+      `${c.code}${c.label && c.label !== c.code ? ` · ${c.label}` : ""}${c.start && c.end ? ` · ${c.start}–${c.end}` : ""}`),
+    ...(breakText ? [`Break: ${breakText}`] : []),
+    ...(note ? [`Note: ${note}`] : []),
+  ].join("\n");
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
-      <button className="dr-cell" onClick={open ? close : openPanel} title={note ? `Note: ${note}` : undefined} style={{
+      <button className="dr-cell" onClick={open ? close : openPanel} title={cellTitle || undefined} style={{
         fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, width: "100%", minWidth: 74,
         padding: "7px 4px", borderRadius: 7, border: `1px solid ${hasCode ? "transparent" : T.line}`,
         background: cellBg, color: cellFg, cursor: "pointer", textAlign: "center", outline: "none", position: "relative",
         boxShadow: open ? `0 0 0 2px ${T.lagoon}` : "none",
       }}>
         {current ? current.code : "\u2014"}
+        {showTime && timeOf(current) && (
+          <div style={{ fontSize: 9, fontWeight: 600, lineHeight: 1.15, marginTop: 1, opacity: 0.85, whiteSpace: "nowrap" }}>{timeOf(current)}</div>
+        )}
         {/* The post under the duty. Every style here is inline on purpose:
             the image export clones the DOM and copies inline styles only, so
             anything styled by a CSS class would vanish from the exported
@@ -2654,6 +2688,14 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
             opacity: 0.9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>{postName}</div>
         )}
+        {/* The break: a light pill at the foot of the duty, readable on any colour. */}
+        {breakText && hasCode && (
+          <div style={{ margin: "3px auto 0", padding: "1px 6px", width: "fit-content", maxWidth: "100%", boxSizing: "border-box",
+            borderRadius: 999, background: "rgba(255,255,255,0.78)", color: "#0E3A47",
+            fontSize: 8.5, fontWeight: 700, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Break {breakText}
+          </div>
+        )}
         {/* The second duty of a split day, divided from the first by a hairline
             so the two read as separate shifts rather than one long label. */}
         {secondCode && (
@@ -2661,6 +2703,9 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
             marginTop: 3, paddingTop: 3, borderTop: "1px solid rgba(0,0,0,0.14)",
           }}>
             <div className="dr-duty2" style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.15 }}>{secondCode.code}</div>
+            {showTime && timeOf(secondCode) && (
+              <div style={{ fontSize: 9, fontWeight: 600, lineHeight: 1.15, marginTop: 1, opacity: 0.85, whiteSpace: "nowrap" }}>{timeOf(secondCode)}</div>
+            )}
             {secondPostName && (
               <div className="dr-postline" style={{
                 fontSize: 9.5, fontWeight: 600, lineHeight: 1.2, marginTop: 1,
@@ -2707,8 +2752,36 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
                 ))}
                 {ordered.length === 0 && <div style={{ fontSize: 12, color: T.inkSoft, padding: "8px 4px" }}>No code matches "{query}"</div>}
               </div>
-              <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKey} placeholder="Type to search… Enter = pick"
-                style={{ width: "100%", boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none", marginBottom: 7 }} />
+              <div style={{ display: "flex", gap: 6, marginBottom: 7 }}>
+                <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onKey} placeholder="Search…"
+                  aria-label="Search codes (Enter picks the first)"
+                  style={{ flex: 1, minWidth: 0, boxSizing: "border-box", padding: "7px 9px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit", outline: "none" }} />
+                {onBreak && hasCode && (
+                  <button onClick={openBreak} title={breakText ? `Break ${breakText}` : "Add a break"} style={{
+                    ...btnMini, flex: "none", whiteSpace: "nowrap",
+                    background: breakText ? "#EAF6F3" : T.mist, color: breakText ? "#12655C" : T.ink,
+                    border: `1px solid ${breakText ? "#BFE2DA" : T.line}`,
+                  }}>{breakText ? `\u25CF ${breakText}` : "+ Break"}</button>
+                )}
+              </div>
+              {(onPaste || (onCopy && hasCode)) && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  {onCopy && hasCode && (
+                    <button onClick={() => { onCopy(); close(); }} title="Copy this duty and its break, to paste into other cells"
+                      style={{ ...btnMini, flex: 1, background: T.mist, color: T.ink, border: `1px solid ${T.line}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                      <Copy size={12} /> Copy
+                    </button>
+                  )}
+                  {onPaste && (
+                    <button onClick={() => { onPaste(); close(); }} title={`Paste ${clipLabel}`}
+                      style={{ ...btnMini, flex: 2, minWidth: 0, background: "#E7F0FA", color: "#2F6DB5", border: "1px solid #C9DCF2",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 5, overflow: "hidden", whiteSpace: "nowrap" }}>
+                      <ClipboardPaste size={12} style={{ flex: "none" }} />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>Paste {clipLabel}</span>
+                    </button>
+                  )}
+                </div>
+              )}
               {/* The actions for a cell, in one block: note, new code, second
                   duty, post, the changed-duty mark and leave. A two-column grid
                   keeps them the same size and inside the panel — the post button
@@ -2864,6 +2937,29 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
                 ...btnMini, width: "100%", marginTop: 8, background: T.mist,
                 color: T.ink, border: `1px solid ${T.line}`,
               }}>Done</button>
+            </div>
+          )}
+
+          {mode === "break" && (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 2 }}>Break</div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>This person's break on this day</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11.5, fontWeight: 600, color: T.inkSoft }}>From
+                  <input type="time" autoFocus value={brk.start} onChange={(e) => setBrk({ ...brk, start: e.target.value })}
+                    style={{ boxSizing: "border-box", width: "100%", padding: "6px 6px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit" }} /></label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11.5, fontWeight: 600, color: T.inkSoft }}>To
+                  <input type="time" value={brk.end} onChange={(e) => setBrk({ ...brk, end: e.target.value })}
+                    style={{ boxSizing: "border-box", width: "100%", padding: "6px 6px", border: `1px solid ${T.line}`, borderRadius: 7, fontSize: 12.5, fontFamily: "inherit" }} /></label>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <button onClick={() => setMode("pick")} style={{ ...btnMini, flex: 1, background: "#fff", color: T.inkSoft, border: `1px solid ${T.line}` }}>Back</button>
+                {breakText && (
+                  <button onClick={() => { onBreak(null); close(); }} style={{ ...btnMini, flex: 1, background: "#FBEAE7", color: T.coral }}>Remove</button>
+                )}
+                <button disabled={!brk.start || !brk.end} onClick={() => { onBreak(brk); close(); }}
+                  style={{ ...btnMini, flex: 1, background: T.lagoon, color: "#fff", opacity: !brk.start || !brk.end ? 0.5 : 1 }}>Save</button>
+              </div>
             </div>
           )}
 
@@ -3051,6 +3147,10 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
   const [arranging, setArranging] = useState(false);
   // Leave-code bands the manager has tapped open to edit day by day.
   const [openRuns, setOpenRuns] = useState(() => new Set());
+  /* Copy and paste between cells: the duty (with its posts and any second
+     duty) and the break. Kept only on this screen, for this visit; notes
+     and changed-duty marks are never copied. */
+  const [clip, setClip] = useState(null);   // { value, breakTime, label }
   const moveRow = (id, dir) => {
     const ids = shownStaffIds.current;
     const pos = ids.indexOf(id);
@@ -3196,7 +3296,13 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
     const postId = existing || carried;
     update((d) => {
       if (!d.cells[date]) d.cells[date] = {};
-      if (!codeId) { delete d.cells[date][staffId]; return d; }
+      if (!codeId) {
+        delete d.cells[date][staffId];
+        // No duty, no break: a cleared day keeps no break time.
+        const m = d.cellMeta?.[date]?.[staffId];
+        if (m && m.breakTime) { delete m.breakTime; if (!Object.keys(m).length) delete d.cellMeta[date][staffId]; }
+        return d;
+      }
       d.cells[date][staffId] = postId ? [{ code: codeId, post: postId }] : codeId;
       return d;
     });
@@ -3267,6 +3373,49 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
       // Only drop the whole entry once nothing is left in it — otherwise
       // clearing a note would also wipe an exchange mark on the same cell.
       if (Object.keys(d.cellMeta[date][staffId]).length === 0) delete d.cellMeta[date][staffId];
+      return d;
+    });
+  };
+
+  // The person's break that day: { start, end }, or null to remove it.
+  const setCellBreak = (date, staffId, bt) => {
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to edit their duties.");
+      return;
+    }
+    update((d) => {
+      if (!d.cellMeta) d.cellMeta = {};
+      if (!d.cellMeta[date]) d.cellMeta[date] = {};
+      if (!d.cellMeta[date][staffId]) d.cellMeta[date][staffId] = {};
+      if (bt && bt.start && bt.end) d.cellMeta[date][staffId].breakTime = { start: bt.start, end: bt.end };
+      else delete d.cellMeta[date][staffId].breakTime;
+      if (Object.keys(d.cellMeta[date][staffId]).length === 0) delete d.cellMeta[date][staffId];
+      return d;
+    });
+  };
+  const copyCell = (date, staffId) => {
+    const value = (data.cells[date] || {})[staffId];
+    if (!value) return;
+    const words = cellEntries(data, date, staffId)
+      .map((e) => (data.codes.find((c) => c.id === e.code) || {}).code).filter(Boolean).join(" + ");
+    const br = breakOf(data, date, staffId);
+    setClip({ value: JSON.parse(JSON.stringify(value)), breakTime: cellMetaOf(data, date, staffId)?.breakTime || null,
+      label: `${words}${br ? ` · break ${br}` : ""}` });
+  };
+  const pasteCell = (date, staffId) => {
+    if (!clip) return;
+    if (!staffEditable(staffId)) {
+      alert("This staff member is view-only on your current plan.\n\nUpgrade to assign or change their duties.");
+      return;
+    }
+    update((d) => {
+      if (!d.cells[date]) d.cells[date] = {};
+      d.cells[date][staffId] = JSON.parse(JSON.stringify(clip.value));
+      if (!d.cellMeta) d.cellMeta = {};
+      if (!d.cellMeta[date]) d.cellMeta[date] = {};
+      const m = { ...(d.cellMeta[date][staffId] || {}) };
+      if (clip.breakTime) m.breakTime = { ...clip.breakTime }; else delete m.breakTime;
+      if (Object.keys(m).length) d.cellMeta[date][staffId] = m; else delete d.cellMeta[date][staffId];
       return d;
     });
   };
@@ -3742,6 +3891,7 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                           postName={cellPostName}
                           onPickPost={(pid) => setCellPost(date, s.id, pid, 0)}
                           splitEnabled={!!data.splitEnabled}
+                          showTime={!!data.showCodeTimes}
                           secondValue={secondId}
                           secondPostId={secondPostId}
                           secondPostName={secondPostName}
@@ -3752,6 +3902,11 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                           hasCode={!!code}
                           note={meta?.note || ""}
                           onNote={(txt) => setCellNote(date, s.id, txt)}
+                          breakTime={meta?.breakTime || null}
+                          onBreak={(bt) => setCellBreak(date, s.id, bt)}
+                          onCopy={() => copyCell(date, s.id)}
+                          onPaste={clip ? () => pasteCell(date, s.id) : null}
+                          clipLabel={clip ? clip.label : ""}
                           onAddCode={addCode}
                           exchange={ex}
                           onExchange={(who) => setExchange(date, s.id, who)}
@@ -3880,7 +4035,7 @@ function Records({ data, range, setRange, onExport }) {
   const valid = range.from && range.to && range.from <= range.to;
   const rows = useMemo(() => valid ? recordsFor(data, range.from, range.to) : [], [data, range, valid]);
 
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", ...(data.splitEnabled ? ["Split"] : []), "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", ...(data.splitEnabled ? ["Double"] : []), "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty", ""];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -4281,7 +4436,7 @@ function Stats({ data, range, setRange, onExport }) {
             Rota totals
           </div>
           <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
-            {[["Duty shifts", totals.duty, "every duty worked, counting a split day twice"],
+            {[["Duty shifts", totals.duty, "every duty worked, counting a double-duty day twice"],
               ["Leave days", totals.leave, "all leave of every kind"],
               ["Off days", totals.off, "days rostered off"]].map(([l, v, note]) => (
               <div key={l} style={{ minWidth: 150 }}>
@@ -4507,11 +4662,20 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
                     <td key={seg.date} style={{ ...ptd, background: code ? code.color : "#fff", color: code ? textOn(code.color) : "#999", fontWeight: 700, position: "relative" }}>
                       {code ? code.code : ""}
                       {num && <sup style={{ fontSize: 8 }}>{num}</sup>}
+                      {data.showCodeTimes && timeOf(code) && (
+                        <div style={{ fontSize: 7, fontWeight: 600, lineHeight: 1.15, opacity: 0.85, whiteSpace: "nowrap" }}>{timeOf(code)}</div>
+                      )}
+
                       {/* Inline styles only: the image export clones this DOM and
                          copies inline styles, dropping anything set by a class. */}
                       {pPostName && (
                         <div style={{ fontSize: 7.5, fontWeight: 600, lineHeight: 1.15, opacity: 0.92 }}>
                           {pPostName}
+                        </div>
+                      )}
+                      {code && breakOf(data, seg.date, s.id) && (
+                        <div style={{ display: "inline-block", fontSize: 7, fontWeight: 700, lineHeight: 1.3, marginTop: 1, padding: "0 4px", borderRadius: 999, background: "rgba(255,255,255,0.8)", color: "#0E3A47", whiteSpace: "nowrap" }}>
+                          Break {breakOf(data, seg.date, s.id)}
                         </div>
                       )}
                       {/* The second duty of a split day. Inline styles only —
@@ -4521,6 +4685,9 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
                           {/* Same size as the first duty: the two are equal shifts,
                               and shrinking the second made it look like a footnote. */}
                           <div style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.15 }}>{pSecond.code}</div>
+                          {data.showCodeTimes && timeOf(pSecond) && (
+                            <div style={{ fontSize: 7, fontWeight: 600, lineHeight: 1.15, opacity: 0.85, whiteSpace: "nowrap" }}>{timeOf(pSecond)}</div>
+                          )}
                           {pSecondPost && (
                             <div style={{ fontSize: 7.5, fontWeight: 600, lineHeight: 1.15, opacity: 0.92 }}>
                               {pSecondPost}
@@ -4596,7 +4763,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
         </tfoot>
       </table>
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
-        Legend: {data.codes.map((c) => `${c.code} = ${c.label}`).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave
+        Legend: {data.codes.map(legendOf).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave
         <br />A boxed <strong>S</strong> or <strong>M</strong> in the corner of a duty = changed duty · S at staff request · M by the manager
       </div>
       {noteList.length > 0 && (
@@ -4635,7 +4802,7 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
 
 function RecordsPrint({ data, from, to }) {
   const rows = recordsFor(data, from, to);
-  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", ...(data.splitEnabled ? ["Split"] : []), "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
+  const cols = ["#", "Staff", "M", "A", ...(data.eveningEnabled ? ["E"] : []), "N", "OD", "RD", "Days on duty", ...(data.splitEnabled ? ["Double"] : []), "Off", "Fri off", "AL", "SL", "FRL", "ML", "Other leave", "Non-off duty"];
   return (
     <div>
       <div className="rp-head">
@@ -6372,7 +6539,7 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
         </div>
       </Card>
 
-      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Split duties</h2>
+      <h2 style={{ margin: "6px 0 0", fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Double duties</h2>
       <Card>
         <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
           <input type="checkbox" checked={!!data.splitEnabled}
@@ -6430,9 +6597,25 @@ function SettingsTab({ data, update, canUseLogo = true, orgName = "", onSaveOrgN
    Lifted out of Settings onto a screen of its own. Settings is about how
    a department behaves; this is the vocabulary of duties it uses, which
    managers edit far more often and shouldn't have to scroll to find.     */
-function DutyCodesTab({ data, update }) {
-  const empty = { code: "", label: "", color: "#F4B860", counts: "morning" };
+function DutyCodesTab({ data, update, canEdit = true }) {
+  /* Codes in four groups, as tiles; tapping one opens it in the edit panel
+     (beside the groups on a laptop, under them on a phone). A shift can
+     carry its hours (start, end: "08:00"), shown on its tile and in the
+     legend of every export: "M = Morning duty (08:00–16:00)". Codes saved
+     before times existed simply have none, and nothing about them changes. */
+  const empty = { code: "", label: "", color: "#F7C35F", counts: "morning", start: "", end: "" };
   const [form, setForm] = useState(null);
+  const panelRef = useRef(null);
+  const openForm = (f) => {
+    setPostForm(null);
+    setForm({ start: "", end: "", ...f });
+    // On a phone the panel moves above the groups: bring it into view.
+    setTimeout(() => {
+      if (!panelRef.current || window.innerWidth >= 900) return;
+      const top = panelRef.current.getBoundingClientRect().top + window.scrollY - 70;
+      window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+    }, 60);
+  };
 
   /* ── Posts ──
      A post is where someone is stationed while working a duty: Front Gate,
@@ -6479,18 +6662,30 @@ function DutyCodesTab({ data, update }) {
       return d;
     });
   };
+  // 32 colours, the same set as the redesign; any other colour from the picker.
   const palette = [
-    "#F4B860", "#E8A33D", "#E58E77", "#E4604E", "#C0483A", "#C08552", "#8C5A2B",
-    "#8FBF6B", "#6E9E4C", "#4F7D3A", "#9AD1C8", "#5FA89C", "#2E7D6F",
-    "#6FA8DC", "#4A82BC", "#2C5C8A", "#8E7CC3", "#6C5BA8", "#5E3A87",
-    "#D98BD3", "#B761B0", "#F0A090", "#D96A6A",
-    "#2E3358", "#5A6472", "#98A2B3", "#C9D2DC", "#E8EEF2", "#FFFFFF",
+    "#F7C35F", "#9BD08A", "#F0A08F", "#7FB2E5", "#FFC48A", "#F28B82", "#A8E6D9", "#D9C7F7",
+    "#2F6FB5", "#C5F277", "#FFE08A", "#F9A8C9", "#E3A8EE", "#F7CF4F", "#9CC8F2", "#F5B2A6",
+    "#E8604C", "#8FD3F5", "#7ED9B5", "#B9C7FF", "#C9B8A6", "#B7E0A5", "#1F9E8F", "#7B4FBF",
+    "#1E7A4D", "#B3261E", "#DCE6EE", "#E6E0FA", "#CFD8DC", "#FFFFFF", "#4A5560", "#0E3A47",
   ];
+  const SHIFT_COUNTS = ["morning", "afternoon", "evening", "night", "other", "release"];
+  const isShift = (counts) => SHIFT_COUNTS.includes(counts);
   const save = () => {
-    if (!form.code.trim()) return;
+    const code = (form.code || "").trim();
+    if (!code) { window.alert("Give the code a short name, e.g. M or CL."); return; }
+    const clash = data.codes.some((c) => c.id !== form.id && (c.code || "").trim().toLowerCase() === code.toLowerCase());
+    if (clash) { window.alert(`There is already a code called "${code}".`); return; }
+    const shift = isShift(form.counts);
+    const start = shift ? (form.start || "") : "";
+    const end = shift ? (form.end || "") : "";
+    if ((start && !end) || (!start && end)) { window.alert("Enter both the start and the end time, or leave both empty."); return; }
+    const saved = { ...form, code };
+    // Hours only belong to a shift; an off day or leave never keeps old ones.
+    if (start && end) { saved.start = start; saved.end = end; } else { delete saved.start; delete saved.end; }
     update((d) => {
-      if (form.id) { const i = d.codes.findIndex((c) => c.id === form.id); d.codes[i] = form; }
-      else d.codes.push({ ...form, id: uid() });
+      if (saved.id) { const i = d.codes.findIndex((c) => c.id === saved.id); d.codes[i] = saved; }
+      else d.codes.push({ ...saved, id: uid() });
       return d;
     });
     setForm(null);
@@ -6532,132 +6727,247 @@ function DutyCodesTab({ data, update }) {
   };
 
   const countsLabel = { morning: "Morning duty", afternoon: "Afternoon duty", evening: "Evening duty", night: "Night duty", other: "Other duty", release: "Release duty", off: "Off day", sl: "Sick leave (SL)", frl: "Family related leave (FRL)", ml: "Medical leave (ML)", leave: "Other leave" };
+  const shortCounts = { morning: "Morning", afternoon: "Afternoon", evening: "Evening", night: "Night", other: "Other duty", release: "Release duty", off: "Off day", sl: "Sick leave", frl: "Family related leave", ml: "Medical leave", leave: "Other leave" };
+  const GROUPS = [
+    { id: "shift", title: "Shifts", note: "Count as duty in totals", test: (c) => isShift(c.counts) },
+    { id: "off", title: "Off days", note: "Not counted as duty", test: (c) => c.counts === "off" },
+    { id: "leave", title: "Leaves", note: "Also usable as longer periods on the Leave screen", test: (c) => ["sl", "frl", "ml", "leave"].includes(c.counts) },
+  ];
+  const known = (c) => GROUPS.some((g) => g.test(c));
+  const others = data.codes.filter((c) => !known(c));
+
+  const glass = { boxSizing: "border-box", borderRadius: 24, background: "rgba(255,255,255,0.74)", border: "1px solid rgba(255,255,255,0.9)", boxShadow: "0 8px 24px rgba(14,58,71,0.07)", padding: "16px 18px" };
+  const chip = (color) => ({
+    display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 46, height: 34, padding: "0 8px", boxSizing: "border-box",
+    borderRadius: 10, fontWeight: 800, fontSize: 13, background: color, color: textOn(color),
+    boxShadow: (color || "").toUpperCase() === "#FFFFFF" ? "inset 0 0 0 1px #9FB6BD" : "none", flex: "none",
+  });
+  const tile = (on) => ({
+    display: "flex", alignItems: "center", gap: 10, minHeight: 52, padding: "6px 14px 6px 8px", borderRadius: 16, fontFamily: "inherit",
+    color: T.ink, cursor: canEdit ? "pointer" : "default", textAlign: "left",
+    background: on ? "#FFFFFF" : "rgba(255,255,255,0.75)", border: on ? "2px solid #0D4F61" : "1px solid rgba(255,255,255,0.95)",
+    boxShadow: on ? "0 8px 18px rgba(13,79,97,0.18)" : "0 1px 3px rgba(14,58,71,0.06)",
+  });
+  const codeTile = (c) => {
+    const on = !!(form && form.id === c.id);
+    const sub = isShift(c.counts)
+      ? `${c.start && c.end ? `${c.start}–${c.end} · ` : ""}${shortCounts[c.counts] || c.counts}`
+      : `Counts as ${shortCounts[c.counts] || c.counts}`;
+    return (
+      <button key={c.id} type="button" aria-pressed={on} onClick={() => { if (canEdit) openForm(c); }} style={tile(on)}>
+        <span style={chip(c.color)}>{c.code}</span>
+        <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{c.label || c.code}</span>
+          <span style={{ fontSize: 11, color: T.inkSoft }}>{sub}</span>
+        </span>
+      </button>
+    );
+  };
+  const groupCard = (title, note, list, countWord, extra = null) => (
+    <section key={title} style={{ ...glass, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 16, fontWeight: 700 }}>
+          {title} <span style={{ fontSize: 13, fontWeight: 600, color: T.inkSoft }}>· {list.length} {countWord}</span>
+        </h2>
+        <span style={{ fontSize: 12, color: T.inkSoft }}>{note}</span>
+      </div>
+      {extra}
+      {list.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{list}</div>}
+    </section>
+  );
+  const pill = { height: 44, padding: "0 18px", borderRadius: 999, fontFamily: "inherit", fontWeight: 600, fontSize: 14, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 };
+  const panelGlass = { ...glass, padding: 20, borderRadius: 28, display: "flex", flexDirection: "column", gap: 14,
+    background: "rgba(255,255,255,0.8)", WebkitBackdropFilter: "blur(20px) saturate(180%)", backdropFilter: "blur(20px) saturate(180%)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85), 0 14px 34px rgba(14,58,71,0.12)" };
+  // A deleted code or post (or one removed by Undo) closes its panel.
+  useEffect(() => {
+    if (form && form.id && !data.codes.some((c) => c.id === form.id)) setForm(null);
+    if (postForm && postForm.id && !(data.posts || []).some((x) => x.id === postForm.id)) setPostForm(null);
+  }, [data.codes, data.posts, form, postForm]);
+  const legendLine = form ? `${(form.code || "").trim() || "?"} = ${form.label || "…"}${isShift(form.counts) && form.start && form.end ? ` (${form.start}–${form.end})` : ""}` : "";
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>
-        The duties this department uses. The code is what appears in the rota
-        grid, and "Counts as" decides which totals it feeds and whether it
-        counts towards non-official day payment.
-      </p>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Duty codes</h2>
-        <Btn onClick={() => setForm(empty)}><Plus size={15} /> New code</Btn>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <style>{`
+        .dr-codes-wrap { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+        .dr-codes-groups { flex: 2 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+        .dr-codes-panel { flex: 1 1 320px; min-width: 0; }
+        @media (min-width: 900px) { .dr-codes-panel { position: sticky; top: 16px; } }
+        /* A phone: the edit panel comes first, above the tiles, so a tap on a
+           code opens it in view rather than three screens down. */
+        @media (max-width: 899px) {
+          .dr-codes-panel { order: -1; flex-basis: 100%; }
+          .dr-codes-hint { display: none; }
+        }
+      `}</style>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 22, fontWeight: 800, letterSpacing: "-0.01em" }}>Duty codes</h2>
+          <span style={{ fontSize: 13, color: T.inkSoft }}>The codes this department uses. "Counts as" decides which totals a code feeds and whether it counts for non-official day payment.{canEdit ? " Tap one to change it." : ""}</span>
+        </div>
+        {canEdit && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={() => { setForm(null); setPostForm({ id: null, name: "" }); }}
+              style={{ ...pill, border: "1px solid rgba(255,255,255,0.95)", background: "rgba(255,255,255,0.65)", color: T.ink }}>
+              <Plus size={16} /> Add a post
+            </button>
+            <button type="button" onClick={() => openForm(empty)}
+              style={{ ...pill, border: "none", background: "linear-gradient(90deg, #0D4F61, #1F7F9F)", color: "#FFFFFF", boxShadow: "0 8px 20px rgba(13,79,97,0.28)" }}>
+              <Plus size={16} /> Add a code
+            </button>
+          </div>
+        )}
       </div>
 
-      {form && (
-        <Card className="dr-anim-in">
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-            <Field label="Code (shown in grid)"><input style={inputStyle} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. CL" /></Field>
-            <Field label="Full label"><input style={inputStyle} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Casual leave" /></Field>
-            <Field label="Counts as">
-              <select style={inputStyle} value={form.counts} onChange={(e) => setForm({ ...form, counts: e.target.value })}>
-                <option value="morning">Morning duty</option>
-                <option value="afternoon">Afternoon duty</option>
-                {(data.eveningEnabled || form.counts === "evening") && <option value="evening">Evening duty</option>}
-                <option value="night">Night duty</option>
-                <option value="other">Other duty (e.g. extra or 5th shift)</option>
-                <option value="release">Release duty (staff only, not unit)</option>
-                <option value="off">Off day</option>
-                <option value="sl">Sick leave (SL)</option>
-                <option value="frl">Family related leave (FRL)</option>
-                <option value="ml">Medical leave (ML)</option>
-                <option value="leave">Other leave</option>
-              </select>
-            </Field>
-            <Field label="Color">
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 4 }}>
-                {palette.map((c) => (
-                  <button key={c} onClick={() => setForm({ ...form, color: c })} style={{
-                    width: 26, height: 26, borderRadius: 8, background: c, cursor: "pointer",
-                    border: form.color === c ? `2.5px solid ${T.ink}` : `1px solid ${T.line}`,
-                  }} />
-                ))}
+      {/* Whether the rota shows each duty's hours under its code. */}
+      {(canEdit || data.showCodeTimes) && (
+        <label style={{ ...glass, display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 16px", cursor: canEdit ? "pointer" : "default" }}>
+          <input type="checkbox" checked={!!data.showCodeTimes} disabled={!canEdit}
+            onChange={(e) => update((d) => { d.showCodeTimes = e.target.checked; return d; })}
+            style={{ accentColor: T.lagoon, width: 18, height: 18, marginTop: 1, flex: "none" }} />
+          <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Show duty times on the rota</span>
+            <span style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
+              {data.showCodeTimes
+                ? "On: each duty with a time shows it in small print under the code, on screen and in PDF, image and Excel exports."
+                : "Off: times show only in the export legend and when you hover over a duty. Turn on to show them under each code on the rota and in exports."}
+              {" "}Set a shift's times by tapping it below.
+            </span>
+          </span>
+        </label>
+      )}
+
+      <div className="dr-codes-wrap">
+        <div className="dr-codes-groups">
+          {GROUPS.map((g) => {
+            const list = data.codes.filter(g.test);
+            return list.length ? groupCard(g.title, g.note, list.map(codeTile), list.length === 1 ? "code" : "codes") : null;
+          })}
+          {others.length > 0 && groupCard("Other", "Codes with a type this screen doesn't group", others.map(codeTile), others.length === 1 ? "code" : "codes")}
+          {groupCard("Posts", "Where someone is stationed during a duty",
+            posts.map((x) => {
+              const on = !!(postForm && postForm.id === x.id);
+              return (
+                <button key={x.id} type="button" aria-pressed={on}
+                  onClick={() => { if (canEdit) { setForm(null); setPostForm({ id: x.id, name: x.name }); if (window.innerWidth < 900) setTimeout(() => panelRef.current && window.scrollTo({ top: Math.max(0, panelRef.current.getBoundingClientRect().top + window.scrollY - 70) }), 60); } }}
+                  style={{ ...tile(on), minHeight: 44, padding: "6px 16px" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{x.name}</span>
+                </button>
+              );
+            }), posts.length === 1 ? "post" : "posts",
+            <p style={{ margin: 0, fontSize: 12.5, color: T.inkSoft, lineHeight: 1.5 }}>
+              Front Gate, Security Room, Cashier: the duty says when, the post says where. Most wards leave this empty.
+              {!data.postsEnabled && " Turn posts on in Settings to use them on the rota."}
+              {posts.length === 0 && " No posts yet."}
+            </p>)}
+        </div>
+
+        <div className="dr-codes-panel" ref={panelRef}>
+          {!form && !postForm && (
+            <div className="dr-codes-hint" style={{ ...glass, fontSize: 13, color: T.inkSoft, lineHeight: 1.5 }}>
+              {canEdit ? "Tap a code or a post to change it, or add a new one." : "Only a manager or the owner can change duty codes."}
+            </div>
+          )}
+
+          {form && (
+            <div className="dr-anim-in" style={panelGlass}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ ...chip(form.color), minWidth: 56, height: 56, borderRadius: 16, fontSize: 18 }}>{(form.code || "").trim() || "?"}</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <strong style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18 }}>{form.id ? `Edit code ${form.code}` : "New code"}</strong>
+                  <span style={{ fontSize: 12, color: T.inkSoft }}>{countsLabel[form.counts] || form.counts}</span>
+                </div>
               </div>
-            </Field>
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            <Btn onClick={save}><Check size={15} /> {form.id ? "Save changes" : "Add code"}</Btn>
-            <Btn kind="ghost" onClick={() => setForm(null)}>Cancel</Btn>
-          </div>
-        </Card>
-      )}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                <Field label="Code (shown in grid)"><input style={inputStyle} value={form.code} maxLength={12} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. M" /></Field>
+                <Field label="Name"><input style={inputStyle} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Morning duty" /></Field>
+              </div>
+              <Field label="Counts as">
+                <select style={inputStyle} value={form.counts} onChange={(e) => setForm({ ...form, counts: e.target.value })}>
+                  <optgroup label="Duty">
+                    <option value="morning">Morning duty</option>
+                    <option value="afternoon">Afternoon duty</option>
+                    {(data.eveningEnabled || form.counts === "evening") && <option value="evening">Evening duty</option>}
+                    <option value="night">Night duty</option>
+                    <option value="other">Other duty (e.g. extra or 5th shift)</option>
+                    <option value="release">Release duty (staff only, not unit)</option>
+                  </optgroup>
+                  <optgroup label="Off">
+                    <option value="off">Off day</option>
+                  </optgroup>
+                  <optgroup label="Leave">
+                    <option value="sl">Sick leave (SL)</option>
+                    <option value="frl">Family related leave (FRL)</option>
+                    <option value="ml">Medical leave (ML)</option>
+                    <option value="leave">Other leave</option>
+                  </optgroup>
+                </select>
+              </Field>
+              {isShift(form.counts) && (
+                <div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                    <Field label="Starts (optional)"><input type="time" style={inputStyle} value={form.start || ""} onChange={(e) => setForm({ ...form, start: e.target.value })} /></Field>
+                    <Field label="Ends (optional)"><input type="time" style={inputStyle} value={form.end || ""} onChange={(e) => setForm({ ...form, end: e.target.value })} /></Field>
+                  </div>
+                  {(form.start || form.end) && (
+                    <button type="button" onClick={() => setForm({ ...form, start: "", end: "" })}
+                      style={{ marginTop: 6, border: "none", background: "none", padding: 0, color: T.lagoon, fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      Clear the times
+                    </button>
+                  )}
+                </div>
+              )}
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: T.inkSoft, marginBottom: 8 }}>Colour</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(8, minmax(0, 1fr))", gap: 6 }}>
+                  {palette.map((c) => {
+                    const on = (form.color || "").toUpperCase() === c.toUpperCase();
+                    return (
+                      <button key={c} type="button" aria-label={`Colour ${c}`} aria-pressed={on} onClick={() => setForm({ ...form, color: c })}
+                        style={{ aspectRatio: "1", width: "100%", padding: 0, borderRadius: "50%", cursor: "pointer", background: c,
+                          border: on ? "3px solid #0D4F61" : "1px solid rgba(14,58,71,0.2)", boxShadow: on ? "inset 0 0 0 2px #FFFFFF" : "none" }} />
+                    );
+                  })}
+                  <label title="Any colour" style={{ position: "relative", aspectRatio: "1", borderRadius: "50%", cursor: "pointer", border: "1.5px dashed rgba(14,58,71,0.45)",
+                    background: "conic-gradient(#F28B82, #FFE08A, #7ED9B5, #8FD3F5, #B9C7FF, #F9A8C9, #F28B82)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <input type="color" aria-label="Any colour" value={/^#[0-9a-f]{6}$/i.test(form.color || "") ? form.color : "#F7C35F"}
+                      onChange={(e) => setForm({ ...form, color: e.target.value })}
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }} />
+                    <Plus size={13} />
+                  </label>
+                </div>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 16, background: "rgba(14,58,71,0.05)" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: T.inkSoft }}>On the rota</span>
+                <span style={chip(form.color)}>{(form.code || "").trim() || "?"}</span>
+                <span style={{ fontSize: 12, color: T.inkSoft }}>Legend: {legendLine}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn onClick={save}><Check size={15} /> {form.id ? "Save changes" : "Add code"}</Btn>
+                <Btn kind="ghost" onClick={() => setForm(null)}>Cancel</Btn>
+                {form.id && <Btn kind="danger" onClick={() => removeCode(form.id)}><Trash2 size={14} /> Delete</Btn>}
+              </div>
+            </div>
+          )}
 
-      <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table className="dr-codes-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
-          <thead><tr>{["Code", "Label", "Counts as", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {data.codes.map((c) => (
-              <tr key={c.id}>
-                <td style={td}>
-                  <span style={{ background: c.color, color: textOn(c.color), fontWeight: 800, borderRadius: 7, padding: "4px 10px", fontSize: 12.5, border: `1px solid ${T.line}` }}>{c.code}</span>
-                </td>
-                <td style={td}>{c.label}</td>
-                <td style={td}>{countsLabel[c.counts] || c.counts}</td>
-                <td style={{ ...td, whiteSpace: "nowrap" }}>
-                  <Btn kind="ghost" small onClick={() => setForm(c)} style={{ marginRight: 6 }}><Pencil size={13} /></Btn>
-                  <Btn kind="danger" small onClick={() => removeCode(c.id)}><Trash2 size={13} /></Btn>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-
-      {/* ── Posts ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-        <h2 style={{ margin: 0, fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 17 }}>Posts</h2>
-        <Btn onClick={() => setPostForm({ id: null, name: "" })}><Plus size={15} /> New post</Btn>
+          {postForm && (
+            <div className="dr-anim-in" style={{ ...panelGlass, gap: 12 }}>
+              <strong style={{ fontFamily: "'Plus Jakarta Sans', Inter, sans-serif", fontSize: 18 }}>{postForm.id ? "Edit post" : "New post"}</strong>
+              <Field label="Post name">
+                <input autoFocus value={postForm.name} maxLength={40}
+                  onChange={(e) => setPostForm({ ...postForm, name: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") savePost(); }}
+                  placeholder="e.g. Front Gate" style={inputStyle} />
+              </Field>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn onClick={savePost}><Check size={15} /> Save post</Btn>
+                <Btn kind="ghost" onClick={() => setPostForm(null)}>Cancel</Btn>
+                {postForm.id && <Btn kind="danger" onClick={() => removePost(postForm.id)}><Trash2 size={14} /> Delete</Btn>}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-      <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>
-        Where someone is stationed while working a duty — Front Gate, Security
-        Room, Cashier. The duty says when; the post says where. Useful for
-        security teams, airports and restaurants; most wards leave this empty.
-        {!data.postsEnabled && " Turn posts on in Settings to use them on the rota."}
-      </p>
-
-      {postForm && (
-        <Card>
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-            <Field label="Post name">
-              <input autoFocus value={postForm.name} maxLength={40}
-                onChange={(e) => setPostForm({ ...postForm, name: e.target.value })}
-                onKeyDown={(e) => { if (e.key === "Enter") savePost(); }}
-                placeholder="e.g. Front Gate" style={inputStyle} />
-            </Field>
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <Btn onClick={savePost}>Save post</Btn>
-            <Btn kind="ghost" onClick={() => setPostForm(null)}>Cancel</Btn>
-          </div>
-        </Card>
-      )}
-
-      {posts.length === 0 ? (
-        <Card>
-          <p style={{ margin: 0, fontSize: 13, color: T.inkSoft }}>
-            No posts yet. Add one and it becomes available on every duty in this
-            department.
-          </p>
-        </Card>
-      ) : (
-        <Card style={{ padding: 0, overflowX: "auto" }}>
-          <table className="dr-posts-table" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Post", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {posts.map((x) => (
-                <tr key={x.id}>
-                  <td style={{ ...td, fontWeight: 600 }}>{x.name}</td>
-                  <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
-                    <Btn kind="ghost" small onClick={() => setPostForm({ id: x.id, name: x.name })} style={{ marginRight: 6 }}><Pencil size={13} /></Btn>
-                    <Btn kind="danger" small onClick={() => removePost(x.id)}><Trash2 size={13} /></Btn>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
     </div>
   );
 }
