@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Plane, Printer, BarChart3,
   AlertTriangle, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
   User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon,
-  Copy, ClipboardPaste
+  Copy, ClipboardPaste, Coffee
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -2007,7 +2007,9 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         const model = {
           orgName: viewData.orgName || "",
           // The same legend as the printed rota, hours included.
-          legend: `Legend: ${viewData.codes.map(legendOf).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave`,
+          legend: `Legend: ${viewData.codes.map(legendOf).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave`
+            + "\n👤 after a duty = changed at staff request · 💼 = changed by the manager · a red corner = a note or a change: hover the cell to read it"
+            + (rotaDays.some((dt) => viewData.staff.some((st) => breakOf(viewData, dt, st.id))) ? " · ☕ = break time" : ""),
           deptName: viewData.title || "Rota",
           rangeLabel: rotaDays.length
             ? `${niceDate(rotaDays[0])} – ${niceDate(rotaDays[rotaDays.length - 1])}`
@@ -2052,7 +2054,18 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
                 // The duty's hours on a small line under it, when the department shows them.
                 sub: viewData.showCodeTimes ? timeOf(code) : "",
                 // The break, on its own line at the foot of the cell, in its own colour.
-                brk: code && breakOf(viewData, seg.date, s.id) ? `Break ${breakOf(viewData, seg.date, s.id)}` : "",
+                brk: code && breakOf(viewData, seg.date, s.id) ? `☕ ${breakOf(viewData, seg.date, s.id)}` : "",
+                // A changed duty: S (staff asked) or M (manager), and what it was.
+                ex: exchangeOf(viewData, seg.date, s.id) ? (exchangeOf(viewData, seg.date, s.id).requestedBy === "manager" ? "💼" : "👤") : "",
+                exNote: (() => {
+                  const x = exchangeOf(viewData, seg.date, s.id);
+                  if (!x) return "";
+                  const was = ((x.originalEntries && x.originalEntries.length) ? x.originalEntries.map((e) => e.code)
+                    : (x.originalCode ? [x.originalCode] : [])).map((id) => (cby(id) || {}).code || "?").join(" + ") || "nothing";
+                  return `Changed from ${was} · ${x.requestedBy === "manager" ? "changed by the manager" : "requested by staff"}`;
+                })(),
+                // The cell's note, shown in Excel when the cell is hovered.
+                note: (cellMetaOf(viewData, seg.date, s.id)?.note || "").trim(),
                 post: pid ? nameOf(pid) : "",
                 second: secondCode ? `${secondCode.code}${viewData.showCodeTimes && timeOf(secondCode) ? ` ${timeOf(secondCode)}` : ""}` : "",
                 secondPost: (viewData.postsEnabled && second?.post) ? nameOf(second.post) : "",
@@ -2690,10 +2703,11 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
         )}
         {/* The break: a light pill at the foot of the duty, readable on any colour. */}
         {breakText && hasCode && (
-          <div style={{ margin: "3px auto 0", padding: "1px 6px", width: "fit-content", maxWidth: "100%", boxSizing: "border-box",
+          <div aria-label={`Break ${breakText}`} style={{ margin: "3px auto 0", padding: "1px 6px", width: "fit-content", maxWidth: "100%", boxSizing: "border-box",
             borderRadius: 999, background: "rgba(255,255,255,0.78)", color: "#0E3A47",
-            fontSize: 8.5, fontWeight: 700, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            Break {breakText}
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+            fontSize: 8.5, fontWeight: 700, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden" }}>
+            <Coffee size={9} strokeWidth={2.5} aria-hidden="true" style={{ flex: "none" }} />{breakText}
           </div>
         )}
         {/* The second duty of a split day, divided from the first by a hairline
@@ -2723,7 +2737,8 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
           const Icon = cfg.icon;
           return (
             <span title={cfg.label} style={{
-              position: "absolute", bottom: 1, left: 2, width: 14, height: 14, borderRadius: "50%",
+              // Top-left, so it never sits on the break pill at the foot of the cell.
+              position: "absolute", top: 2, left: 2, width: 14, height: 14, borderRadius: "50%",
               background: "#fff", border: `1px solid ${cfg.color}`, color: cfg.color,
               display: "flex", alignItems: "center", justifyContent: "center",
             }}><Icon size={9} /></span>
@@ -4673,9 +4688,13 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
                           {pPostName}
                         </div>
                       )}
+                      {/* The break on its own line under the duty: a cup and the time.
+                          Inline styles and SVG attributes only, for the image export. */}
                       {code && breakOf(data, seg.date, s.id) && (
-                        <div style={{ display: "inline-block", fontSize: 7, fontWeight: 700, lineHeight: 1.3, marginTop: 1, padding: "0 4px", borderRadius: 999, background: "rgba(255,255,255,0.8)", color: "#0E3A47", whiteSpace: "nowrap" }}>
-                          Break {breakOf(data, seg.date, s.id)}
+                        <div style={{ display: "flex", justifyContent: "center", marginTop: 2 }}>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 7, fontWeight: 700, lineHeight: 1.3, padding: "0 4px", borderRadius: 999, background: "rgba(255,255,255,0.85)", color: "#0E3A47", whiteSpace: "nowrap" }}>
+                            <Coffee size={7} strokeWidth={2.6} color="#0E3A47" aria-hidden="true" />{breakOf(data, seg.date, s.id)}
+                          </span>
                         </div>
                       )}
                       {/* The second duty of a split day. Inline styles only —
@@ -4702,15 +4721,19 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
                           under the second duty — where a lone "S" or "M" reads as
                           another duty code. All inline: the image export keeps
                           inline styles and drops classes. */}
-                      {ex && (
-                        <span style={{
-                          position: "absolute", top: 1, right: 2,
-                          fontSize: 7, fontWeight: 800, lineHeight: 1,
-                          padding: "1px 2px", borderRadius: 3,
-                          background: "rgba(255,255,255,0.72)", color: "#3B2C05",
-                          border: "1px solid rgba(0,0,0,0.12)",
-                        }}>{ex.requestedBy === "manager" ? "M" : "S"}</span>
-                      )}
+                      {/* The same person / briefcase mark as on screen, as SVG
+                          attributes and inline styles so the image export keeps it. */}
+                      {ex && (() => {
+                        const cfg = EXCHANGE_BY[ex.requestedBy === "manager" ? "manager" : "staff"];
+                        const Icon = cfg.icon;
+                        return (
+                          <span style={{
+                            position: "absolute", top: 1, right: 1, width: 11, height: 11, borderRadius: "50%",
+                            background: "#FFFFFF", border: `1px solid ${cfg.color}`, color: cfg.color,
+                            display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box",
+                          }}><Icon size={7} strokeWidth={2.6} color={cfg.color} aria-hidden="true" /></span>
+                        );
+                      })()}
                     </td>
                   );
                 })}
@@ -4764,7 +4787,10 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
       </table>
       <div style={{ fontSize: 10, color: "#666", marginTop: 8 }}>
         Legend: {data.codes.map(legendOf).join(" · ")} · AL = Annual leave · MAT = Maternity · PML = Pre-maternity · EL = Emergency leave
-        <br />A boxed <strong>S</strong> or <strong>M</strong> in the corner of a duty = changed duty · S at staff request · M by the manager
+        <br />A mark in the corner of a duty = changed duty ·{" "}
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 11, height: 11, borderRadius: "50%", border: `1px solid ${EXCHANGE_BY.staff.color}`, verticalAlign: "middle" }}><User size={7} strokeWidth={2.6} color={EXCHANGE_BY.staff.color} /></span>{" "}at staff request ·{" "}
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 11, height: 11, borderRadius: "50%", border: `1px solid ${EXCHANGE_BY.manager.color}`, verticalAlign: "middle" }}><Briefcase size={7} strokeWidth={2.6} color={EXCHANGE_BY.manager.color} /></span>{" "}by the manager
+        {days.some((dt) => data.staff.some((st) => breakOf(data, dt, st.id))) && <> ·{" "}<Coffee size={9} strokeWidth={2.4} color="#0E3A47" style={{ verticalAlign: "middle" }} />{" "}= break time</>}
       </div>
       {noteList.length > 0 && (
         <div style={{ marginTop: 10, border: "1px solid #ccc", borderRadius: 6, padding: "8px 10px" }}>
