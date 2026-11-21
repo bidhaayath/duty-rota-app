@@ -63,7 +63,9 @@ const safeFileName = (s) =>
  *   rows        [{ num, name, designation, contact, email, recc,
  *                  cells, totals, nonOfficialDuty }]
  *                 cells: [{ span, text, sub, post, second, secondPost, brk, bg, fg, muted }]
- *                   brk: "Break 12:00–13:00", "" when none; drawn last, in its own colour
+ *                   brk: "☕ 12:00–13:00", "" when none; drawn last, in its own colour
+ *                   ex: "👤" (staff asked) | "💼" (manager) | "" — a changed duty; exNote says what it was
+ *                   note: the cell's note; note and exNote become the cell's Excel comment
  *                   sub: a leave span's date range, "" when not shown
  *                 totals: [number] aligned with totalHeads
  *   onCall      [string]  one per day, "" when nobody
@@ -202,19 +204,30 @@ export async function exportRotaToExcel(model) {
         italic: !!seg.muted,
         color: { argb: argb(seg.fg, "FF142B33") },
       };
-      if (seg.brk) {
+      if (seg.brk || seg.ex) {
         /* Excel cannot shade one line of a cell, so the break gets its own
            colour instead: deep purple, or light yellow on a dark duty colour
-           (where the duty's own text is white). */
+           (where the duty's own text is white). A changed duty carries a
+           small S or M straight after its code, as on the printed rota. */
         const onDark = /^#?f{6}$/i.test(String(seg.fg || "").trim());
         const brkFont = { bold: true, italic: true, size: 9, color: { argb: onDark ? "FFFFF0A8" : "FF5B1A8C" } };
-        cell.value = { richText: [
-          ...(lines.length ? [{ text: lines.join("\n") + "\n", font }] : []),
-          { text: seg.brk, font: brkFont },
-        ] };
+        const exFont = { size: 8, color: { argb: onDark ? "FFFFE08A" : "FF8A4B00" } };
+        const runs = [];
+        const [first, ...rest] = lines;
+        if (first !== undefined) {
+          runs.push({ text: first, font });
+          if (seg.ex) runs.push({ text: ` ${seg.ex}`, font: exFont });
+        }
+        if (rest.length) runs.push({ text: "\n" + rest.join("\n"), font });
+        if (seg.brk) runs.push({ text: (runs.length ? "\n" : "") + seg.brk, font: brkFont });
+        cell.value = { richText: runs };
       } else {
         cell.value = lines.join("\n");
       }
+      /* Hovering the cell in Excel shows its note and, for a changed duty,
+         what it was. Excel marks such a cell with a small red corner. */
+      const comment = [seg.note ? `Note: ${seg.note}` : "", seg.exNote || ""].filter(Boolean).join("\n");
+      if (comment) cell.note = comment;
       cell.alignment = { horizontal: "center", vertical: "middle", wrapText: lines.length > 1 || !!seg.brk };
       cell.font = font;
       if (seg.bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: argb(seg.bg) } };
@@ -300,7 +313,8 @@ export async function exportRotaToExcel(model) {
     cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
     // Roughly how many characters fit across the merged width.
     const across = 34 + E * 20 + days.length * 11 + totalHeads.length * 5.5 + 13;
-    ws.getRow(r).height = Math.max(1, Math.ceil((legend.length * 1.15) / across)) * 13 + 4;
+    const legendLines = legend.split("\n").reduce((n, part) => n + Math.max(1, Math.ceil((part.length * 1.15) / across)), 0);
+    ws.getRow(r).height = legendLines * 13 + 4;
   }
 
   ws.getColumn(1).width = 4;
