@@ -425,3 +425,68 @@ describe("a hospital weekly sheet: headings over two rows, a sign-off block", ()
     expect(plan.leave).toHaveLength(1);
   });
 });
+
+describe("a workbook with one sheet per week", () => {
+  // A weekly sheet like a hospital's: weekday row, date row, then people
+  // whose rows end in COUNTIF totals (plain numbers).
+  const week = (name, dates, people) => ({
+    name,
+    cells: [
+      ["#", "NAME & DESIGNATION", "SUN", "MON", "TUE", "TOTAL M", "TOTAL A", "TOTAL N", "OFF", "X", "Y", "Z"],
+      ["", "", ...dates, "", "", "", "", "", "", ""],
+      ...people.map(([n, ...codes], i) => [String(i + 1), n, ...codes, "1", "2", "2", "7", "11", "3", "4"]),
+      ["MORNING", "", "1", "1", "1"],
+    ],
+    merges: [],
+  });
+
+  test("weeks are joined in date order, one person per name", () => {
+    const g = readGrid([
+      week("week 2", ["2025-01-05", "2025-01-06", "2025-01-07"], [["RN TEST ONE", "A", "A", "N"], ["RN NEW JOINER", "M", "M", "M"]]),
+      week("Sheet25", ["", "", ""], []),
+      week("week 1", ["2024-12-29", "2024-12-30", "2024-12-31"], [["RN Test One ", "M", "OFF", "AL"]]),
+    ]);
+    expect(g.sheetNames).toEqual(["week 2", "week 1"]);
+    expect(g.days.map((d) => d.date)).toEqual(["2024-12-29", "2024-12-30", "2024-12-31", "2025-01-05", "2025-01-06", "2025-01-07"]);
+    expect(g.people.map((p) => p.name)).toEqual(["RN TEST ONE", "RN NEW JOINER"]);
+    expect(g.people[0].cells["2024-12-29"].code).toBe("M");
+    expect(g.people[0].cells["2025-01-07"].code).toBe("N");
+    expect(g.people[1].cells["2024-12-29"].blank).toBe(true);       // not on that week's sheet
+    expect(g.issues).toEqual(["No sheet covers 1 Jan 2025 – 4 Jan 2025."]);
+    const plan = planImport(g, emptyDept());
+    expect(plan.counts).toMatchObject({ people: 2, days: 6, duties: 8, leavePeriods: 1 });
+  });
+
+  test("a person's row of totals is never taken for the date row", () => {
+    const g = readGrid([week("w", ["2025-01-05", "2025-01-06", "2025-01-07"], [["RN TEST ONE", "M", "A", "N"]])]);
+    expect(g.headerRow).toBe(1);
+    expect(g.people).toHaveLength(1);
+  });
+
+  test("a second sheet over the same dates is left out, and said so", () => {
+    const g = readGrid([
+      week("Ramadan", ["2025-03-02", "2025-03-03", "2025-03-04"], [["RN TEST ONE", "M", "A", "N"]]),
+      week("Copy of Ramadan", ["2025-03-02", "2025-03-03", "2025-03-04"], [["RN TEST ONE", "OFF", "OFF", "OFF"]]),
+    ]);
+    expect(g.days).toHaveLength(3);
+    expect(g.people[0].cells["2025-03-02"].code).toBe("M");
+    expect(g.issues[0]).toMatch(/Copy of Ramadan.*left it out/);
+  });
+
+  test("a mistyped date between two good ones is put right", () => {
+    const g = readGrid([week("w", ["2025-02-03", "2025-01-04", "2025-02-05"], [["RN TEST ONE", "M", "A", "N"]])]);
+    expect(g.days.map((d) => d.date)).toEqual(["2025-02-03", "2025-02-04", "2025-02-05"]);
+    expect(g.issues[0]).toMatch(/says 4 Jan 2025.*used 4 Feb 2025/);
+  });
+
+  test("years dragged up by Excel's fill handle are put back", () => {
+    const g = readGrid([week("w", ["17/8/25", "18/8/26", "19/8/27"], [["RN TEST ONE", "M", "A", "N"]])]);
+    expect(g.days.map((d) => d.date)).toEqual(["2025-08-17", "2025-08-18", "2025-08-19"]);
+    expect(g.issues[0]).toMatch(/as if dragged/);
+  });
+
+  test("a real skipped day at the end is left alone", () => {
+    const s = week("w", ["2025-02-03", "2025-02-04", "2025-02-06"], [["RN TEST ONE", "M", "A", "N"]]);
+    expect(readGrid([s]).days.map((d) => d.date)).toEqual(["2025-02-03", "2025-02-04", "2025-02-06"]);
+  });
+});

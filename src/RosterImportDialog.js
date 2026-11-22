@@ -183,12 +183,26 @@ export default function RosterImportDialog({ data, update, staffLimit = null, on
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ background: "#F1F8FB", borderRadius: 12, padding: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.soft, marginBottom: 4 }}>
-            <FileSpreadsheet size={14} /> {fileName}{grid.sheetName ? ` · sheet "${grid.sheetName}"` : ""}
+            <FileSpreadsheet size={14} /> {fileName}{(grid.sheetNames || []).length > 1 ? ` · ${grid.sheetNames.length} sheets` : (grid.sheetName ? ` · sheet "${grid.sheetName}"` : "")}
           </div>
           <div style={{ fontWeight: 800, fontSize: 14.5, color: C.ink }}>{nice(plan.from)} – {nice(plan.to)}</div>
           <div style={{ fontSize: 13, color: C.ink, marginTop: 2 }}>{summaryLine(plan)}</div>
         </div>
-        {grid.issues.map((t) => <Amber key={t}>{t}</Amber>)}
+        {grid.issues.length > 0 && (
+          <Amber>
+            {grid.issues.length === 1 ? grid.issues[0] : (
+              <ul style={{ margin: 0, paddingLeft: 16 }}>
+                {grid.issues.slice(0, 8).map((t) => <li key={t}>{t}</li>)}
+                {grid.issues.length > 8 && <li>…and {grid.issues.length - 8} more</li>}
+              </ul>
+            )}
+          </Amber>
+        )}
+        {plan.days > 45 && (
+          <div style={{ fontSize: 12, color: C.soft }}>
+            That's {plan.days} days. Everything is added in one go; afterwards the rota opens at the first 45 days, and the rest is a date change away.
+          </div>
+        )}
 
         <Section title="Staff" note={attention.length
           ? `${plan.people.length - attention.length} of ${plan.people.length} found on your Staff list. Check the rest:`
@@ -300,11 +314,12 @@ export default function RosterImportDialog({ data, update, staffLimit = null, on
 
         {plan.leave.length > 0 && (
           <Section title="Leave" note="Added as leave periods, as in the Leave tab">
-            {plan.leave.map((lv, i) => (
+            {plan.leave.slice(0, 12).map((lv, i) => (
               <div key={i} style={{ fontSize: 13, color: C.ink }}>
                 <strong>{plan.people[lv.index].name}</strong> · {lv.label || (LEAVE_STYLES[lv.type] || {}).label || lv.type} · {nice(lv.start)}{lv.end !== lv.start ? ` – ${nice(lv.end)}` : ""}
               </div>
             ))}
+            {plan.leave.length > 12 && <div style={{ fontSize: 12, color: C.soft }}>…and {plan.leave.length - 12} more</div>}
           </Section>
         )}
 
