@@ -265,7 +265,7 @@ const NOT_A_PERSON = /^(morning|afternoon|evening|night|other duty|on-?call|tota
 /* A row that ends the grid: the coverage counts or a sign-off block. Once
    people have been found, nothing below one of these is a person, even if
    a merged "Approved by" box happens to sit over the day columns. */
-const END_OF_GRID = /^(morning|afternoon|evening|night|total|totals|grand total|legend|key|prepared by|checked by|approved by|signature)\b/i;
+const END_OF_GRID = /^(morning|afternoon|evening|night|total|totals|grand total|legend|key|prepared by|checked by|approved by|signature)\b|\b(colou?r legend|colou?r key|code key|transcription note)\b/i;
 
 /* Leave names as the export writes them, and the usual short forms.
    SL, FRL and ML are deliberately absent: written short they are rota
@@ -292,6 +292,34 @@ export const leaveFromText = (line) => {
   return null;
 };
 
+/* "10–24 NOV", "8th october 2026- 25th May 2027", "14 Dec 2026 – 20 Dec 2026",
+   "1/12 - 5/12" → { start, end }, or null. A missing year is the year of
+   the day the cell is on; a start month later than the end month is the
+   year before ("20 Dec – 5 Jan"). */
+export const parseLeaveRange = (text, refYear) => {
+  const t = dashes(clean(text)).toLowerCase().replace(/(\d)(st|nd|rd|th)\b/g, "$1").replace(/[,]/g, " ").replace(/\s+/g, " ").trim();
+  const parts = t.split(/\s*(?:-|\bto\b|\buntil\b|\btill\b)\s*/).filter(Boolean);
+  if (parts.length !== 2) return null;
+  const part = (p) => {
+    let m = p.match(/^(\d{1,2})[/.](\d{1,2})(?:[/.](\d{2,4}))?$/);
+    if (m) return { d: +m[1], m: +m[2], y: m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : 0 };
+    m = p.match(/^(\d{1,2})(?: ?([a-z]{3,})\.?)?(?: (\d{4}))?$/);
+    if (m && (!m[2] || monthOf(m[2]))) return { d: +m[1], m: m[2] ? monthOf(m[2]) : 0, y: m[3] ? +m[3] : 0 };
+    m = p.match(/^([a-z]{3,})\.? (\d{1,2})(?: (\d{4}))?$/);
+    if (m && monthOf(m[1])) return { d: +m[2], m: monthOf(m[1]), y: m[3] ? +m[3] : 0 };
+    return null;
+  };
+  const a = part(parts[0]), b = part(parts[1]);
+  if (!a || !b || !b.m) return null;
+  if (!a.m) a.m = b.m;
+  if (!b.y) b.y = a.y || refYear;
+  if (!a.y) a.y = a.m > b.m ? b.y - 1 : b.y;
+  const real = (x) => { const dt = new Date(x.y, x.m - 1, x.d); return dt.getMonth() === x.m - 1 && dt.getDate() === x.d; };
+  if (!real(a) || !real(b)) return null;
+  const start = iso(a.y, a.m, a.d), end = iso(b.y, b.m, b.d);
+  return start <= end ? { start, end } : null;
+};
+
 /* What the export writes for days a person was not employed. */
 const NOT_EMPLOYED = /^(not yet joined|left|—|–|-)$/i;
 const DATE_RANGE_LINE = /^\(?\s*\d{1,2} [a-z]{3,9}\.?( \d{4})?\s*-\s*\d{1,2} [a-z]{3,9}\.?( \d{4})?\s*\)?$/i;
@@ -310,17 +338,27 @@ export const parseCell = (raw, isCode = () => false) => {
                  blank: !lines.length, notEmployed: false, lines };
   if (!lines.length) return cell;
   const rest = [];
+  let rangeLine = "";
   lines.forEach((ln) => {
     const flat = dashes(ln);
     if (BREAK_LINE.test(flat) || flat.startsWith("☕")) { cell.brk = timeRange(flat) || cell.brk; return; }
-    if (DATE_RANGE_LINE.test(flat)) return;           // the export's "(14 Dec 2026 – 20 Dec 2026)"
+    if (DATE_RANGE_LINE.test(flat)) { rangeLine = rangeLine || flat.replace(/^\(|\)$/g, ""); return; }   // the export's "(14 Dec 2026 – 20 Dec 2026)"
     rest.push(ln);
   });
   if (!rest.length) return cell;
   let first = stripMarks(rest[0]);
   if (NOT_EMPLOYED.test(first)) { cell.notEmployed = true; return cell; }
-  const lv = leaveFromText(first);
-  if (lv) { cell.leave = lv; return cell; }
+  /* Leave, perhaps with its dates in brackets: "ANNUAL LEAVE (10–24 NOV)",
+     "MATERNITY LEAVE(8th october 2026- 25th May 2027)". The dates are kept
+     as written; readSheetGrid turns them into a period once it knows the year. */
+  const paren = first.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+  const lv = (paren && leaveFromText(paren[1])) || leaveFromText(first);
+  if (lv) {
+    cell.leave = lv;
+    const rangeText = (paren && leaveFromText(paren[1]) ? paren[2] : "") || rangeLine;
+    if (rangeText) cell.leaveRangeText = rangeText;
+    return cell;
+  }
   // "D 07:00–15:00" on one line: the code, then its hours.
   const t0 = timeRange(first);
   if (t0) {
@@ -569,6 +607,19 @@ const readSheetGrid = (sheet, header, staffSheet, opts = {}) => {
   nameCol = Number(nameCol);
   const hasDesignationCol = Object.values(kinds).includes("designation");
 
+  /* A column that only counts 1, 2, 3… is row numbers, whatever its heading
+     ("RC NO", "S/N"), not an ID to copy onto each person. */
+  let endRow = sheet.cells.length;
+  for (let r = header.row + 1; r < sheet.cells.length; r++) {
+    const first = clean((sheet.cells[r] || []).slice(0, firstDayCol).map(clean).find(Boolean) || "");
+    if (r > header.row + 1 && END_OF_GRID.test(first)) { endRow = r; break; }
+  }
+  Object.keys(kinds).forEach((c) => {
+    if (kinds[c] !== "extra" && kinds[c] !== "recc") return;
+    const vals = sheet.cells.slice(header.row + 1, endRow).map((row) => clean((row || [])[c])).filter(Boolean);
+    if (vals.length >= 3 && vals.every((v, i) => /^\d+$/.test(v) && (i === 0 ? +v <= 1 : +v === +vals[i - 1] + 1))) kinds[c] = "skip";
+  });
+
   /* Merged blocks inside the day columns: spread each over its days. */
   const spread = new Map();       // "r,c" → text of the block's top-left cell
   sheet.merges.forEach((m) => {
@@ -629,7 +680,15 @@ const readSheetGrid = (sheet, header, staffSheet, opts = {}) => {
       else if (k === "extra") p.extra[clean(headRow[c]).replace(/\n/g, " ")] = v;
       else p.details[k] = v;
     });
-    days.forEach((d) => { p.cells[d.date] = parseCell(textAt(r, d.col), isCode); });
+    days.forEach((d) => {
+      const cell = parseCell(textAt(r, d.col), isCode);
+      if (cell.leave && cell.leaveRangeText) {
+        // Only a range that includes this day is believed; a garbled one is ignored.
+        const range = parseLeaveRange(cell.leaveRangeText, Number(d.date.slice(0, 4)));
+        if (range && range.start <= d.date && d.date <= range.end) cell.leaveRange = range;
+      }
+      p.cells[d.date] = cell;
+    });
     return p;
   });
 
@@ -819,8 +878,10 @@ const postKey = (s) => dashes(clean(s)).toLowerCase().replace(/[^a-z0-9]+/g, "")
    the manager mostly just confirms. */
 export const guessCounts = (code, label = "", start = "") => {
   // The usual single letters, with or without (R) for a request.
-  const bare = clean(code).toUpperCase().replace(/\(R\)$/, "");
-  const LETTERS = { M: "morning", AM: "morning", D: "morning", A: "afternoon", PM: "afternoon", E: "evening", N: "night", RD: "release", RELEASE: "release" };
+  // "M(R)", "M*", "A/R": the shift letter with a request or marker after it.
+  const bare = clean(code).toUpperCase().replace(/\s*(\(R\)|\*+|\/R)$/, "");
+  const LETTERS = { M: "morning", AM: "morning", D: "morning", A: "afternoon", PM: "afternoon", E: "evening", N: "night", RD: "release", RELEASE: "release",
+    SL: "sl", ML: "ml", FRL: "frl" };
   if (!label && LETTERS[bare]) return LETTERS[bare];
   const t = `${code} ${label}`.toLowerCase();
   if (/\boff\b|day off|rest day|\bdo\b|\bro\b/.test(t)) return "off";
@@ -842,21 +903,40 @@ export const guessCounts = (code, label = "", start = "") => {
 };
 const NEW_CODE_COLORS = ["#F4B860", "#8FBF6B", "#6FA8DC", "#8E7CC3", "#E58E77", "#C08552", "#5BB5A2", "#D98BD3", "#A9D3E0", "#FAD9A0"];
 
-/* Consecutive days of the same leave → periods. */
+/* Consecutive days of the same leave → periods. When the file writes the
+   leave's own dates ("MATERNITY LEAVE (8 Oct 2026 – 25 May 2027)"), the
+   period is those dates, not just the days this file happens to show. */
 const leaveRuns = (person, days) => {
   const runs = [];
   let cur = null;
   days.forEach(({ date }) => {
-    const lv = person.cells[date] && person.cells[date].leave;
+    const cell = person.cells[date];
+    const lv = cell && cell.leave;
     const same = lv && cur && cur.type === lv.type && (cur.label || "") === (lv.label || "") && addDays(cur.end, 1) === date;
-    if (same) cur.end = date;
+    if (same) { cur.end = date; if (!cur.range && cell.leaveRange) cur.range = cell.leaveRange; }
     else {
       if (cur) runs.push(cur);
-      cur = lv ? { type: lv.type, label: lv.label || "", start: date, end: date } : null;
+      cur = lv ? { type: lv.type, label: lv.label || "", start: date, end: date, range: cell.leaveRange || null } : null;
     }
   });
   if (cur) runs.push(cur);
-  return runs;
+  runs.forEach((r) => {
+    if (r.range && r.range.start <= r.start && r.range.end >= r.end) {
+      if (r.range.start < r.start || r.range.end > r.end) r.fromNote = true;
+      r.start = r.range.start; r.end = r.range.end;
+    }
+    delete r.range;
+  });
+  // Weekly sheets each saying "(10–24 Nov)" give the same period twice: join them.
+  const out = [];
+  runs.sort((a, b) => (a.start < b.start ? -1 : 1)).forEach((r) => {
+    const last = out[out.length - 1];
+    if (last && last.type === r.type && last.label === r.label && r.start <= addDays(last.end, 1)) {
+      if (r.end > last.end) last.end = r.end;
+      last.fromNote = last.fromNote || r.fromNote;
+    } else out.push({ ...r });
+  });
+  return out;
 };
 
 /**
@@ -942,6 +1022,20 @@ export const planImport = (grid, data) => {
   grid.people.forEach((p, index) => leaveRuns(p, grid.days).forEach((run) => leave.push({ index, ...run })));
 
   const dates = grid.days.map((d) => d.date);
+  /* A period taken from the file's note can reach past the file's own days.
+     Duties already in the rota on those extra days would sit under the
+     leave, so count them for the preview. */
+  const inFile = new Set(dates);
+  leave.forEach((lv) => {
+    if (!lv.fromNote) return;
+    const sid = people[lv.index] && people[lv.index].staffId;
+    if (!sid) return;
+    let n = 0;
+    Object.keys(data.cells || {}).forEach((date) => {
+      if (date >= lv.start && date <= lv.end && !inFile.has(date) && entriesOf((data.cells[date] || {})[sid]).length) n += 1;
+    });
+    if (n) lv.covers = n;
+  });
   let existing = 0;
   people.forEach((pp) => {
     if (!pp.staffId) return;

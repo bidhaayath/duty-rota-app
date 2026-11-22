@@ -317,6 +317,8 @@ export default function RosterImportDialog({ data, update, staffLimit = null, on
             {plan.leave.slice(0, 12).map((lv, i) => (
               <div key={i} style={{ fontSize: 13, color: C.ink }}>
                 <strong>{plan.people[lv.index].name}</strong> · {lv.label || (LEAVE_STYLES[lv.type] || {}).label || lv.type} · {nice(lv.start)}{lv.end !== lv.start ? ` – ${nice(lv.end)}` : ""}
+                {lv.fromNote && <span style={{ color: C.soft }}> (dates as written in the file)</span>}
+                {lv.covers > 0 && <span style={{ color: C.amberInk }}> · covers {plural(lv.covers, "duty", "duties")} already in the rota on other dates</span>}
               </div>
             ))}
             {plan.leave.length > 12 && <div style={{ fontSize: 12, color: C.soft }}>…and {plan.leave.length - 12} more</div>}
