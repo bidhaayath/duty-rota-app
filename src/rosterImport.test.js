@@ -314,3 +314,70 @@ describe("small readers", () => {
     expect(guessCounts("DO", "Day off")).toBe("off");
   });
 });
+
+describe("a new department that already has the standard codes", () => {
+  /* Like a fresh department: M, E, N and OFF exist without hours, and
+     Evening shift is off. Rows 3 and 4 have an empty week. */
+  const csv = [
+    "Workshop,,,,,",
+    "6 Sept 2026 – 8 Sept 2026,,,,,",
+    "#,NAME,DESIGNATION,SUN 6 Sep,MON 7 Sep,TUE 8 Sep",
+    "1,Ali Hassan,Technician,M,E,N",
+    "2,Hawwa Zahir,Technician,E,OFF,M",
+    "3,Moosa Didi,Technician,,,",
+    ",Prepared by the supervisor,,,,",
+    ",,,,,",
+    "Legend: M = Morning duty (08:00-16:00) · E = Evening duty (16:00-00:00) · N = Night duty (00:00),,,,,",
+  ].join("\n");
+  const fresh = () => ({
+    staff: [], cells: {}, cellMeta: {}, posts: [], nonOfficial: [], fridayRule: true, eveningEnabled: false,
+    codes: [
+      { id: "M", code: "M", label: "Morning duty", counts: "morning" },
+      { id: "E", code: "E", label: "Evening duty", counts: "evening" },
+      { id: "N", code: "N", label: "Night duty", counts: "night", start: "20:00", end: "08:00" },
+      { id: "OFF", code: "OFF", label: "Off day", counts: "off" },
+    ],
+  });
+
+  test("a listed person with an empty week is still added; a footer note is not", () => {
+    const g = readGrid([sheetFromCSV(csv)]);
+    expect(g.people.map((p) => p.name)).toEqual(["Ali Hassan", "Hawwa Zahir", "Moosa Didi"]);
+  });
+
+  test("codes without hours take the file's; codes with hours keep theirs", () => {
+    const g = readGrid([sheetFromCSV(csv)]);
+    const plan = planImport(g, fresh());
+    expect(plan.codes.find((c) => c.key === "M").fillHours).toEqual({ start: "08:00", end: "16:00" });
+    expect(plan.codes.find((c) => c.key === "E").fillHours).toEqual({ start: "16:00", end: "00:00" });
+    expect(plan.codes.find((c) => c.key === "N").fillHours).toBeNull();   // already 20:00–08:00
+    const { data: d, report } = applyImport(fresh(), g, plan, { ...defaultChoices(plan) }, { today: "2026-11-22" });
+    expect(report.hoursAdded.sort()).toEqual(["E", "M"]);
+    expect(d.codes.find((c) => c.id === "M")).toMatchObject({ start: "08:00", end: "16:00" });
+    expect(d.codes.find((c) => c.id === "N")).toMatchObject({ start: "20:00", end: "08:00" });
+    expect(d.staff).toHaveLength(3);
+  });
+
+  test("hours are left alone when the manager unticks it", () => {
+    const g = readGrid([sheetFromCSV(csv)]);
+    const plan = planImport(g, fresh());
+    const { data: d } = applyImport(fresh(), g, plan, { ...defaultChoices(plan), codeHours: false }, { today: "2026-11-22" });
+    expect(d.codes.find((c) => c.id === "M").start).toBeUndefined();
+  });
+
+  test("Evening duties switch Evening shift on, so they are counted", () => {
+    const g = readGrid([sheetFromCSV(csv)]);
+    const plan = planImport(g, fresh());
+    const { data: d, report } = applyImport(fresh(), g, plan, defaultChoices(plan), { today: "2026-11-22" });
+    expect(report.eveningOn).toBe(true);
+    expect(d.eveningEnabled).toBe(true);
+  });
+
+  test("no Evening duties: Evening shift stays as it was", () => {
+    const noE = csv.replace(",M,E,N", ",M,M,N").replace(",E,OFF,M", ",N,OFF,M");
+    const g = readGrid([sheetFromCSV(noE)]);
+    const plan = planImport(g, fresh());
+    const { data: d, report } = applyImport(fresh(), g, plan, defaultChoices(plan), { today: "2026-11-22" });
+    expect(report.eveningOn).toBe(false);
+    expect(d.eveningEnabled).toBe(false);
+  });
+});

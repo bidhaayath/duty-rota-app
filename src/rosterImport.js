@@ -538,6 +538,14 @@ export const readGrid = (sheets, opts = {}) => {
   });
   const textAt = (r, c) => (spread.has(`${r},${c}`) ? spread.get(`${r},${c}`) : (sheet.cells[r] || [])[c] || "");
 
+  /* The export's Staff sheet, read first: it vouches for people whose week
+     in the grid is empty. */
+  let staffSheet = null;
+  list.forEach((s) => { if (s !== sheet && !staffSheet) staffSheet = readStaffSheet(s); });
+  const onStaffSheet = new Set((staffSheet || []).map((x) => clean(x.name).toLowerCase()));
+  const numberCol = Object.keys(kinds).find((c) => kinds[c] === "skip");
+  const desigCol = Object.keys(kinds).find((c) => kinds[c] === "designation");
+
   /* People. First pass collects first lines, so a split duty's second code
      can be told apart from a post on the second pass. */
   const personRows = [];
@@ -546,7 +554,17 @@ export const readGrid = (sheets, opts = {}) => {
     if (!rawName || NOT_A_PERSON.test(rawName)) continue;
     if (/^\d+([.,]\d+)?$/.test(rawName)) continue;
     const dayTexts = days.map((d) => clean(textAt(r, d.col)));
-    if (!dayTexts.some(Boolean)) continue;
+    if (!dayTexts.some(Boolean)) {
+      /* A whole week empty: still a person when the file says so — a row
+         number, a designation, or a line on the Staff sheet. A stray note
+         under the grid has none of those. */
+      const row = sheet.cells[r] || [];
+      const listed = onStaffSheet.has(splitNameDesignation(rawName).name.toLowerCase()) || onStaffSheet.has(rawName.toLowerCase())
+        || (numberCol !== undefined && /^\d+$/.test(clean(row[numberCol])))
+        || (desigCol !== undefined && clean(row[desigCol]));
+      if (listed) personRows.push(r);
+      continue;
+    }
     // A counts row ("5 5 4 5 …") rather than a person.
     if (dayTexts.filter(Boolean).every((t) => /^\d+$/.test(t))) continue;
     personRows.push(r);
@@ -578,8 +596,6 @@ export const readGrid = (sheets, opts = {}) => {
 
   const lastPersonRow = personRows[personRows.length - 1];
   const legend = readLegend(sheet, lastPersonRow + 1);
-  let staffSheet = null;
-  list.forEach((s) => { if (s !== sheet && !staffSheet) staffSheet = readStaffSheet(s); });
 
   return { sheetName: sheet.name, headerRow: header.row, days, people, legend, staffSheet, issues };
 };
@@ -751,13 +767,16 @@ export const planImport = (grid, data) => {
     const legend = grid.legend[key] || {};
     const commonTime = [...t.times.entries()].sort((a, b) => b[1] - a[1])[0];
     const [cs, ce] = commonTime ? commonTime[0].split("-") : [legend.start || "", legend.end || ""];
+    const start = cs || legend.start || "", end = ce || legend.end || "";
+    // An existing code without hours can take them from the file; one that has hours keeps its own.
+    const fillHours = existing && !(existing.start && existing.end) && start && end ? { start, end } : null;
     const proposal = existing ? null : {
       code: t.text, label: legend.label && legend.label.toUpperCase() !== key ? legend.label : t.text,
       counts: guessCounts(t.text, legend.label || "", cs || legend.start || ""),
       color: NEW_CODE_COLORS[colorAt++ % NEW_CODE_COLORS.length],
       start: cs || legend.start || "", end: ce || legend.end || "",
     };
-    return { key, text: t.text, count: t.count, existingId: existing ? existing.id : "", proposal };
+    return { key, text: t.text, count: t.count, existingId: existing ? existing.id : "", proposal, fillHours };
   }).sort((a, b) => b.count - a.count);
 
   const posts = [...postTally.entries()].map(([key, t]) => {
@@ -801,6 +820,7 @@ export const defaultChoices = (plan) => ({
   codes: Object.fromEntries(plan.codes.map((c) => [c.key, c.existingId || { create: true, ...c.proposal }])),
   posts: Object.fromEntries(plan.posts.map((p) => [p.key, p.existingId || "new"])),
   staffDetails: true,      // fill blank designation/contact/ID/dates from the file
+  codeHours: true,         // give existing codes with no hours the file's hours
   emails: false,           // an email links a staff row to someone's login, so it's opt-in
 });
 
@@ -822,7 +842,7 @@ export const applyImport = (d, grid, plan, choices, opts = {}) => {
   const report = {
     staffAdded: 0, staffMatched: 0, staffSkipped: 0, staffOverLimit: [], codesAdded: 0, postsAdded: 0,
     duties: 0, breaks: 0, overwritten: 0, keptExisting: 0, leavePeriods: 0, leaveSkipped: 0,
-    nonOfficialAdded: 0, detailsFilled: 0, columnsAdded: 0,
+    nonOfficialAdded: 0, detailsFilled: 0, columnsAdded: 0, hoursAdded: [], eveningOn: false,
   };
   const today = opts.today || iso(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
   d.staff = d.staff || [];
@@ -842,11 +862,21 @@ export const applyImport = (d, grid, plan, choices, opts = {}) => {
     const id = uid();
     const c = { id, code: clean(ch.code).slice(0, 8), label: clean(ch.label) || clean(ch.code), color: ch.color || "#A9D3E0", counts: ch.counts || "other" };
     if (ch.start && ch.end) { c.start = ch.start; c.end = ch.end; }
-    if (c.counts === "evening") d.eveningEnabled = true;
     d.codes.push(c);
     codeId[key] = id;
     report.codesAdded += 1;
   });
+
+  /* Hours for existing codes that have none — never over hours already set. */
+  if (choices.codeHours) {
+    plan.codes.forEach((pc) => {
+      if (!pc.fillHours || codeId[pc.key] !== pc.existingId) return;
+      const c = d.codes.find((x) => x.id === pc.existingId);
+      if (!c || (c.start && c.end)) return;
+      c.start = pc.fillHours.start; c.end = pc.fillHours.end;
+      report.hoursAdded.push(c.code);
+    });
+  }
 
   /* Posts. */
   const postId = {};
@@ -931,6 +961,8 @@ export const applyImport = (d, grid, plan, choices, opts = {}) => {
   const anyPosts = Object.keys(postId).length > 0;
   if (anyPosts) d.postsEnabled = true;
   const postFor = (name) => (name ? postId[postKey(name)] || "" : "");
+  const eveningIds = new Set(d.codes.filter((c) => c.counts === "evening").map((c) => c.id));
+  let wroteEvening = false;
   grid.people.forEach((p, index) => {
     const s = staffOf[index];
     if (!s) return;
@@ -959,6 +991,7 @@ export const applyImport = (d, grid, plan, choices, opts = {}) => {
       d.cells[date] = d.cells[date] || {};
       d.cells[date][s.id] = value;
       report.duties += ents.length;
+      if (ents.some((e) => eveningIds.has(e.code))) wroteEvening = true;
       const metaDay = (d.cellMeta[date] = d.cellMeta[date] || {});
       if (c.brk) {
         metaDay[s.id] = { ...(metaDay[s.id] || {}), breakTime: { start: c.brk.start, end: c.brk.end } };
@@ -970,6 +1003,10 @@ export const applyImport = (d, grid, plan, choices, opts = {}) => {
       }
     });
   });
+
+  /* Evening duties are only counted when the department has Evening shift on.
+     If the import wrote any, switch it on, or they would vanish from every total. */
+  if (!d.eveningEnabled && wroteEvening) { d.eveningEnabled = true; report.eveningOn = true; }
 
   /* Non-official days the file marks that the department doesn't have yet. */
   grid.days.forEach(({ date, nonOff }) => {
