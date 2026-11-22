@@ -53,6 +53,10 @@ const addDays = (s, n) => {
 };
 const clean = (s) => String(s == null ? "" : s).replace(/ /g, " ").replace(/[ \t]+/g, " ").trim();
 // Every kind of dash a spreadsheet produces, as a plain hyphen, for comparing.
+const niceIso = (s) => {
+  const [y, m, d] = String(s).split("-").map(Number);
+  return `${d} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1]} ${y}`;
+};
 const dashes = (s) => s.replace(/[‐‑‒–—―−]/g, "-");
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -431,44 +435,29 @@ export const readStaffSheet = (sheet) => {
 /* Find the header row: the row (in the top 15) with the most cells that
    read as dates. Plain numbers count only as a run of seven or more. */
 const findHeader = (sheet) => {
-  let best = null;
+  /* Real dates ("6 Dec", a date cell) always win over plain numbers, so a
+     person's row of totals ("1 2 2 7 11") can never pass for the header.
+     Plain numbers count only as a run of seven or more going 1, 2, 3… */
+  let strongBest = null, bareBest = null;
   sheet.cells.slice(0, 15).forEach((row, r) => {
     const hits = [];
     row.forEach((v, c) => { const h = parseDayHeader(v); if (h) hits.push({ c, h }); });
     const strong = hits.filter((x) => !x.h.bare);
-    const bare = hits.filter((x) => x.h.bare);
-    const use = strong.length >= 3 ? strong : (bare.length >= 7 ? hits : []);
-    if (use.length >= 3 && (!best || use.length > best.cols.length)) best = { row: r, cols: use };
+    if (strong.length >= 3 && (!strongBest || strong.length > strongBest.cols.length)) strongBest = { row: r, cols: strong };
+    let run = [], longest = [];
+    hits.forEach((x) => {
+      const prev = run[run.length - 1];
+      run = prev && x.c === prev.c + 1 && (x.h.day === prev.h.day + 1 || (x.h.day === 1 && prev.h.day >= 28)) ? [...run, x] : [x];
+      if (run.length > longest.length) longest = run;
+    });
+    if (longest.length >= 7 && (!bareBest || longest.length > bareBest.cols.length)) bareBest = { row: r, cols: longest };
   });
-  return best;
+  return strongBest || bareBest;
 };
 
-/**
- * Plain sheets → the roster as found in the file.
- * @param sheets   from readSheets
- * @param opts     { fileName, fallbackYear }
- * @returns {
- *   sheetName, headerRow,
- *   days:   [{ date, col, nonOff }],
- *   people: [{ row, name, designation, details: {contact,email,recc}, extra: {colName: value},
- *              defaultPost, cells: { [date]: parsedCell } }],
- *   legend: { CODE: { label, start, end } },
- *   staffSheet: [{ name, designation, email, contact, recc, licence, startDate, endDate }] | null,
- *   issues: [string]       things the manager should know (year guessed, weekday mismatch…)
- * }
- * Throws an Error with a plain message when no roster can be found.
- */
-export const readGrid = (sheets, opts = {}) => {
+/* One sheet with a date row → that sheet's part of the roster. */
+const readSheetGrid = (sheet, header, staffSheet, opts = {}) => {
   const issues = [];
-  const list = (sheets || []).filter((s) => s && s.cells && s.cells.length);
-  let sheet = null, header = null;
-  list.forEach((s) => {
-    const h = findHeader(s);
-    if (h && (!header || h.cols.length > header.cols.length)) { sheet = s; header = h; }
-  });
-  if (!sheet) {
-    throw new Error("I couldn't find a row of dates in this file. The roster needs a header row with one column per day, such as \"1 Dec\", \"Mon 1\" or \"2026-12-01\".");
-  }
 
   /* Dates. Each header gives what it can; the title rows, sheet name and
      file name fill in the month and year; a day number that goes down
@@ -484,7 +473,7 @@ export const readGrid = (sheets, opts = {}) => {
   if (!month) {
     throw new Error("I found the days, but not the month. Add the month to the title (for example \"December 2026\") or to the date headers, and try again.");
   }
-  const days = [];
+  let days = [];
   let prevDay = 0, mismatches = 0;
   header.cols.forEach(({ c, h }) => {
     if (h.year) year = h.year;
@@ -501,9 +490,45 @@ export const readGrid = (sheets, opts = {}) => {
     const real = new Date(yy, mm - 1, dd);
     if (real.getMonth() !== mm - 1) return;                 // "31 Nov" — skip it
     if (h.weekday >= 0 && real.getDay() !== h.weekday) mismatches += 1;
-    if (days.some((d) => d.date === date)) return;          // a repeated header
     days.push({ date, col: c, nonOff: !!h.nonOff });
   });
+
+  /* Dates dragged across with Excel's fill handle can count the YEAR up
+     instead of the day: 17/8/25, 18/8/26, 19/8/27… When the days and months
+     run on one by one but the years don't, keep the first column's year. */
+  if (days.length >= 3) {
+    const md = (x) => x.slice(5);
+    let run = [days[0].date], ok = true, yearsMoved = false;
+    for (let i = 1; i < days.length; i++) {
+      const want = addDays(run[i - 1], 1);
+      if (md(days[i].date) !== md(want)) { ok = false; break; }
+      if (days[i].date !== want) yearsMoved = true;
+      run.push(want);
+    }
+    if (ok && yearsMoved) {
+      issues.push(`The years in the date headers go up column by column, as if dragged in Excel, so I've used ${niceIso(run[0])} – ${niceIso(run[run.length - 1])}.`);
+      days = days.map((d, i) => ({ ...d, date: run[i] }));
+    }
+  }
+
+  /* A mistyped date between two good ones ("3 Feb, 4 Jan, 5 Feb") is put
+     right from its neighbours, and the manager is told. Only when both
+     sides agree, so a real gap in the roster is never "corrected". */
+  const farApart = (a, b) => Math.abs(new Date(a) - new Date(b)) > 7 * 86400000;
+  const fixAt = (i, want) => {
+    issues.push(`One date header looks mistyped: it says ${niceIso(days[i].date)} but sits between days that make it ${niceIso(want)}, so I've used ${niceIso(want)}.`);
+    days[i] = { ...days[i], date: want };
+  };
+  for (let i = 0; i < days.length; i++) {
+    const L = days[i - 1], R = days[i + 1];
+    if (L && R && addDays(L.date, 2) === R.date && days[i].date !== addDays(L.date, 1)) fixAt(i, addDays(L.date, 1));
+    // At either end only one side can vouch, so only a date more than a week out (a wrong month or year) is corrected.
+    else if (!L && R && days[i + 2] && addDays(R.date, 1) === days[i + 2].date && farApart(days[i].date, addDays(R.date, -1))) fixAt(i, addDays(R.date, -1));
+    else if (L && !R && days[i - 2] && addDays(days[i - 2].date, 1) === L.date && farApart(days[i].date, addDays(L.date, 1))) fixAt(i, addDays(L.date, 1));
+  }
+  const seenDates = new Set();
+  days = days.filter((d) => (seenDates.has(d.date) ? false : (seenDates.add(d.date), true)));   // a repeated header
+
   if (mismatches > days.length / 2) {
     issues.push("The weekday names in the file don't match the dates I worked out. Please check the year and month in the preview before adding.");
   }
@@ -553,10 +578,7 @@ export const readGrid = (sheets, opts = {}) => {
   });
   const textAt = (r, c) => (spread.has(`${r},${c}`) ? spread.get(`${r},${c}`) : (sheet.cells[r] || [])[c] || "");
 
-  /* The export's Staff sheet, read first: it vouches for people whose week
-     in the grid is empty. */
-  let staffSheet = null;
-  list.forEach((s) => { if (s !== sheet && !staffSheet) staffSheet = readStaffSheet(s); });
+  /* The export's Staff sheet vouches for people whose week in the grid is empty. */
   const onStaffSheet = new Set((staffSheet || []).map((x) => clean(x.name).toLowerCase()));
   const numberCol = Object.keys(kinds).find((c) => kinds[c] === "skip");
   const desigCol = Object.keys(kinds).find((c) => kinds[c] === "designation");
@@ -614,7 +636,111 @@ export const readGrid = (sheets, opts = {}) => {
   const lastPersonRow = personRows[personRows.length - 1];
   const legend = readLegend(sheet, lastPersonRow + 1);
 
-  return { sheetName: sheet.name, headerRow: header.row, days, people, legend, staffSheet, issues };
+  return { sheetName: sheet.name, headerRow: header.row, days, people, legend, issues };
+};
+
+/**
+ * Plain sheets → the roster as found in the file.
+ * Every sheet with a row of dates is read, so a workbook with one sheet
+ * per week brings all its weeks at once. The same person on several
+ * sheets becomes one person.
+ * @param sheets   from readSheets
+ * @param opts     { fileName, fallbackYear }
+ * @returns {
+ *   sheetName, sheetNames, headerRow,
+ *   days:   [{ date, col, nonOff }],
+ *   people: [{ row, name, designation, details: {contact,email,recc}, extra: {colName: value},
+ *              defaultPost, cells: { [date]: parsedCell } }],
+ *   legend: { CODE: { label, start, end } },
+ *   staffSheet: [{ name, designation, email, contact, recc, licence, startDate, endDate }] | null,
+ *   issues: [string]       things the manager should know (year guessed, weekday mismatch…)
+ * }
+ * Throws an Error with a plain message when no roster can be found.
+ */
+export const readGrid = (sheets, opts = {}) => {
+  const list = (sheets || []).filter((s) => s && s.cells && s.cells.length);
+  const found = list.map((s) => ({ s, h: findHeader(s) })).filter((x) => x.h);
+  if (!found.length) {
+    throw new Error("I couldn't find a row of dates in this file. The roster needs a header row with one column per day, such as \"1 Dec\", \"Mon 1\" or \"2026-12-01\".");
+  }
+  let staffSheet = null;
+  list.forEach((s) => { if (!staffSheet && !found.some((f) => f.s === s)) staffSheet = readStaffSheet(s); });
+
+  const issues = [];
+  const parts = [];
+  let firstError = null;
+  const many = found.length > 1;
+  found.forEach(({ s, h }) => {
+    try {
+      const part = readSheetGrid(s, h, staffSheet, opts);
+      /* A second sheet over the same dates (a "Break Schedule" copy of the
+         month, a duplicate week) would mix two versions of each day. Use the
+         first and say so. */
+      const covered = new Set(parts.flatMap((x) => x.days.map((d) => d.date)));
+      const overlap = part.days.filter((d) => covered.has(d.date)).length;
+      if (overlap && overlap * 2 >= part.days.length) {
+        issues.push(`Sheet "${s.name}" covers the same dates as an earlier sheet, so I left it out.`);
+        return;
+      }
+      if (overlap) {
+        part.days = part.days.filter((d) => !covered.has(d.date));
+        issues.push(`Sheet "${s.name}" repeats ${overlap === 1 ? "a date" : `${overlap} dates`} from an earlier sheet; I used the earlier one.`);
+      }
+      part.issues.forEach((t) => issues.push(many ? `Sheet "${s.name}": ${t}` : t));
+      parts.push(part);
+    } catch (e) {
+      if (!firstError) firstError = e;
+      if (many) issues.push(`Sheet "${s.name}" was left out: ${e.message}`);
+    }
+  });
+  if (!parts.length) throw firstError;
+
+  /* Join the sheets: days in date order, one person per name. */
+  const dayByDate = new Map();
+  parts.forEach((part) => part.days.forEach((d) => {
+    const had = dayByDate.get(d.date);
+    dayByDate.set(d.date, had ? { ...had, nonOff: had.nonOff || d.nonOff } : { ...d });
+  }));
+  const days = [...dayByDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const people = [];
+  const byKey = new Map();
+  parts.forEach((part) => part.people.forEach((p) => {
+    const key = nameKey(p.name);
+    let into = byKey.get(key);
+    if (!into) {
+      into = { ...p, details: { ...p.details }, extra: { ...p.extra }, cells: {} };
+      byKey.set(key, into);
+      people.push(into);
+    } else {
+      if (!into.designation && p.designation) into.designation = p.designation;
+      if (!into.defaultPost && p.defaultPost) into.defaultPost = p.defaultPost;
+      Object.entries(p.details).forEach(([k, v]) => { if (v && !into.details[k]) into.details[k] = v; });
+      Object.entries(p.extra).forEach(([k, v]) => { if (v && !into.extra[k]) into.extra[k] = v; });
+    }
+    part.days.forEach((d) => { if (p.cells[d.date]) into.cells[d.date] = p.cells[d.date]; });
+  }));
+  // Days a person isn't on (another week's sheet without them) are blank.
+  const blank = parseCell("");
+  people.forEach((p) => days.forEach((d) => { if (!p.cells[d.date]) p.cells[d.date] = blank; }));
+  const legend = {};
+  parts.forEach((part) => Object.entries(part.legend).forEach(([k, v]) => { if (!legend[k]) legend[k] = v; }));
+
+  if (many) {
+    // Weeks no sheet covers, so the manager isn't surprised by an empty week.
+    const gaps = [];
+    for (let i = 1; i < days.length; i++) {
+      const expect = addDays(days[i - 1].date, 1);
+      if (days[i].date !== expect) gaps.push(`${niceIso(expect)} – ${niceIso(addDays(days[i].date, -1))}`);
+    }
+    if (gaps.length) issues.push(`No sheet covers ${gaps.slice(0, 3).join(", ")}${gaps.length > 3 ? ` and ${gaps.length - 3} more gaps` : ""}.`);
+  }
+
+  return {
+    sheetName: parts.length === 1 ? parts[0].sheetName : "",
+    sheetNames: parts.map((x) => x.sheetName),
+    headerRow: parts[0].headerRow,
+    days, people, legend, staffSheet, issues,
+  };
 };
 
 /* ─────────────────── Step 3: match against the department ─────────────────── */

@@ -897,6 +897,9 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
   const [deptMenuOpen, setDeptMenuOpen] = useState(false);
   const switchingDept = useRef(false); // guards the autosave while a switch loads
   const [tab, setTab] = useState("rota");
+  /* "Edit details" on the rota's name card opens this person's form in the
+     Staff tab. Cleared once the Staff tab has opened it. */
+  const [staffToEdit, setStaffToEdit] = useState(null);
   /* Sunday to begin with, because the rota has not loaded yet and its
      setting is not known. The effect further down realigns this the moment
      it is, so a Monday ward sees a Monday without ever seeing a flicker of
@@ -2402,12 +2405,14 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         )}
 
         <WelcomeGuide data={data} update={update} setTab={setTab} />
-        {tab === "rota" && <WeekRota data={data} update={update} staffEditable={staffEditable} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} canAddStaff={!(editBlocked || currentDeptLocked || viewOnlyRole)} staffLimit={staffLimit} onOpenStaffTab={() => setTab("staff")} />}
+        {tab === "rota" && <WeekRota data={data} update={update} staffEditable={staffEditable} weekStart={weekStart} setWeekStart={setWeekStart} days={rotaDays} rotaView={rotaView} setRotaView={setRotaView} monthRange={monthRange} setMonthRange={setMonthRange} onExport={() => setPrintView({ kind: "rota" })} canAddStaff={!(editBlocked || currentDeptLocked || viewOnlyRole)} staffLimit={staffLimit} onOpenStaffTab={() => setTab("staff")}
+          onEditStaff={(editBlocked || currentDeptLocked || viewOnlyRole) ? null : (id) => { setStaffToEdit(id); setTab("staff"); }} />}
         {tab === "records" && <Records data={data} range={range} setRange={setRange} onExport={() => setPrintView({ kind: "records" })} />}
         {tab === "stats" && <Stats data={data} range={statRange} setRange={setStatRange} onExport={() => setPrintView({ kind: "stats" })} />}
         {tab === "insights" && <InsightsTab data={data} onExport={(cfg) => setPrintView({ kind: "insights", cfg })} />}
         {tab === "staff" && <StaffTab data={data} update={update} staffLimit={staffLimit} readonlyStaffIds={readonlyStaffIds} staffEditable={staffEditable} canGrantManager={isOwnerLevel} deptId={deptId} deptName={(departments.find((d) => d.id === deptId) || {}).name}
-          canEdit={!(editBlocked || currentDeptLocked || viewOnlyRole)} />}
+          canEdit={!(editBlocked || currentDeptLocked || viewOnlyRole)}
+          openStaffId={staffToEdit} onOpenedStaff={() => setStaffToEdit(null)} />}
         {tab === "requests" && (
           <RequestsTab
             data={data} update={update} staffEditable={staffEditable}
@@ -3122,7 +3127,7 @@ function CodePicker({ value, codes, onPick, cellBg, cellFg, hasCode, note, onNot
 }
 
 /* ─────────────────── Weekly rota grid ─────────────────── */
-function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport, canAddStaff = false, staffLimit = null, onOpenStaffTab = null }) {
+function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeekStart, days, rotaView, setRotaView, monthRange, setMonthRange, onExport, canAddStaff = false, staffLimit = null, onOpenStaffTab = null, onEditStaff = null }) {
   const codeById = codeByIdOf(data);
   // "See original rota" shows what each changed cell was BEFORE it was
   // exchanged. The whole rota is view-only while this is on, so nobody
@@ -4049,6 +4054,15 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
           {!cardStaff.designation && !cardStaff.recc && !cardStaff.contact && !cardStaff.email && !cardStaff.licence
             && !(data.staffColumns || []).some((c) => ((cardStaff.extra || {})[c.id] || "").trim()) && (
             <div style={{ fontSize: 12, color: T.inkSoft }}>No other details yet. Add them in the Staff tab.</div>
+          )}
+          {onEditStaff && staffEditable(cardStaff.id) && (
+            <button type="button" onClick={() => { const id = cardStaff.id; setNameCard(null); onEditStaff(id); }}
+              aria-label={`Edit ${cardStaff.name}'s details`}
+              style={{ marginTop: 10, width: "100%", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, color: T.lagoon,
+                background: "#FFFFFF", border: `1px solid ${T.line}`, borderRadius: 10, padding: "7px 10px", cursor: "pointer",
+                display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <Pencil size={13} /> Edit details
+            </button>
           )}
         </div>
       )}
@@ -5150,13 +5164,25 @@ function StatsPrint({ data, from, to }) {
 // rather than how the department runs — that stays with the owner. A null
 // role means an account with no membership row, i.e. every existing customer,
 // who is effectively the owner of their own organisation.
-function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true, canGrantManager = true, deptId, deptName, canEdit = true }) {
+function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, staffEditable = () => true, canGrantManager = true, deptId, deptName, canEdit = true, openStaffId = null, onOpenedStaff = null }) {
   // email and employmentRole are what turn a staff row into an invitation:
   // the email says who to invite, the role says what they get. Both are
   // optional, so every staff member entered before this simply has them
   // blank and nothing about their rota changes.
   const empty = { name: "", designation: "", contact: "", recc: "", licence: "", email: "", employmentRole: "employee", startDate: "", endDate: "", leavePeriods: [] };
   const [form, setForm] = useState(null);
+  /* Arriving from the rota's "Edit details": open that person's form, the
+     same as pressing their Edit button here, and bring it into view. */
+  const formRef = useRef(null);
+  useEffect(() => {
+    if (!openStaffId) return;
+    const s = data.staff.find((x) => x.id === openStaffId);
+    if (s && canEdit && staffEditable(s.id)) {
+      setForm(s);
+      requestAnimationFrame(() => formRef.current && formRef.current.scrollIntoView({ behavior: "smooth", block: "start" }));
+    }
+    if (onOpenedStaff) onOpenedStaff();
+  }, [openStaffId]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showFormer, setShowFormer] = useState(false);
   const [inviteFor, setInviteFor] = useState(null);
   const { access, isOwner: isOrgOwner, refresh: refreshAccess } = useOrgAccess(deptId);
@@ -5402,7 +5428,7 @@ function StaffTab({ data, update, staffLimit = null, readonlyStaffIds = null, st
       )}
 
       {form && (
-        <Card className="dr-anim-in">
+        <Card ref={formRef} className="dr-anim-in">
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
             <Field label="Name"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aminath Ali" /></Field>
             <Field label="Designation (optional)"><input style={inputStyle} value={form.designation || ""} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="e.g. Staff Nurse" /></Field>
