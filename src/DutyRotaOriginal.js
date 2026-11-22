@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Plane, Printer, BarChart3,
   AlertTriangle, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
   User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon,
-  Copy, ClipboardPaste, Coffee
+  Copy, ClipboardPaste, Coffee, Upload
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -17,6 +17,7 @@ import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
 import AssistantPanel from "./AssistantPanel";
 import { exportRotaToExcel } from "./rotaExcel";
+import RosterImportDialog from "./RosterImportDialog";
 import { effectivePlan, deptPlanLoading } from "./deptPlan";
 import { tagDept, ownedByMe, deptAllowance, ownerLevel } from "./deptAllowance";
 import { useRotaHistory, UndoRedoButtons } from "./useRotaHistory";
@@ -3166,6 +3167,10 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
      duty) and the break. Kept only on this screen, for this visit; notes
      and changed-duty marks are never copied. */
   const [clip, setClip] = useState(null);   // { value, breakTime, label }
+  /* Import a roster: a previous roster from Excel or CSV, previewed first,
+     then added in one update() — one save, one Undo. Owners and managers
+     only (the same people who can add staff). */
+  const [importOpen, setImportOpen] = useState(false);
   const moveRow = (id, dir) => {
     const ids = shownStaffIds.current;
     const pos = ids.indexOf(id);
@@ -3678,10 +3683,23 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
             <Btn small onClick={() => setQuickAdd(quickAdd ? null : { name: "", designation: "" })}
               style={{ background: "linear-gradient(90deg, #0D4F61, #1F7F9F)", boxShadow: "0 4px 12px rgba(13,79,97,0.22)" }}><Plus size={14} /> Add staff</Btn>
           )}
+          {canAddStaff && (
+            <span className="rota-soft"><Btn kind="ghost" small onClick={() => setImportOpen(true)} aria-label="Import a roster"
+              style={{ background: "#FFFFFF", border: "1px solid rgba(14,58,71,0.25)", color: "#0D4F61", boxShadow: "0 2px 8px rgba(14,58,71,0.08)" }}><Upload size={14} /> <span className="rota-btnlabel">Import</span></Btn></span>
+          )}
           <span className="rota-soft"><Btn kind="ghost" small onClick={onExport} aria-label="Export PDF"
             style={{ background: "#FFFFFF", border: "1px solid rgba(14,58,71,0.25)", color: "#0D4F61", boxShadow: "0 2px 8px rgba(14,58,71,0.08)" }}><Printer size={14} /> <span className="rota-btnlabel">Export PDF</span></Btn></span>
         </div>
       </div>
+
+      {importOpen && canAddStaff && (
+        <RosterImportDialog data={data} update={update} staffLimit={staffLimit}
+          onClose={() => setImportOpen(false)}
+          onDone={({ from, to }) => {
+            // Show what was just imported: the monthly view over the file's dates.
+            if (from && to) { setRotaView("monthly"); setRange(from, to); }
+          }} />
+      )}
 
       {quickAdd && (
         <Card className="dr-anim-in" style={{ padding: 14, display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
