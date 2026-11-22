@@ -7,7 +7,7 @@ import fs from "fs";
 import path from "path";
 import {
   readSheets, sheetFromCSV, readGrid, parseDayHeader, parseCell, splitNameDesignation,
-  matchStaff, planImport, defaultChoices, applyImport, summaryLine, guessCounts,
+  matchStaff, planImport, defaultChoices, applyImport, summaryLine, guessCounts, parseLeaveRange,
 } from "./rosterImport";
 import { cellEntries, leaveOn } from "./rotaCounts";
 
@@ -489,4 +489,67 @@ describe("a workbook with one sheet per week", () => {
     const s = week("w", ["2025-02-03", "2025-02-04", "2025-02-06"], [["RN TEST ONE", "M", "A", "N"]]);
     expect(readGrid([s]).days.map((d) => d.date)).toEqual(["2025-02-03", "2025-02-04", "2025-02-06"]);
   });
+});
+
+describe("a ward roster with leave dates written in the cells", () => {
+  const sheet = {
+    name: "Ward Roster",
+    cells: [
+      ["GENERAL WARD – DUTY ROSTER", "", "", "", ""],
+      ["NAME AND DESIGNATION", "RC NO", "SUN\n15-Nov-26", "MON\n16-Nov-26", "TUE\n17-Nov-26"],
+      ["Test One", "1", "M*", "A/R", "OFF/C"],
+      ["Test Two", "2", "ANNUAL LEAVE (10–24 NOV)", "", ""],
+      ["Test Three", "3", "MATERNITY LEAVE(8th october 2026- 25th May 2027)", "", ""],
+      ["Test Four", "", "ICU DUTY", "", ""],
+      ["", "", "", "", ""],
+      ["COLOUR LEGEND", "", "", "", ""],
+      ["M", "Morning", "", "", ""],
+      ["OFF / OFF C", "Off day / off-call", "", "", ""],
+    ],
+    merges: [
+      { r1: 3, c1: 2, r2: 3, c2: 4 }, { r1: 4, c1: 2, r2: 4, c2: 4 }, { r1: 5, c1: 2, r2: 5, c2: 4 },
+      { r1: 8, c1: 1, r2: 8, c2: 3 }, { r1: 9, c1: 1, r2: 9, c2: 3 },
+    ],
+  };
+
+  test("the colour legend ends the grid, and 1, 2, 3 is not an ID", () => {
+    const g = readGrid([sheet]);
+    expect(g.people.map((p) => p.name)).toEqual(["Test One", "Test Two", "Test Three", "Test Four"]);
+    expect(g.people[0].extra).toEqual({});
+    expect(g.people[0].details).toEqual({});
+  });
+
+  test("leave takes the dates written in brackets", () => {
+    const plan = planImport(readGrid([sheet]), emptyDept());
+    expect(plan.leave).toEqual([
+      { index: 1, type: "annual", label: "", start: "2026-11-10", end: "2026-11-24", fromNote: true },
+      { index: 2, type: "maternity", label: "", start: "2026-10-08", end: "2027-05-25", fromNote: true },
+    ]);
+  });
+
+  test("marked shift codes are guessed from their letter", () => {
+    const plan = planImport(readGrid([sheet]), emptyDept());
+    const by = Object.fromEntries(plan.codes.map((c) => [c.key, c]));
+    expect(by["M*"].proposal.counts).toBe("morning");
+    expect(by["A/R"].proposal.counts).toBe("afternoon");
+    expect(by["OFF/C"].proposal.counts).toBe("off");
+  });
+
+  test("a period from the note warns about duties it would cover", () => {
+    const d0 = emptyDept({ staff: [{ id: "t2", name: "Test Two", leavePeriods: [] }], cells: { "2026-11-11": { t2: "OFF" } } });
+    const plan = planImport(readGrid([sheet]), d0);
+    expect(plan.leave[0]).toMatchObject({ index: 1, covers: 1 });
+  });
+});
+
+describe("leave date ranges", () => {
+  test.each([
+    ["10–24 NOV", 2026, { start: "2026-11-10", end: "2026-11-24" }],
+    ["8th october 2026- 25th May 2027", 2026, { start: "2026-10-08", end: "2027-05-25" }],
+    ["30th june 2026- 15th decembr 2026", 2026, { start: "2026-06-30", end: "2026-12-15" }],
+    ["14 Dec 2026 – 20 Dec 2026", 2026, { start: "2026-12-14", end: "2026-12-20" }],
+    ["20 Dec – 5 Jan", 2027, { start: "2026-12-20", end: "2027-01-05" }],
+    ["1/12 - 5/12", 2026, { start: "2026-12-01", end: "2026-12-05" }],
+  ])("%j", (text, year, want) => expect(parseLeaveRange(text, year)).toEqual(want));
+  test.each(["", "soon", "31 Feb – 2 Mar", "5 Dec – 1 Dec 2026"])("not a range: %j", (t) => expect(parseLeaveRange(t, 2026)).toBeNull());
 });
