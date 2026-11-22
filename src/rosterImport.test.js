@@ -381,3 +381,47 @@ describe("a new department that already has the standard codes", () => {
     expect(d.eveningEnabled).toBe(false);
   });
 });
+
+
+describe("a hospital weekly sheet: headings over two rows, a sign-off block", () => {
+  /* Row 1 holds the headings and weekdays, row 2 the dates; NAME, CONTACT
+     and RECC are merged down over both. Under the grid: coverage counts
+     and a Prepared by / Approved by box that overlaps the day columns. */
+  const sheet = {
+    name: "Sheet1",
+    cells: [
+      ["DUTY NURSE MANAGER", "", "", "", "", "", ""],
+      ["#", "NAME & DESIGNATION", "CONTACT NO.", "RECC NO.", "SUN", "MON ", "TUE"],
+      ["", "", "", "", "2024-12-29", "2024-12-30", "2024-12-31"],
+      ["1", "SRN TEST ONE", "7000001", "HMH0001", "M", "A(R)", "OFF(N)"],
+      ["2", "RN TEST TWO", "7000002", "HMH0002", "AL", "AL", "AL"],
+      ["", "", "", "", "", "", ""],
+      ["MORNING", "", "", "", "1", "0", "0"],
+      ["", "PREPARED BY:", "", "", "APPROVED BY:", "", ""],
+      ["", "DNM SRN. TEST ONE", "", "", "ND SOMEONE", "", ""],
+      ["", "DATE:", "", "", "DATE:", "", ""],
+    ],
+    merges: [
+      { r1: 1, c1: 0, r2: 2, c2: 0 }, { r1: 1, c1: 1, r2: 2, c2: 1 },
+      { r1: 1, c1: 2, r2: 2, c2: 2 }, { r1: 1, c1: 3, r2: 2, c2: 3 },
+      { r1: 7, c1: 4, r2: 7, c2: 6 }, { r1: 8, c1: 4, r2: 8, c2: 6 }, { r1: 9, c1: 4, r2: 9, c2: 6 },
+    ],
+  };
+
+  test("only the two nurses are people, with contact and RECC numbers", () => {
+    const g = readGrid([sheet]);
+    expect(g.days.map((d) => d.date)).toEqual(["2024-12-29", "2024-12-30", "2024-12-31"]);
+    expect(g.people.map((p) => p.name)).toEqual(["SRN TEST ONE", "RN TEST TWO"]);
+    expect(g.people[0].details).toEqual({ contact: "7000001", recc: "HMH0001" });
+  });
+
+  test("letters are guessed as shifts, and OFF(N) is your (N)OFF", () => {
+    const g = readGrid([sheet]);
+    const plan = planImport(g, { staff: [], cells: {}, posts: [], nonOfficial: [], fridayRule: true,
+      codes: [{ id: "M", code: "M", counts: "morning" }, { id: "NOFF", code: "(N)OFF", counts: "off" }] });
+    const by = Object.fromEntries(plan.codes.map((c) => [c.key, c]));
+    expect(by["OFF(N)"].existingId).toBe("NOFF");
+    expect(by["A(R)"].proposal.counts).toBe("afternoon");
+    expect(plan.leave).toHaveLength(1);
+  });
+});

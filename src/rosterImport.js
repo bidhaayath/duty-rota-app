@@ -242,7 +242,7 @@ const findPeriod = (texts) => {
 /* Headers to the left of the days, by what they hold. */
 const LEFT_COLUMNS = [
   ["skip", /^(#|no\.?|s\.? ?no\.?|sl\.? ?no\.?|sr\.? ?no\.?|number)$/i],
-  ["name", /^(name|names|staff|staff name|employee|employee name|officer|officers|nurse|nurses|member|person|full name)$/i],
+  ["name", /^(name|names|staff|staff name|employee|employee name|officer|officers|nurse|nurses|member|person|full name|name\s*(&|and|\/)\s*designation)$/i],
   ["designation", /^(designation|title|rank|position|grade|role|job title)$/i],
   ["contact", /^(contact|contact no\.?|phone|mobile|tel|telephone)$/i],
   ["email", /^(e-?mail|email address)$/i],
@@ -257,7 +257,11 @@ const classifyLeft = (head) => {
 };
 
 /* Rows under the grid that are counts or footers, not people. */
-const NOT_A_PERSON = /^(morning|afternoon|evening|night|other duty|on-?call|total|totals|grand total|legend|note|notes|key|signature|prepared by|checked by|approved by|in charge|count)\b/i;
+const NOT_A_PERSON = /^(morning|afternoon|evening|night|other duty|on-?call|total|totals|grand total|legend|note|notes|key|signature|sign|date|prepared by|checked by|approved by|updated|in charge|count)\b/i;
+/* A row that ends the grid: the coverage counts or a sign-off block. Once
+   people have been found, nothing below one of these is a person, even if
+   a merged "Approved by" box happens to sit over the day columns. */
+const END_OF_GRID = /^(morning|afternoon|evening|night|total|totals|grand total|legend|key|prepared by|checked by|approved by|signature)\b/i;
 
 /* Leave names as the export writes them, and the usual short forms.
    SL, FRL and ML are deliberately absent: written short they are rota
@@ -506,8 +510,19 @@ export const readGrid = (sheets, opts = {}) => {
   const dayCols = new Set(days.map((d) => d.col));
   const firstDayCol = Math.min(...days.map((d) => d.col));
 
-  /* Columns left of the days. */
-  const headRow = sheet.cells[header.row] || [];
+  /* Columns left of the days. Their headings may sit a row above the dates
+     ("NAME" over two rows, the dates in the second), so look up a little. */
+  const headAt = (c) => {
+    const m = sheet.merges.find((x) => x.c1 <= c && c <= x.c2 && x.r1 <= header.row && header.row <= x.r2);
+    if (m) return clean((sheet.cells[m.r1] || [])[m.c1]);
+    for (let r = header.row; r >= Math.max(0, header.row - 2); r--) {
+      const t = clean((sheet.cells[r] || [])[c]);
+      if (t) return t;
+    }
+    return "";
+  };
+  const headRow = [];
+  for (let c = 0; c < firstDayCol; c++) headRow[c] = headAt(c);
   const kinds = {};
   for (let c = 0; c < firstDayCol; c++) {
     const k = classifyLeft(headRow[c]);
@@ -551,6 +566,8 @@ export const readGrid = (sheets, opts = {}) => {
   const personRows = [];
   for (let r = header.row + 1; r < sheet.cells.length; r++) {
     const rawName = clean((sheet.cells[r] || [])[nameCol]);
+    const firstText = clean((sheet.cells[r] || []).slice(0, firstDayCol).map(clean).find(Boolean) || "");
+    if (personRows.length && END_OF_GRID.test(firstText)) break;
     if (!rawName || NOT_A_PERSON.test(rawName)) continue;
     if (/^\d+([.,]\d+)?$/.test(rawName)) continue;
     const dayTexts = days.map((d) => clean(textAt(r, d.col)));
@@ -663,11 +680,22 @@ export const matchStaff = (name, designation, staff) => {
 };
 
 const codeKey = (s) => clean(s).toUpperCase().replace(/\s+/g, "");
+/* "OFF(N)" and "(N)OFF" are the same code written two ways. */
+const codeTwin = (key) => {
+  let m = key.match(/^(.+)\(([^)]+)\)$/);
+  if (m) return `(${m[2]})${m[1]}`;
+  m = key.match(/^\(([^)]+)\)(.+)$/);
+  return m ? `${m[2]}(${m[1]})` : "";
+};
 const postKey = (s) => dashes(clean(s)).toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 /* A best guess at what a new code counts as, from its name and hours, so
    the manager mostly just confirms. */
 export const guessCounts = (code, label = "", start = "") => {
+  // The usual single letters, with or without (R) for a request.
+  const bare = clean(code).toUpperCase().replace(/\(R\)$/, "");
+  const LETTERS = { M: "morning", AM: "morning", D: "morning", A: "afternoon", PM: "afternoon", E: "evening", N: "night", RD: "release", RELEASE: "release" };
+  if (!label && LETTERS[bare]) return LETTERS[bare];
   const t = `${code} ${label}`.toLowerCase();
   if (/\boff\b|day off|rest day|\bdo\b|\bro\b/.test(t)) return "off";
   if (/sick/.test(t)) return "sl";
@@ -763,7 +791,7 @@ export const planImport = (grid, data) => {
 
   let colorAt = 0;
   const codes = [...codeTally.entries()].map(([key, t]) => {
-    const existing = codesByKey.get(key);
+    const existing = codesByKey.get(key) || codesByKey.get(codeTwin(key));
     const legend = grid.legend[key] || {};
     const commonTime = [...t.times.entries()].sort((a, b) => b[1] - a[1])[0];
     const [cs, ce] = commonTime ? commonTime[0].split("-") : [legend.start || "", legend.end || ""];
