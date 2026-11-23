@@ -512,6 +512,9 @@ export default function Dashboard({
           .edr-dept-text, .edr-dept-role { display: none !important; }
           .edr-dept-badge { width: 36px !important; height: 36px !important; }
           .edr-home h2 { font-size: 15px !important; }
+          /* Next: just the day and the code. The hours don't fit beside them
+             on a phone; they're still in the row's details (hover / long-press). */
+          .edr-next-time { display: none !important; }
         }
       `}</style>
 
@@ -582,7 +585,7 @@ export default function Dashboard({
                 {u.d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" })}
               </span>
               {u.first && u.first.time && (
-                <span style={{ marginLeft: "auto", fontSize: 11, color: T.inkSoft, whiteSpace: "nowrap" }}>{u.first.time}</span>
+                <span className="edr-next-time" style={{ marginLeft: "auto", fontSize: 11, color: T.inkSoft, whiteSpace: "nowrap" }}>{u.first.time}</span>
               )}
               {u.first
                 ? <span style={chip(u.first.color, { minWidth: 44, height: 24, padding: "0 8px", borderRadius: 999, fontSize: 11, whiteSpace: "nowrap" })}>{u.first.text}{u.more ? "+" : ""}</span>
