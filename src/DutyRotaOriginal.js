@@ -768,7 +768,18 @@ const joinLeaveRuns = (data, staffId, segs, open) => {
     const entries = cellEntries(data, date, staffId);
     if (entries.length !== 1) return null;
     const code = data.codes.find((c) => c.id === entries[0].code);
-    return code && (leaveBucket(code) || code.counts === "release") ? code : null;
+    return code && (leaveBucket(code) || code.counts === "release" || code.counts === "other") ? code : null;
+  };
+  /* A band's dates are the whole run, like a leave period's: a run that
+     carries on past the days on screen (PVT DUTY to 23 Nov, viewed 15–21 Nov)
+     says so. Only plain days on duty count; a leave period, a day outside
+     the person's employment, or a different code ends the run. */
+  const staff = data.staff.find((x) => x.id === staffId);
+  const sameRunOn = (date, codeId) => !!staff && isEmployedOn(staff, date) && !leaveOn(staff, date) && leaveCodeOf(date)?.id === codeId;
+  const runEdge = (date, codeId, dir) => {
+    let d = date;
+    for (let n = 0; n < 400 && sameRunOn(addDays(d, dir), codeId); n++) d = addDays(d, dir);
+    return d;
   };
   const out = [];
   let k = 0;
@@ -779,9 +790,13 @@ const joinLeaveRuns = (data, staffId, segs, open) => {
     let j = k;
     while (j + 1 < segs.length && segs[j + 1].kind === "cell" && leaveCodeOf(segs[j + 1].date)?.id === code.id) j++;
     const len = j - k + 1;
-    const key = `${staffId}:${seg.date}:${code.id}`;
-    if (len >= RUN_MIN && !open.has(key)) {
-      out.push({ kind: "codeRun", code, start: seg.date, end: segs[j].date, span: len, key });
+    // Only stretch past the screen from its edges; a run that ends inside the view ends there.
+    const start = k === 0 ? runEdge(seg.date, code.id, -1) : seg.date;
+    const end = j === segs.length - 1 ? runEdge(segs[j].date, code.id, 1) : segs[j].date;
+    const whole = spanDays(start, end);
+    const key = `${staffId}:${start}:${code.id}`;
+    if (whole >= RUN_MIN && len >= 2 && !open.has(key)) {
+      out.push({ kind: "codeRun", code, start, end, span: len, key });
     } else {
       for (let x = k; x <= j; x++) out.push(segs[x]);
     }
@@ -1765,7 +1780,25 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     }
     .rota-name {
       position: sticky; left: 32px; z-index: 2; background: #fff;
-      min-width: 168px; box-shadow: 1px 0 0 ${T.line};
+      width: var(--edr-namew, 150px); min-width: var(--edr-namew, 150px); max-width: var(--edr-namew, 150px); box-shadow: 1px 0 0 ${T.line};
+      white-space: normal !important; line-height: 1.25;
+    }
+    /* A long name wraps to two lines; anything longer ends in "…".
+       The whole name is in the hover card and the tooltip. */
+    /* The drag handle on the NAME header's right edge. */
+    .rota-resize {
+      position: absolute; top: 0; right: -4px; bottom: 0; width: 9px; z-index: 8;
+      cursor: col-resize; touch-action: none;
+    }
+    .rota-resize::after {
+      content: ""; position: absolute; top: 22%; bottom: 22%; left: 3px; width: 3px; border-radius: 2px;
+      background: rgba(13,79,97,0.18); transition: background 120ms;
+    }
+    .rota-resize:hover::after, .rota-resize:focus-visible::after { background: #1F7F9F; }
+    .rota-resize:focus-visible { outline: none; }
+    .rota-namebtn {
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      overflow: hidden; word-break: break-word; overflow-wrap: anywhere;
     }
     .rota-foot-label { position: sticky; left: 0; z-index: 2; }
     /* The rota box scrolls both ways inside itself, sized to the screen, so
@@ -1786,7 +1819,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     @media screen and (min-width: 900px) {
       /* A week plus its totals fits a 1366px laptop with the menu open, and
          slim rows show a dozen or more staff without scrolling. */
-      .dr-rota-grid .rota-name { min-width: 140px; }
+      .dr-rota-grid .rota-name { width: var(--edr-namew, 150px); min-width: var(--edr-namew, 150px); max-width: var(--edr-namew, 150px); }
       .dr-rota-grid .dr-cell { min-width: 62px !important; padding-top: 3px !important; padding-bottom: 3px !important; font-size: 12px !important; }
       .dr-rota-grid tbody td { padding-top: 1px !important; padding-bottom: 1px !important; font-size: 12.5px; }
       .rota-goldnote:not(.rota-goldnote-open) { display: none !important; }
@@ -1892,7 +1925,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
         padding: 5px 2px !important; border-radius: 6px !important;
       }
       .rota-name {
-        width: 92px !important; min-width: 92px !important; max-width: 92px !important;
+        width: var(--edr-namew-phone, 92px) !important; min-width: var(--edr-namew-phone, 92px) !important; max-width: var(--edr-namew-phone, 92px) !important;
         font-size: 10.5px !important;
       }
       .rota-num { width: 18px !important; min-width: 18px !important; max-width: 18px !important; }
@@ -2034,7 +2067,7 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
             const cells = joinLeaveRuns(viewData, s.id, weekSegments(s, rotaDays), NO_OPEN_RUNS).map((seg) => {
               if (seg.kind === "codeRun") {
                 return { span: seg.span, bg: seg.code.color, fg: textOn(seg.code.color),
-                         text: seg.code.code, sub: `(${niceDate(seg.start)} – ${niceDate(seg.end)})` };
+                         text: seg.code.code, sub: seg.span >= 5 ? `(${niceDate(seg.start)} – ${niceDate(seg.end)})` : "" };
               }
               if (seg.kind === "notEmployed") {
                 return { span: seg.span, muted: true, bg: "#F2F4F5", fg: "#9AA5AB",
@@ -3194,6 +3227,49 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
      heading's top line (a slot beside the department name), so the toolbar
      below fits on one line. Phones keep them in the toolbar. */
   const [headSlot, setHeadSlot] = useState(null);
+  /* The NAME column's width, dragged like a column in Excel: the handle on
+     the header's right edge. Double-click it for the standard width. Kept
+     in this browser only, laptop and phone separately (phones need it much
+     narrower), under their own keys — never the password-reset keys. It is
+     not part of the rota, so other people and the exports are unaffected. */
+  const NAMEW = { laptop: { key: "edr:nameColW", def: 150, min: 90, max: 360 }, phone: { key: "edr:nameColWPhone", def: 92, min: 60, max: 220 } };
+  const readNameW = (k) => {
+    try { const v = Number(window.localStorage.getItem(NAMEW[k].key)); return v >= NAMEW[k].min && v <= NAMEW[k].max ? v : NAMEW[k].def; }
+    catch (e) { return NAMEW[k].def; }
+  };
+  const [nameW, setNameW] = useState(() => ({ laptop: readNameW("laptop"), phone: readNameW("phone") }));
+  const nameWKind = () => (window.matchMedia("(max-width: 900px)").matches ? "phone" : "laptop");
+  const saveNameW = (k, v) => { try { window.localStorage.setItem(NAMEW[k].key, String(v)); } catch (e) { /* private mode: just not remembered */ } };
+  const setNameWidth = (k, v) => {
+    const w = Math.round(Math.min(NAMEW[k].max, Math.max(NAMEW[k].min, v)));
+    setNameW((prev) => ({ ...prev, [k]: w }));
+    return w;
+  };
+  const startNameResize = (e) => {
+    e.preventDefault();
+    const k = nameWKind();
+    const x0 = e.clientX, w0 = nameW[k];
+    let last = w0;
+    const move = (ev) => { last = setNameWidth(k, w0 + ev.clientX - x0); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.body.style.cursor = "";
+      saveNameW(k, last);
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+  const resetNameWidth = () => { const k = nameWKind(); saveNameW(k, setNameWidth(k, NAMEW[k].def)); };
+  const nudgeNameWidth = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const k = nameWKind();
+    saveNameW(k, setNameWidth(k, nameW[k] + (e.key === "ArrowRight" ? 10 : -10)));
+  };
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 900px)");
     const pick = () => setHeadSlot(mq.matches ? document.getElementById("edr-pagehead-slot") : null);
@@ -3759,11 +3835,17 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
       </div>
 
       <Card ref={rotaBoxRef} className="dr-rota-scroll" style={{ padding: 0, overflow: "auto", ...(rotaBoxMax ? { maxHeight: rotaBoxMax } : null) }}>
-        <table className="dr-rota-grid" style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%" }}>
+        <table className="dr-rota-grid" style={{ borderCollapse: "separate", borderSpacing: 0, width: "100%", "--edr-namew": `${nameW.laptop}px`, "--edr-namew-phone": `${nameW.phone}px` }}>
           <thead>
             <tr>
               <th className="rota-num rota-corner" style={th}>#</th>
-              <th className="rota-name rota-corner" style={th}>NAME</th>
+              <th className="rota-name rota-corner" style={th}>
+                NAME
+                <span className="rota-resize" role="separator" aria-orientation="vertical" tabIndex={0}
+                  aria-label="Name column width: drag, or use the arrow keys. Double-click for the standard width."
+                  title="Drag to change the width · double-click to reset"
+                  onPointerDown={startNameResize} onDoubleClick={resetNameWidth} onKeyDown={nudgeNameWidth} />
+              </th>
               {days.map((date) => {
                 const d = parseD(date);
                 const nonOff = isNonOff(data, date);
@@ -3819,14 +3901,17 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
                     }
                     if (seg.kind === "codeRun") {
                       return (
-                        <td key={`r${i2}`} colSpan={seg.span} style={{ ...td, padding: 3, textAlign: "center" }}>
+                        /* maxWidth 0: a band never widens the day columns; its text is cut short instead. */
+                        <td key={`r${i2}`} colSpan={seg.span} style={{ ...td, padding: 3, textAlign: "center", maxWidth: 0 }}>
                           <button type="button" className="dr-cell"
                             title={`${seg.code.label || seg.code.code}, ${niceDate(seg.start)} – ${niceDate(seg.end)}. Tap to edit these days one by one.`}
                             onClick={() => setOpenRuns((prev) => new Set(prev).add(seg.key))}
                             style={{ width: "100%", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 6px", borderRadius: 7, cursor: "pointer",
                               border: "1px solid rgba(0,0,0,0.06)", background: seg.code.color, color: textOn(seg.code.color), letterSpacing: 0.5,
                               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {seg.code.code} <span style={{ fontWeight: 500, letterSpacing: 0, fontSize: 11.5 }}>({niceDate(seg.start)} – {niceDate(seg.end)})</span>
+                            {seg.code.code}
+                            {/* Dates only on a band of 5+ days, the same rule as long leave. */}
+                            {seg.span >= 5 && <span style={{ fontWeight: 500, letterSpacing: 0, fontSize: 11.5 }}> ({niceDate(seg.start)} – {niceDate(seg.end)})</span>}
                           </button>
                         </td>
                       );
@@ -4671,9 +4756,11 @@ function RotaPrint({ data, days, rotaOnly = false, orientation = null, cols = { 
                     return (
                       <td key={`r${i2}`} colSpan={seg.span} style={{ ...ptd, background: seg.code.color, color: textOn(seg.code.color), fontWeight: 700, letterSpacing: 1 }}>
                         {seg.code.code}
-                        <span style={{ fontWeight: 500, letterSpacing: 0, marginLeft: 6, fontSize: 8.5 }}>
-                          ({niceDate(seg.start)} – {niceDate(seg.end)})
-                        </span>
+                        {seg.span >= 5 && (
+                          <span style={{ fontWeight: 500, letterSpacing: 0, marginLeft: 6, fontSize: 8.5 }}>
+                            ({niceDate(seg.start)} – {niceDate(seg.end)})
+                          </span>
+                        )}
                       </td>
                     );
                   }
