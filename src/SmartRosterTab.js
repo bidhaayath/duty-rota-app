@@ -23,7 +23,7 @@ import { prettyWeekday } from "./monthBuild";
 import {
   mergeRules, seniorTermsOf, seniorNeedOf,addDays, shiftISO, employedOn,
   weekDatesFrom, activeStaffFor, codeTextById, codeIdByText, flattenCells,
-  chosenCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches,
+  chosenCodesFor, requestedCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches,
 } from "./rosterConfig";
 import { checkSettings, settingsKey } from "./settingsCheck";
 import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
@@ -241,7 +241,8 @@ export default function SmartRosterTab({
   // What the screen keeps of one build: the week, its report, and the rota codes.
   const optionOf = (res) => ({
     cells: res.cells, report: res.report,
-    rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes),
+    rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes,
+      requestedCodesFor((data.dutyRequests || []).filter((r) => r.approved), data.codes)),
   });
 
   /* Option N of the ones found so far. Everything about the week — the

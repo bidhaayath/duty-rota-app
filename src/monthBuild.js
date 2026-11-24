@@ -43,7 +43,7 @@
 import { SHIFTS, PRESERVE, checkFeasible, datesBetween, generateRoster, toRotaCells } from "./rosterEngine";
 import {
   mergeRules, buildRosterConfig, activeStaffFor, employedOn, shiftISO, firstCodeIdOf,
-  codeIdByText, chosenCodesFor, LOOK_BACK_ALL,
+  codeIdByText, chosenCodesFor, requestedCodesFor, LOOK_BACK_ALL,
 } from "./rosterConfig";
 import { whyNoInCharge } from "./inChargeGaps";
 
@@ -286,7 +286,7 @@ export function runEngine(config, chosenCodes) {
     ok: true,
     cells: res.cells,
     report: res.report,
-    rotaCells: toRotaCells(res.cells, config.codes || [], res.nightRest, chosenCodes),
+    rotaCells: toRotaCells(res.cells, config.codes || [], res.nightRest, chosenCodes, requestedCodesFor(config.requests, config.codes)),
     ms: Date.now() - began,
   };
 }

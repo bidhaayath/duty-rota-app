@@ -3036,7 +3036,7 @@ function buildOnce(cfg, seed, ctx) {
    using the person's own duty codes. Kept separate from generateRoster so
    the engine stays testable without needing a code list, and so the preview
    can show real codes before anything is written. */
-export function toRotaCells(cells, codes, nightRest, chosen = {}) {
+export function toRotaCells(cells, codes, nightRest, chosen = {}, requested = {}) {
   const out = {};
   const cache = {};
   /* Which code actually gets written for each kind of duty.
@@ -3069,8 +3069,14 @@ export function toRotaCells(cells, codes, nightRest, chosen = {}) {
     ? chosen.nightOff
     : ((codes || []).find((c) => c.counts === OFF_CAT && /\(N\)/i.test(c.code))?.code || null);
 
+  /* A request that named its exact code ("M(R)") gets that code, as long as
+     the code still exists and counts as the duty the day was given. */
+  const countsOf = (text) => ((codes || []).find((c) => c.code === text) || {}).counts;
   for (const [key, category] of Object.entries(cells)) {
-    const code = (category === OFF_CAT && rest.has(key) && nightOffCode)
+    const asked = requested[key];
+    const code = (asked && countsOf(asked) === category)
+      ? asked
+      : (category === OFF_CAT && rest.has(key) && nightOffCode)
       ? nightOffCode
       : codeFor(category);
     if (code) out[key] = code;   // no code for that category: leave the cell alone
