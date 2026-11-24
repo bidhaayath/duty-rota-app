@@ -23,7 +23,7 @@
    request simply arrives with approved: false and enteredBy: "staff".    */
 
 import React, { useState, useMemo } from "react";
-import { Plus, Trash2, Check, X, CalendarRange, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Check, X, CalendarRange, AlertTriangle, Pencil } from "lucide-react";
 import { SHIFTS } from "./rosterEngine";
 
 // The duty categories a person can ask for. Leave types are deliberately
@@ -37,6 +37,14 @@ const REQUESTABLE = [
 ];
 const SHIFT_LABELS = { morning: "morning", afternoon: "afternoon", evening: "evening", night: "night" };
 
+/* A request can also name the exact code — M(R) rather than plain M — so a
+   rota built by Smart Roster or Ini writes the code the manager uses for
+   requests, and nobody has to change it by hand afterwards. Stored as
+   codeId beside the category; the category (from the code's "Counts as")
+   is still what every rule and check reads. A request without a codeId
+   behaves exactly as before. In the picker a code is "code:<id>". */
+const CODE_PREFIX = "code:";
+
 export default function RequestsTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
 }) {
@@ -44,8 +52,25 @@ export default function RequestsTab({
   // on every render. Without that, the two useMemos below see their
   // dependency change each time and recalculate for nothing.
   const requests = useMemo(() => data.dutyRequests || [], [data.dutyRequests]);
-  const [form, setForm] = useState({ staffId: "", date: "", category: "off" });
+  const [form, setForm] = useState({ staffId: "", date: "", category: "off", codeId: "" });
+  const codeById = useMemo(() => {
+    const m = {};
+    (data.codes || []).forEach((c) => { m[c.id] = c; });
+    return m;
+  }, [data.codes]);
+  // Codes that can be asked for, grouped under what they count as.
+  const codesFor = (cat) => (data.codes || []).filter((c) => c.counts === cat);
   const [showPast, setShowPast] = useState(false);
+  /* Editing: the form above holds the request being changed. Its approval,
+     who entered it and when are kept; only person, date and duty change. */
+  const [editingId, setEditingId] = useState(null);
+  const blankForm = { staffId: "", date: "", category: "off", codeId: "" };
+  const startEdit = (r) => {
+    setEditingId(r.id);
+    setForm({ staffId: r.staffId, date: r.date, category: r.category, codeId: r.codeId && codeById[r.codeId] ? r.codeId : "" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const cancelEdit = () => { setEditingId(null); setForm(blankForm); };
 
   const today = dstr(new Date());
   const staffById = useMemo(() => {
@@ -112,10 +137,10 @@ export default function RequestsTab({
     // The same person asking for two different duties on one date cannot
     // both be honoured, so catch it here rather than letting the generator
     // silently drop one.
-    const clash = requests.find((r) => r.staffId === form.staffId && r.date === form.date);
+    const clash = requests.find((r) => r.id !== editingId && r.staffId === form.staffId && r.date === form.date);
     if (clash) {
       const who = staffById[form.staffId]?.name || "This staff member";
-      window.alert(`${who} already has a request for ${form.date}.\n\nDelete that one first if you want to change it.`);
+      window.alert(`${who} already has a request for ${form.date}.\n\nEdit or delete that one instead.`);
       return;
     }
     /* Recorded anyway if the manager wants it — a request is also a record
@@ -126,8 +151,18 @@ export default function RequestsTab({
       const who = staffById[form.staffId]?.name || "This staff member";
       if (!window.confirm(
         `${who}: ${trouble.join("; ")}.\n\n` +
-        `The request can still be recorded, but approving it will not change the rota.\n\nAdd it anyway?`
+        `The request can still be recorded, but approving it will not change the rota.\n\n${editingId ? "Save" : "Add"} it anyway?`
       )) return;
+    }
+    if (editingId) {
+      setRequests(requests.map((r) => {
+        if (r.id !== editingId) return r;
+        const next = { ...r, staffId: form.staffId, date: form.date, category: form.category };
+        if (form.codeId && codeById[form.codeId]) next.codeId = form.codeId; else delete next.codeId;
+        return next;
+      }));
+      cancelEdit();
+      return;
     }
     setRequests([
       ...requests,
@@ -136,12 +171,13 @@ export default function RequestsTab({
         staffId: form.staffId,
         date: form.date,
         category: form.category,
+        ...(form.codeId && codeById[form.codeId] ? { codeId: form.codeId } : {}),
         approved: false,
         enteredBy: "manager",   // employee logins will use "staff" here
         enteredOn: today,
       },
     ]);
-    setForm({ staffId: "", date: "", category: "off" });
+    setForm({ staffId: "", date: "", category: "off", codeId: "" });
   };
 
   const toggleApproved = (id) =>
@@ -152,6 +188,7 @@ export default function RequestsTab({
     const who = staffById[r?.staffId]?.name || "this staff member";
     if (!window.confirm(`Delete the request for ${who} on ${r?.date}?`)) return;
     setRequests(requests.filter((x) => x.id !== id));
+    if (id === editingId) cancelEdit();
   };
 
   // Upcoming first, because those are the ones that still matter. Past
@@ -213,6 +250,12 @@ export default function RequestsTab({
   }, [requests, today, activeStaff, staffById, coverage, dailyMin, skipStaff, seniorStaff, seniorPerDay, termLower]);
 
   const catLabel = (c) => REQUESTABLE.find(([id]) => id === c)?.[1] || c;
+  // "M(R) — Morning request", or the plain category when no code was named
+  // (or the named code has since been deleted).
+  const requestLabel = (r) => {
+    const c = r.codeId && codeById[r.codeId];
+    return c ? `${c.code} — ${c.label || catLabel(r.category)}` : catLabel(r.category);
+  };
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -256,22 +299,44 @@ export default function RequestsTab({
 
           <Field label="Requested duty">
             <select
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
+              value={form.codeId ? CODE_PREFIX + form.codeId : form.category}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v.startsWith(CODE_PREFIX)) {
+                  const c = codeById[v.slice(CODE_PREFIX.length)];
+                  if (c) setForm({ ...form, category: c.counts, codeId: c.id });
+                } else setForm({ ...form, category: v, codeId: "" });
+              }}
               disabled={!staffEditable}
               style={{ ...inputStyle, cursor: "pointer" }}
             >
-              {REQUESTABLE.map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}{id !== "off" && !wardRuns(id) ? " — not run here" : ""}
-                </option>
-              ))}
+              {REQUESTABLE.map(([id, label]) => {
+                const note = id !== "off" && !wardRuns(id) ? " — not run here" : "";
+                const list = codesFor(id);
+                return (
+                  <optgroup key={id} label={label + note}>
+                    <option value={id}>Any {label.toLowerCase()}</option>
+                    {list.map((c) => (
+                      <option key={c.id} value={CODE_PREFIX + c.id}>{c.code}{c.label && c.label !== c.code ? ` — ${c.label}` : ""}</option>
+                    ))}
+                  </optgroup>
+                );
+              })}
             </select>
           </Field>
 
-          <Btn onClick={add} disabled={!staffEditable} style={{ justifyContent: "center" }}>
-            <Plus size={15} /> Add request
-          </Btn>
+          {editingId ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={add} disabled={!staffEditable} style={{ justifyContent: "center", flex: 1 }}>
+                <Check size={15} /> Save changes
+              </Btn>
+              <Btn kind="ghost" onClick={cancelEdit}>Cancel</Btn>
+            </div>
+          ) : (
+            <Btn onClick={add} disabled={!staffEditable} style={{ justifyContent: "center" }}>
+              <Plus size={15} /> Add request
+            </Btn>
+          )}
         </div>
 
         {!activeStaff.length && (
@@ -346,7 +411,7 @@ export default function RequestsTab({
                   </td>
                   <td style={td}>{r.date}</td>
                   <td style={{ ...td, whiteSpace: "normal" }}>
-                    {catLabel(r.category)}
+                    {requestLabel(r)}
                     {/* Said on the row rather than only in a banner, because
                         this is the row the manager is about to tick. */}
                     {trouble.length > 0 && (
@@ -383,9 +448,14 @@ export default function RequestsTab({
                     </button>
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>
-                    <Btn kind="danger" small onClick={() => remove(r.id)} disabled={!staffEditable}>
-                      <Trash2 size={13} />
-                    </Btn>
+                    <span style={{ display: "inline-flex", gap: 6 }}>
+                      <Btn kind="ghost" small onClick={() => startEdit(r)} disabled={!staffEditable} aria-label="Edit request">
+                        <Pencil size={13} />
+                      </Btn>
+                      <Btn kind="danger" small onClick={() => remove(r.id)} disabled={!staffEditable} aria-label="Delete request">
+                        <Trash2 size={13} />
+                      </Btn>
+                    </span>
                   </td>
                 </tr>
               );

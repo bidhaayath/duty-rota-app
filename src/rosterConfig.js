@@ -191,6 +191,17 @@ export const flattenCells = (cells, codeById, from, to) => {
 /* The ward's code choices, turned from ids into the code text the engine
    writes. A choice pointing at a code that has since been deleted simply
    drops out here, and the engine falls back to working it out. */
+/* Requests that named an exact code, as "staffId|date" → that code's text,
+   for toRotaCells. Pass approved requests only. A deleted code drops out. */
+export const requestedCodesFor = (requests, codes) => {
+  const out = {};
+  (requests || []).forEach((r) => {
+    const c = r.codeId && (codes || []).find((x) => x.id === r.codeId);
+    if (c) out[`${r.staffId}|${r.date}`] = c.code;
+  });
+  return out;
+};
+
 export const chosenCodesFor = (rules, codes) => {
   const out = {};
   Object.entries(rules.codeFor || {}).forEach(([slot, id]) => {
@@ -306,7 +317,7 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     requests: [
       ...(data.dutyRequests || [])
         .filter((r) => r.approved && r.date >= from && r.date <= to)
-        .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category })),
+        .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category, ...(r.codeId ? { codeId: r.codeId } : {}) })),
       ...fixedDutiesIn(rules, from, to),
     ],
     history: {

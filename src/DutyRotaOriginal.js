@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Check, X, Pencil, Coins, Plane, Printer, BarChart3,
   AlertTriangle, ArrowDownAZ, HelpCircle, Search, ArrowLeftRight, MessageCircle, Image,
   User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon,
-  Copy, ClipboardPaste, Coffee, Upload
+  Copy, ClipboardPaste, Coffee, Upload, Eraser
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
@@ -3193,6 +3193,55 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
      in the Staff tab. Same staff list and the same plan limit as the Staff
      tab's own Add staff. */
   const [quickAdd, setQuickAdd] = useState(null); // { name, designation } while open
+  /* Clear duties from one date to another, for everyone or one person, in
+     one update(): one save, one Undo. Duties, their breaks and changed-duty
+     marks go; leave periods are never touched; notes only if ticked. Staff
+     the plan has locked are skipped, as in every other edit. */
+  const [clearForm, setClearForm] = useState(null); // { from, to, who, notes } while open
+  const clearTargets = (f) => {
+    if (!f || !f.from || !f.to || f.from > f.to) return { cells: 0, notes: 0, ids: [] };
+    const ids = data.staff.filter((s) => (f.who === "all" || s.id === f.who) && staffEditable(s.id)).map((s) => s.id);
+    let cells = 0, notes = 0;
+    Object.keys(data.cells || {}).forEach((date) => {
+      if (date < f.from || date > f.to) return;
+      ids.forEach((id) => { if (cellEntries(data, date, id).length) cells++; });
+    });
+    Object.keys(data.cellMeta || {}).forEach((date) => {
+      if (date < f.from || date > f.to) return;
+      ids.forEach((id) => { if ((data.cellMeta[date][id] || {}).note) notes++; });
+    });
+    return { cells, notes, ids };
+  };
+  const doClear = () => {
+    const f = clearForm;
+    const t = clearTargets(f);
+    if (!t.cells && !(f.notes && t.notes)) { alert("There are no duties to clear for those dates."); return; }
+    const whoText = f.who === "all" ? "everyone" : (data.staff.find((x) => x.id === f.who) || {}).name || "this person";
+    const parts = [`${t.cells} dut${t.cells === 1 ? "y" : "ies"}`];
+    if (f.notes && t.notes) parts.push(`${t.notes} note${t.notes === 1 ? "" : "s"}`);
+    if (!window.confirm(`Clear ${parts.join(" and ")} for ${whoText}, ${niceDate(f.from)} – ${niceDate(f.to)}?\n\nLeave periods are kept. You can press Undo straight after if you change your mind.`)) return;
+    const ids = new Set(t.ids);
+    update((d) => {
+      Object.keys(d.cells || {}).forEach((date) => {
+        if (date < f.from || date > f.to) return;
+        ids.forEach((id) => { delete d.cells[date][id]; });
+        if (!Object.keys(d.cells[date]).length) delete d.cells[date];
+      });
+      Object.keys(d.cellMeta || {}).forEach((date) => {
+        if (date < f.from || date > f.to) return;
+        ids.forEach((id) => {
+          const m = d.cellMeta[date][id];
+          if (!m) return;
+          delete m.breakTime; delete m.exchange;
+          if (f.notes) delete m.note;
+          if (!Object.keys(m).length) delete d.cellMeta[date][id];
+        });
+        if (!Object.keys(d.cellMeta[date]).length) delete d.cellMeta[date];
+      });
+      return d;
+    });
+    setClearForm(null);
+  };
   // The gold chip opens the full non-official explanation (phones can't hover).
   const [goldOpen, setGoldOpen] = useState(false);
   /* Arrange rows: up/down arrows beside each name. Same rule as the Staff
@@ -3752,6 +3801,13 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
               exchanges — otherwise navigating to a clean week would hide the
               only way back out of view-only mode. */}
           {!headSlot && topPieces}
+          {canAddStaff && (
+            <span className={"rota-soft" + (clearForm ? " rota-soft-on" : "")}><Btn kind="ghost" small aria-label="Clear duties"
+              onClick={() => setClearForm(clearForm ? null : { from: days[0], to: days[days.length - 1], who: "all", notes: false })}
+              style={{ background: "#FFFFFF", border: "1px solid rgba(14,58,71,0.25)", color: "#0D4F61", boxShadow: "0 2px 8px rgba(14,58,71,0.08)" }}>
+              <Eraser size={14} /> <span className="rota-btnlabel">Clear</span>
+            </Btn></span>
+          )}
           {canAddStaff && shownStaff.length > 1 && (
             <span className={"rota-soft" + (arranging ? " rota-soft-on" : "")}><Btn kind="ghost" small aria-label={arranging ? "Done arranging" : "Arrange rows"} onClick={() => { setArranging((v) => !v); setNameCard(null); }}
               style={arranging
@@ -3772,6 +3828,39 @@ function WeekRota({ data, update, staffEditable = () => true, weekStart, setWeek
             style={{ background: "#FFFFFF", border: "1px solid rgba(14,58,71,0.25)", color: "#0D4F61", boxShadow: "0 2px 8px rgba(14,58,71,0.08)" }}><Printer size={14} /> <span className="rota-btnlabel">Export PDF</span></Btn></span>
         </div>
       </div>
+
+      {clearForm && canAddStaff && (() => {
+        const t = clearTargets(clearForm);
+        const bad = !clearForm.from || !clearForm.to || clearForm.from > clearForm.to;
+        return (
+          <Card className="dr-anim-in" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: T.ink }}>Clear duties</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+              <Field label="From"><input type="date" style={{ ...inputStyle, minWidth: 150 }} value={clearForm.from}
+                onChange={(e) => setClearForm({ ...clearForm, from: e.target.value })} /></Field>
+              <Field label="To"><input type="date" style={{ ...inputStyle, minWidth: 150 }} value={clearForm.to}
+                onChange={(e) => setClearForm({ ...clearForm, to: e.target.value })} /></Field>
+              <Field label="For"><select style={{ ...inputStyle, minWidth: 190 }} value={clearForm.who}
+                onChange={(e) => setClearForm({ ...clearForm, who: e.target.value })}>
+                <option value="all">Everyone</option>
+                {data.staff.filter((s) => !isFormer(s) && staffEditable(s.id)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select></Field>
+            </div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: T.ink, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!clearForm.notes} onChange={(e) => setClearForm({ ...clearForm, notes: e.target.checked })} />
+              Also remove notes on those days
+            </label>
+            <div style={{ fontSize: 12.5, color: T.inkSoft }}>
+              {bad ? "Choose a From date on or before the To date."
+                : `${t.cells} dut${t.cells === 1 ? "y" : "ies"}${clearForm.notes && t.notes ? ` and ${t.notes} note${t.notes === 1 ? "" : "s"}` : ""} will be cleared. Leave periods are kept.`}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn kind="danger" small onClick={doClear} disabled={bad || (!t.cells && !(clearForm.notes && t.notes))}><Eraser size={14} /> Clear</Btn>
+              <Btn kind="ghost" small onClick={() => setClearForm(null)}>Cancel</Btn>
+            </div>
+          </Card>
+        );
+      })()}
 
       {importOpen && canAddStaff && (
         <RosterImportDialog data={data} update={update} staffLimit={staffLimit}
