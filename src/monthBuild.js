@@ -40,7 +40,7 @@
      becomes a one-day absence. The engine leaves it alone and does not
      count it as a working day toward the weekly limits.                 */
 
-import { SHIFTS, PRESERVE, checkFeasible, datesBetween, generateRoster, toRotaCells } from "./rosterEngine";
+import { SHIFTS, PRESERVE, checkFeasible, datesBetween, generateRoster, nextOption, toRotaCells } from "./rosterEngine";
 import {
   mergeRules, buildRosterConfig, activeStaffFor, employedOn, shiftISO, firstCodeIdOf,
   codeIdByText, chosenCodesFor, requestedCodesFor, LOOK_BACK_ALL,
@@ -284,6 +284,29 @@ export function runEngine(config, chosenCodes) {
   if (!res.ok) return { ok: false, problems: res.problems, ms: Date.now() - began };
   return {
     ok: true,
+    cells: res.cells,
+    report: res.report,
+    rotaCells: toRotaCells(res.cells, config.codes || [], res.nightRest, chosenCodes, requestedCodesFor(config.requests, config.codes)),
+    ms: Date.now() - began,
+  };
+}
+
+/* "Show another option" for a built period: the engine's nextOption, as
+   Smart Roster's week uses it — the same period built again with every
+   random choice moved along, kept only if it differs enough from every
+   option already found (`keptCells`, the engine cells of each) and is no
+   worse on cover, in-charge or any Must. `next` is the try to start from.
+   Answers { ok: true, cells, report, rotaCells, next } for a new option,
+   or { ok: false, next } when there is none. */
+export function runAnotherOption(config, chosenCodes, keptCells, next) {
+  const began = Date.now();
+  const kept = (keptCells || []).map((cells) => ({ ok: true, cells }));
+  const found = nextOption(config, kept, next);
+  if (!found.option) return { ok: false, next: found.next, ms: Date.now() - began };
+  const res = found.option;
+  return {
+    ok: true,
+    next: found.next,
     cells: res.cells,
     report: res.report,
     rotaCells: toRotaCells(res.cells, config.codes || [], res.nightRest, chosenCodes, requestedCodesFor(config.requests, config.codes)),

@@ -234,6 +234,52 @@ export const fixedDutiesIn = (rules, from, to) => (rules.fixedDuties || [])
     && typeof f.date === "string" && f.date >= from && f.date <= to)
   .map((f) => ({ staffId: f.staffId, date: f.date, category: f.duty, source: "manager" }));
 
+/* ── Duties the manager fixed on a day of the week ──
+   rosterRules.weeklyFixed: [{ id, staffId, days, duty }], days 0 Sunday …
+   6 Saturday and duty one of the shifts — "always Night on Thursday". Each
+   matching day in the period becomes a fixed duty, kept exactly as one set
+   on a date is. A day is left out — and so left to the week as usual — when
+   the person is skipped, not employed or on leave that day, or already has
+   an approved request or a duty fixed on that date: those say what the
+   day is. A ward that sets none is handed exactly what it was.          */
+const weekdayOfISO = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).getDay(); };
+export const weeklyFixedIn = (rules, from, to, staff, taken = []) => {
+  const list = (rules.weeklyFixed || []).filter((w) => w && w.staffId != null && SHIFTS_FIXED.includes(w.duty)
+    && Array.isArray(w.days) && w.days.length > 0);
+  if (!list.length) return [];
+  const busy = new Set(taken.map((r) => `${r.staffId}|${r.date}`));
+  const skipped = new Set((rules.skipStaff || []).map(String));
+  const out = [];
+  for (let date = from; date <= to; date = shiftISO(date, 1)) {
+    const dow = weekdayOfISO(date);
+    list.forEach((w) => {
+      if (!w.days.includes(dow) || skipped.has(String(w.staffId))) return;
+      const person = (staff || []).find((s) => String(s.id) === String(w.staffId));
+      if (!person || !employedOn(person, date)) return;
+      if ((person.leavePeriods || []).some((lp) => date >= lp.start && date <= lp.end)) return;
+      const key = `${person.id}|${date}`;
+      if (busy.has(key)) return;
+      busy.add(key);
+      out.push({ staffId: person.id, date, category: w.duty, source: "manager" });
+    });
+  }
+  return out;
+};
+const SHIFTS_FIXED = ["morning", "afternoon", "evening", "night"];
+
+/* Everything already decided for the period: approved requests, duties
+   fixed on a date, then duties fixed on a day of the week where neither
+   of the first two has said what the day is. */
+const requestsFor = (data, rules, from, to, staff) => {
+  const decided = [
+    ...(data.dutyRequests || [])
+      .filter((r) => r.approved && r.date >= from && r.date <= to)
+      .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category, ...(r.codeId ? { codeId: r.codeId } : {}) })),
+    ...fixedDutiesIn(rules, from, to),
+  ];
+  return [...decided, ...weeklyFixedIn(rules, from, to, staff, decided)];
+};
+
 /* ── The configuration the engine is given ──
    `staff` is everyone employed somewhere in from..to; `lookFrom`..`lookTo`
    is the history read for fairness. Everything else comes from the ward's
@@ -314,12 +360,7 @@ export const buildRosterConfig = ({ data, rules, from, to, staff, lookFrom, look
     // gives way, and only to keep a shift covered.
     ruleStates: rules.ruleStates,
     nonOfficialDates: nonOfficialFor(data, from, to),
-    requests: [
-      ...(data.dutyRequests || [])
-        .filter((r) => r.approved && r.date >= from && r.date <= to)
-        .map((r) => ({ staffId: r.staffId, date: r.date, category: r.category, ...(r.codeId ? { codeId: r.codeId } : {}) })),
-      ...fixedDutiesIn(rules, from, to),
-    ],
+    requests: requestsFor(data, rules, from, to, staff),
     history: {
       cells: history, nonOfficialDates: nonOfficialFor(data, lookFrom, lookTo),
       // Fairness counts nothing before this; absent = everything given.

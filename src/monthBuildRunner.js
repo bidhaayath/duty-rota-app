@@ -11,9 +11,9 @@
    Returns { promise, cancel }. Cancelling (a different department, the
    panel closing) stops the worker and the promise never settles.       */
 
-import { runEngine } from "./monthBuild";
+import { runEngine, runAnotherOption } from "./monthBuild";
 
-export function startMonthBuild(config, chosenCodes) {
+export function startMonthBuild(config, chosenCodes, another = null) {
   let worker = null;
   let cancelled = false;
   let timer = null;
@@ -22,7 +22,12 @@ export function startMonthBuild(config, chosenCodes) {
     const onMainThread = () => {
       timer = setTimeout(() => {
         if (cancelled) return;
-        try { resolve({ ...runEngine(config, chosenCodes), inBackground: false }); } catch (e) { reject(e); }
+        try {
+          const out = another
+            ? runAnotherOption(config, chosenCodes, another.keptCells, another.next)
+            : runEngine(config, chosenCodes);
+          resolve({ ...out, inBackground: false });
+        } catch (e) { reject(e); }
       }, 30);
     };
     try {
@@ -44,7 +49,7 @@ export function startMonthBuild(config, chosenCodes) {
       if (worker) { worker.terminate(); worker = null; }
       if (!cancelled) onMainThread();
     };
-    worker.postMessage({ config, chosenCodes });
+    worker.postMessage(another ? { config, chosenCodes, another } : { config, chosenCodes });
   });
 
   const cancel = () => {

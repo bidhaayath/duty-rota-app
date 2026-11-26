@@ -16,7 +16,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Wand2, AlertTriangle, Check, X, ChevronDown, ChevronLeft, ChevronRight, Shuffle } from "lucide-react";
 import { generateRoster, nextOption, checkFeasible, toRotaCells, SHIFTS, mustCauseText } from "./rosterEngine";
-import { prettyWeekday } from "./monthBuild";
+import { prettyWeekday, prepareBuild } from "./monthBuild";
 /* The settings, the engine configuration and the Apply helpers live in
    rosterConfig.js, shared with Ini's month builder so the two never drift
    apart. Moved there unchanged; rosterConfig.test.js proves it. */
@@ -24,11 +24,13 @@ import {
   mergeRules, seniorTermsOf, seniorNeedOf,addDays, shiftISO, employedOn,
   weekDatesFrom, activeStaffFor, codeTextById, codeIdByText, flattenCells,
   chosenCodesFor, requestedCodesFor, weekConfig, planWrites, exchangeMarksIn, writeCells, findMismatches,
+  firstCodeIdOf,
 } from "./rosterConfig";
 import { checkSettings, settingsKey } from "./settingsCheck";
 import { ShiftNeeds, PersonWeek, GivesWay, FollowRules } from "./WardNeeds";
 import { whyNoInCharge, noInChargeText } from "./inChargeGaps";
 import YourStaff from "./YourStaff";
+import MonthBuildCard from "./MonthBuildCard";
 import { StepNav, StepFoot, ReadyList, readyLines, loadStep, saveStep, weekSummary } from "./RosterSteps";
 import { AskIniBar, reducedMotion } from "./IniBuddy";
 import { tell, weekMoment, firstOfMonth } from "./iniMoments";
@@ -52,7 +54,7 @@ const MAX_OPTIONS = 3;
 
 export default function SmartRosterTab({
   data, update, staffEditable, T, Card, Btn, Field, inputStyle, th, td, uid, dstr,
-  onApplied, deptId,
+  onApplied, deptId, onMonthApplied,
   // The "Ask Ini" bar: where its note goes, and whether the Ini panel is busy with one.
   onAskIni, iniWorking = false, userId,
 }) {
@@ -164,13 +166,29 @@ export default function SmartRosterTab({
   const codeById = useMemo(() => codeTextById(data.codes), [data.codes]);
   const idByCode = useMemo(() => codeIdByText(data.codes), [data.codes]);
 
-  const buildConfig = () => weekConfig(data, weekStart);
+  /* "Keep duties already on the rota": off unless ticked, so the week is
+     built exactly as it always was. Ticked, the week is set up the way Ini's
+     month build sets up a month with the same box ticked (prepareBuild in
+     monthBuild.js): every duty already in the week is fixed where it is and
+     counts toward the week, only the empty days are filled, and Apply
+     writes nothing over a kept cell — its exact code and post stay. */
+  const [keepWeek, setKeepWeek] = useState(false);
+  const weekBuild = () => {
+    if (!keepWeek) return { cfg: weekConfig(data, weekStart), kept: [] };
+    const back = rules.lookbackDays || 0;
+    const prep = prepareBuild({
+      data, from: weekStart, to: weekEnd, keepExisting: true,
+      lookFrom: back ? dstr(addDays(new Date(weekStart), -back)) : null,
+    });
+    return { cfg: prep.config, kept: [...Object.keys(prep.pinned), ...prep.blocked] };
+  };
+  const buildConfig = () => weekBuild().cfg;
 
   const feasibility = useMemo(() => {
     if (!activeStaff.length) return null;
     try { return checkFeasible(buildConfig()); } catch { return null; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, rules, weekStart, activeStaff]);
+  }, [data, rules, weekStart, activeStaff, keepWeek]);
 
   /* ── Do the settings fit ──
      Worked out afresh from the settings as they are now, so it follows
@@ -213,11 +231,11 @@ export default function SmartRosterTab({
     // the last uncovered shifts get resolved.
     setTimeout(() => {
       try {
-        const cfg = buildConfig();
+        const { cfg, kept } = weekBuild();
         const res = generateRoster(cfg);
         if (!res.ok) { setProposal({ failed: true, problems: res.problems, deptId }); return; }
         const yearStart = `${weekStart.slice(0, 4)}-01-01`;
-        const first = optionOf(res);
+        const first = optionOf(res, kept);
         setProposal({
           deptId,
           ...first,
@@ -225,7 +243,7 @@ export default function SmartRosterTab({
           yearStart,
           from: weekStart, to: weekEnd,
           // Other options are built only when asked for, from the same settings.
-          cfg, options: [first], shown: 0, nextTry: 1, noMore: false,
+          cfg, kept, options: [first], shown: 0, nextTry: 1, noMore: false,
         });
         setCelebrate(Date.now());
         // Ini says how it went: a little dance for every shift covered, plain help for gaps.
@@ -239,11 +257,17 @@ export default function SmartRosterTab({
   };
 
   // What the screen keeps of one build: the week, its report, and the rota codes.
-  const optionOf = (res) => ({
-    cells: res.cells, report: res.report,
-    rotaCells: toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes,
-      requestedCodesFor((data.dutyRequests || []).filter((r) => r.approved), data.codes)),
-  });
+  const optionOf = (res, kept = []) => {
+    const rotaCells = toRotaCells(res.cells, data.codes || [], res.nightRest, chosenCodes,
+      requestedCodesFor((data.dutyRequests || []).filter((r) => r.approved), data.codes));
+    // A kept cell shows the code already on the rota, and is never written.
+    kept.forEach((key) => {
+      const cut = key.lastIndexOf("|");
+      const text = codeById[firstCodeIdOf((data.cells?.[key.slice(cut + 1)] || {})[key.slice(0, cut)])];
+      if (text) rotaCells[key] = text; else delete rotaCells[key];
+    });
+    return { cells: res.cells, report: res.report, rotaCells };
+  };
 
   /* Option N of the ones found so far. Everything about the week — the
      grid, What had to give, Use this roster — reads the shown one. */
@@ -264,7 +288,7 @@ export default function SmartRosterTab({
         setProposal((p) => {
           if (p !== proposal) return p;
           if (!option) return { ...p, nextTry: next, noMore: true };
-          const o = optionOf(option);
+          const o = optionOf(option, p.kept || []);
           return { ...p, ...o, options: [...p.options, o], shown: p.options.length, nextTry: next };
         });
       } catch (e) {
@@ -347,7 +371,10 @@ export default function SmartRosterTab({
     }
     // Plan the write before touching anything, so a code that cannot be
     // resolved stops the whole thing rather than leaving half a week behind.
-    const { writes, missing } = planWrites(proposal.rotaCells, idByCode);
+    const keptKeys = new Set(proposal.kept || []);
+    const planned = planWrites(proposal.rotaCells, idByCode);
+    const writes = planned.writes.filter((w) => !keptKeys.has(`${w.sid}|${w.date}`));
+    const { missing } = planned;
     if (missing.size) {
       window.alert(
         `Cannot apply: no duty code is set up for ${[...missing].join(", ")}.\n\n` +
@@ -364,7 +391,10 @@ export default function SmartRosterTab({
     const marksCleared = exchangeMarksIn(data, writes);
     if (!window.confirm(
       `Apply this week?\n\n${writes.length} duties will be written for ${weekLabel}.\n\n` +
-      `Existing duties that week will be replaced. Recorded leave is kept as it is, ` +
+      (keptKeys.size
+        ? `Duties already on the rota that week are kept as they are; only empty days are filled. `
+        : `Existing duties that week will be replaced. `) +
+      `Recorded leave is kept as it is, ` +
       `and so are any notes on the cells.` +
       (marksCleared
         ? `\n\n${marksCleared} "changed duty" mark${marksCleared === 1 ? "" : "s"} on that week ` +
@@ -394,6 +424,13 @@ export default function SmartRosterTab({
   const setFixedDuties = (list) => update((d) => {
     const next = { ...rules, fixedDuties: list };
     if (!list.length) delete next.fixedDuties;
+    d.rosterRules = next;
+    return d;
+  });
+  // Duties fixed on a day of the week ("always Night on Thursday"): the same again.
+  const setWeeklyFixed = (list) => update((d) => {
+    const next = { ...rules, weeklyFixed: list };
+    if (!list.length) delete next.weeklyFixed;
     d.rosterRules = next;
     return d;
   });
@@ -607,6 +644,7 @@ export default function SmartRosterTab({
       {step === 2 && (<>
       {/* ── Your staff ── */}
       <YourStaff rules={rules} setRules={setRules} setPersonRules={setPersonRules} setFixedDuties={setFixedDuties}
+        setWeeklyFixed={setWeeklyFixed}
         editable={staffEditable}
         T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle} uid={uid} data={data}
         allStaff={allStaff} firstDay={firstDay} termOne={termOne} termMany={termMany} today={today} />
@@ -640,6 +678,13 @@ export default function SmartRosterTab({
             </div>
           )}
         </div>
+        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: T.ink, lineHeight: 1.45,
+                        cursor: "pointer", marginTop: 12 }}>
+          <input type="checkbox" checked={keepWeek} disabled={!staffEditable || busy}
+            onChange={(e) => { setKeepWeek(e.target.checked); setProposal(null); }}
+            style={{ width: 16, height: 16, marginTop: 2, accentColor: T.lagoon, flexShrink: 0 }} />
+          <span>Keep duties already on the rota (only fill empty days)</span>
+        </label>
 
         {/* Somebody who has left, or has not started, is not on the rota for
             this week — so they are not rostered either. Said here because the
@@ -711,6 +756,10 @@ export default function SmartRosterTab({
           T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle}
           th={th} td={td} dstr={dstr} rules={rules} />
       )}
+
+      {/* The whole month at once: Ini's month build, offered here too. */}
+      <MonthBuildCard data={data} update={update} T={T} Card={Card} Btn={Btn} Field={Field} inputStyle={inputStyle}
+        editable={!!staffEditable} staffEditable={staffEditable} today={today} onMonthApplied={onMonthApplied} />
 
       {/* Said here rather than discovered later. A manager whose department
           uses tasks or split shifts needs to know what the engine will and

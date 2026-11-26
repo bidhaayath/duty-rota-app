@@ -45,6 +45,11 @@ export const weekOrderOf = (firstDay) => [...Array(7)].map((_, i) => (firstDay +
 export const startsAs = (type) => (type === "offOn" ? "hard" : "soft");
 export const strengthWord = (strength) => (strength === "hard" ? "Must" : "Try");
 
+// A duty fixed on a day of the week, as the row and the panel say it.
+export const weeklyText = (w) => `Always ${SHIFT_LABELS[w.duty] || w.duty} on ${andList((w.days || []).map((d) => DAY_LABEL[d]))}`;
+export const weeklyPreview = (name, w) =>
+  `${name}: ${SHIFT_LABELS[w.duty]} on every ${andList(w.days.map((d) => DAY_LABEL[d]))}, fixed by you — always kept, `
+  + `except on leave or where an approved request says otherwise.`;
 // A duty the manager fixed, as the row and the panel say it.
 export const fixedText = (f) => `Fixed: ${CATEGORY_LABELS[f.duty] || f.duty} on ${isISO(f.date) ? prettyWeekday(f.date) : f.date}`;
 // What a rule or a fixed duty being written says, before it is added.
@@ -133,6 +138,31 @@ export function personChecks({ rules, data, allStaff, firstDay }) {
     return null;
   };
 
+  /* A duty fixed on a day of the week that could never be kept, said
+     before it is saved: the person cannot work that shift, or one of their
+     own Must rules covers the day. */
+  const weeklyFixed = (rules.weeklyFixed || []).filter(Boolean);
+  const weeklyProblem = (person, { days, duty }) => {
+    const who = person.name, id = person.id;
+    if (rules.skipStaff.includes(id)) return `${who} is skipped, so Smart Roster does not roster them. Untick Skip first.`;
+    const ticks = rules.staffShifts?.[id] || [];
+    if (ticks.length && !ticks.includes(duty)) {
+      return `${who} is set up for ${ampList(SHIFTS.filter((sh) => ticks.includes(sh)).map((sh) => SHIFT_LABELS[sh]))} only.`;
+    }
+    const mine = weeklyFixed.find((w) => String(w.staffId) === String(id) && (w.days || []).some((d) => days.includes(d)));
+    if (mine) {
+      const day = DAY_LABEL[weekOrder.find((d) => mine.days.includes(d) && days.includes(d))];
+      return `${who} already has "${weeklyText(mine)}", which covers ${day}. Remove it first to change it.`;
+    }
+    const clash = dayRulesOf(id).find((r) => r.strength === "hard" && r.days.some((d) => days.includes(d))
+      && (r.type === "offOn" || !r.shifts.includes(duty)));
+    if (clash) {
+      const day = DAY_LABEL[weekOrder.find((d) => clash.days.includes(d) && days.includes(d))];
+      return `${who} has "${personRuleText(clash)}" as a Must, which covers ${day}. Remove it first, or set it to Try.`;
+    }
+    return null;
+  };
+
   /* Why the rule as written cannot be added, in the manager's words. Asked
      before saving, so a list never holds two rules that fight each other. */
   const ruleProblem = (person, rule) => {
@@ -207,6 +237,6 @@ export function personChecks({ rules, data, allStaff, firstDay }) {
 
   return {
     runShifts, weekOrder, dayRulesOf, fixedOffNote, shortDays, shortDayText,
-    fixedProblem, ruleProblem, offOnNotes,
+    fixedProblem, ruleProblem, offOnNotes, weeklyProblem,
   };
 }
