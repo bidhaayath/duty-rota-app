@@ -7,7 +7,7 @@
 
 import React from "react";
 import { Check, AlertTriangle } from "lucide-react";
-import { LOOK_BACK_ALL } from "./rosterConfig";
+import { LOOK_BACK_ALL, weeklyFixedIn } from "./rosterConfig";
 import { STRENGTH_SCALE, levelOf } from "./WardNeeds";
 
 /* ── The step a ward was last on ──
@@ -105,7 +105,12 @@ export function readyLines({ fit, rules, staff, from, to, data, senior, terms })
   // 4. What is already decided this week: always kept.
   const inWeek = (d) => d >= from && d <= to;
   const asked = (data.dutyRequests || []).filter((r) => r.approved && inWeek(r.date)).length;
-  const fixed = (rules.fixedDuties || []).filter((f) => f && inWeek(f.date)).length;
+  const fixedOnDates = (rules.fixedDuties || []).filter((f) => f && inWeek(f.date));
+  // Duties fixed on a day of the week count too, on the days they will be kept.
+  const fixed = fixedOnDates.length + weeklyFixedIn(rules, from, to, staff || [], [
+    ...(data.dutyRequests || []).filter((r) => r.approved && inWeek(r.date)),
+    ...fixedOnDates,
+  ]).length;
   lines.push({
     ok: true,
     text: asked || fixed

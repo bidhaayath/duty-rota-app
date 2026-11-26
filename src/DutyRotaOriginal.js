@@ -2514,6 +2514,10 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
               T={T} Card={Card} Btn={Btn} Field={Field}
               inputStyle={inputStyle} th={th} td={td} uid={uid} dstr={dstr}
               onApplied={(sunday) => { setWeekStart(sunday); setRotaView("weekly"); setTab("rota"); }}
+              onMonthApplied={(start, end) => {
+                const last = addDays(start, 44);
+                setMonthRange({ start, end: end > last ? last : end }); setRotaView("monthly"); setTab("rota");
+              }}
               onAskIni={iniShown ? (text) => setIniAsk((a) => ({ text, n: (a ? a.n : 0) + 1 })) : undefined}
               iniWorking={iniWorking} userId={iniUser}
             />

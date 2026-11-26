@@ -190,14 +190,14 @@ describe("the rows", () => {
     expect(screen.queryByLabelText("Add a rule for Mariyam")).toBeNull();
   });
 
-  test("the seven kinds of rule, and only the fields each needs", async () => {
+  test("the eight kinds of rule, and only the fields each needs", async () => {
     await openWard(rota(undefined));
     fireEvent.click(row("Shau").getByRole("button", { name: "+ Rule" }));
     const box = screen.getByLabelText("Add a rule for Shau");
     expect([...box.options].map((o) => o.text)).toEqual([
       "At most … of a shift a week", "At least … of a shift a week", "Gap between shifts: at least … days",
       "A shift in pairs (2 together)", "Always off on … (days)", "On … (days), only … (shifts)",
-      "Fixed duty on a date (set by you)",
+      "Always … (shift) on … (days)", "Fixed duty on a date (set by you)",
     ]);
     expect(screen.getByLabelText("How many")).toBeInTheDocument();
     fireEvent.change(box, { target: { value: "apart" } });
@@ -208,6 +208,34 @@ describe("the rows", () => {
     fireEvent.change(box, { target: { value: "offOn" } });
     expect(screen.queryByLabelText("Shift")).toBeNull();
     expect(screen.getByRole("button", { name: "Friday" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add rule/ })).toBeDisabled();
+  });
+
+  test("always a shift on a day of the week: saved as its own list, shown, refused where it could not be kept, and removed", async () => {
+    await openWard(rota({ staffShifts: { s1: ["morning"] } }));
+    fireEvent.click(row("Shau").getByRole("button", { name: "+ Rule" }));
+    fireEvent.change(screen.getByLabelText("Add a rule for Shau"), { target: { value: "weekly" } });
+    expect(screen.queryByLabelText("How many")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Shift"), { target: { value: "night" } });
+    expect(screen.getByRole("button", { name: /Add rule/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Thursday" }));
+    expect(screen.getByText(/Shau: Night on every Thursday, fixed by you — always kept/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Add rule/ }));
+    expect(h.data.rosterRules.weeklyFixed).toEqual([{ id: "u1", staffId: "s0", days: [4], duty: "night" }]);
+    expect("personRules" in h.data.rosterRules).toBe(false);
+    expect(row("Shau").getAllByText("Always Night on Thursday").length).toBeGreaterThan(0);
+    // The same day again is refused.
+    fireEvent.click(screen.getByRole("button", { name: "Thursday" }));
+    fireEvent.click(screen.getByRole("button", { name: "Thursday" }));
+    expect(screen.getByText(/already has "Always Night on Thursday", which covers Thursday/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Remove: Always Night on Thursday"));
+    expect("weeklyFixed" in h.data.rosterRules).toBe(false);
+    // Somebody kept to mornings cannot be fixed to nights.
+    fireEvent.click(row("Mariyam").getByRole("button", { name: "+ Rule" }));
+    fireEvent.change(screen.getByLabelText("Add a rule for Mariyam"), { target: { value: "weekly" } });
+    fireEvent.change(screen.getByLabelText("Shift"), { target: { value: "night" } });
+    fireEvent.click(screen.getByRole("button", { name: "Thursday" }));
+    expect(screen.getByText("Mariyam is set up for Morning only.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Add rule/ })).toBeDisabled();
   });
 

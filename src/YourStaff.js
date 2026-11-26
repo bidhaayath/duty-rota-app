@@ -15,7 +15,7 @@ import { SHIFTS, personRuleText } from "./rosterEngine";
 import { prettyWeekday } from "./monthBuild";
 import {
   SHIFT_LABELS, CATEGORY_LABELS, DAY_LABEL, DAY_TYPES, RULE_COUNTS, isISO, upperFirst, ampList,
-  fixedText, startsAs, rulePreview, fixedPreview, atLeastMustText, personChecks,
+  fixedText, startsAs, rulePreview, fixedPreview, atLeastMustText, personChecks, weeklyText, weeklyPreview,
 } from "./personRuleChecks";
 
 const RULE_TYPES = [
@@ -25,6 +25,7 @@ const RULE_TYPES = [
   ["together", "A shift in pairs (2 together)"],
   ["offOn", "Always off on … (days)"],
   ["onlyOn", "On … (days), only … (shifts)"],
+  ["weekly", "Always … (shift) on … (days)"],
   ["fixed", "Fixed duty on a date (set by you)"],
 ];
 const toggled = (list, x) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
@@ -62,7 +63,7 @@ const Tag = ({ tone, children }) => (
 );
 
 export default function YourStaff({
-  rules, setRules, setPersonRules, setFixedDuties, editable, T, Card, Btn, Field, inputStyle, uid,
+  rules, setRules, setPersonRules, setFixedDuties, setWeeklyFixed, editable, T, Card, Btn, Field, inputStyle, uid,
   data, allStaff, firstDay, termOne, termMany, today,
 }) {
   /* Decided once, when the page opens: a ward with its own plural keeps the
@@ -105,20 +106,29 @@ export default function YourStaff({
   const fixedOf = (id) => fixedDuties.filter((f) => String(f.staffId) === String(id))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const pastFixed = fixedDuties.filter((f) => isISO(f.date) && f.date < today);
+  /* Duties fixed on a day of the week ("always Night on Thursday"): saved
+     as their own list, the same way, and turned into fixed duties for each
+     week as it is built (weeklyFixedIn in rosterConfig.js). */
+  const weeklyFixed = (rules.weeklyFixed || []).filter(Boolean);
+  const weeklyOf = (id) => weeklyFixed.filter((w) => String(w.staffId) === String(id));
 
   /* The checks, shared with Ini (personRuleChecks.js): what may be added,
      and what it costs. */
   const checks = personChecks({ rules, data, allStaff, firstDay });
   const { runShifts, weekOrder, dayRulesOf, fixedOffNote, shortDayText } = checks;
   const draftShift = runShifts.includes(draft.shift) ? draft.shift : runShifts[0];
-  const onDays = DAY_TYPES.includes(draft.type);
+  const isWeekly = draft.type === "weekly";
+  const onDays = DAY_TYPES.includes(draft.type) || isWeekly;
   const isFixed = draft.type === "fixed";
+  const weeklyDuty = runShifts.includes(draft.duty) ? draft.duty : runShifts[0];
+  const draftWeekly = { days: weekOrder.filter((d) => draft.days.includes(d)), duty: weeklyDuty };
   const draftRule = onDays
     ? { type: draft.type, days: weekOrder.filter((d) => draft.days.includes(d)),
         ...(draft.type === "onlyOn" ? { shifts: runShifts.filter((sh) => draft.shifts.includes(sh)) } : {}) }
     : { type: draft.type, shift: draftShift, count: draft.type === "together" ? 2 : draft.count };
   const fixedChoices = [...runShifts, "off"];
   const draftComplete = isFixed ? isISO(draft.date) && fixedChoices.includes(draft.duty)
+    : isWeekly ? draftWeekly.days.length > 0 && !!weeklyDuty
     : onDays
       ? draftRule.days.length > 0 && (draft.type === "offOn" || draftRule.shifts.length > 0)
       : !!draftShift;
@@ -128,6 +138,7 @@ export default function YourStaff({
   // Why the rule as written cannot be added, in the manager's words.
   const draftProblem = !draftPerson || !draftComplete ? null
     : isFixed ? checks.fixedProblem(draftPerson, { date: draft.date, duty: draft.duty })
+    : isWeekly ? checks.weeklyProblem(draftPerson, draftWeekly)
     : checks.ruleProblem(draftPerson, draftRule);
   const addOwnRule = () => {
     if (!draftPerson || !draftComplete || draftProblem) return;
@@ -135,14 +146,19 @@ export default function YourStaff({
       setFixedDuties([...fixedDuties, { id: uid(), staffId: draftPerson.id, date: draft.date, duty: draft.duty }]);
       return;
     }
+    if (isWeekly) {
+      setWeeklyFixed([...weeklyFixed, { id: uid(), staffId: draftPerson.id, ...draftWeekly }]);
+      return;
+    }
     setPersonRules([...ownRules, { id: uid(), staffId: draftPerson.id, ...draftRule, strength: startsAs(draft.type) }]);
   };
   // What the rule being written says, before Add.
   const preview = (name) => (isFixed
     ? fixedPreview(name, { date: draft.date, duty: draft.duty })
+    : isWeekly ? weeklyPreview(name, draftWeekly)
     : rulePreview(name, draftRule));
   // Said before Add, for a fixed day off as it would be saved.
-  const draftNotes = draftPerson && draftComplete && !draftProblem
+  const draftNotes = draftPerson && draftComplete && !draftProblem && !isWeekly
     ? checks.offOnNotes(draftPerson, draftRule, startsAs(draft.type)) : { fixedNote: null, shortNotes: [] };
   const draftFixedNote = draftNotes.fixedNote;
   const draftShortNotes = draftNotes.shortNotes;
@@ -214,12 +230,27 @@ export default function YourStaff({
     );
   };
 
-  const panel = (s, mine, requests, fixed) => (
+  /* A duty fixed on a day of the week as a line: always kept, so no Must or Try. */
+  const weeklyLine = (w) => {
+    const text = weeklyText(w);
+    return (
+      <div key={w.id} style={{ borderTop: `1px solid ${T.line}`, padding: "4px 0", display: "flex", gap: 8, alignItems: "center",
+                               flexWrap: "wrap" }}>
+        <span style={{ fontSize: 14, flex: "1 1 180px", minWidth: 0 }}>{text}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, borderRadius: 9, padding: "0 12px", minHeight: 44, display: "inline-flex",
+                       alignItems: "center", ...TAG.purple }}>Always kept</span>
+        {removeButton(`Remove: ${text}`, () => setWeeklyFixed(weeklyFixed.filter((x) => x.id !== w.id)))}
+      </div>
+    );
+  };
+
+  const panel = (s, mine, requests, fixed, weekly = []) => (
     <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: "#F6FAFA", border: `1px solid ${T.line}`,
                   display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 6 }}>
       {mine.length > 0 && mine.map(ruleLine)}
+      {weekly.length > 0 && weekly.map(weeklyLine)}
       {fixed.length > 0 && fixed.map(fixedLine)}
-      {!mine.length && !fixed.length && (
+      {!mine.length && !fixed.length && !weekly.length && (
         <span style={{ ...hint }}>No rules of {s.name}'s own yet: the ward's settings apply.</span>
       )}
       {requests.length > 0 && (
@@ -259,6 +290,14 @@ export default function YourStaff({
                 const n = Math.round(Number(e.target.value));
                 setDraft({ ...draft, count: Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : min });
               }} />
+          </Field>
+        )}
+        {isWeekly && (
+          <Field label="Shift">
+            <select style={{ ...field, width: "auto" }} disabled={!editable} value={weeklyDuty}
+              onChange={(e) => setDraft({ ...draft, duty: e.target.value })}>
+              {runShifts.map((sh) => <option key={sh} value={sh}>{SHIFT_LABELS[sh]}</option>)}
+            </select>
           </Field>
         )}
         {!isFixed && !onDays && (
@@ -369,6 +408,7 @@ export default function YourStaff({
           const isSenior = rules.seniorStaff.includes(s.id);
           const mine = rulesOf(s.id);
           const fixed = fixedOf(s.id);
+          const weekly = weeklyOf(s.id);
           const requests = requestsOf(s.id);
           const showAll = allRequests.includes(String(s.id));
           const shownRequests = showAll ? requests : requests.slice(0, REQUESTS_SHOWN);
@@ -387,6 +427,7 @@ export default function YourStaff({
                         {CATEGORY_LABELS[r.category] || r.category} on {prettyWeekday(r.date)}
                       </Tag>
                     ))}
+                    {weekly.map((w) => <Tag key={w.id} tone="purple">{weeklyText(w)}</Tag>)}
                     {fixed.map((f) => (
                       <span key={f.id} style={{ opacity: isISO(f.date) && f.date < today ? 0.55 : 1 }}>
                         <Tag tone="purple">{fixedText(f)}</Tag>
@@ -426,10 +467,10 @@ export default function YourStaff({
                   onClick={() => setDraft(blankDraft(isOpen ? "" : String(s.id)))}
                   style={{ fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, minHeight: 44, padding: "0 14px",
                            borderRadius: 10, border: `1px solid ${T.line}`, background: "#fff", color: T.lagoon, cursor: "pointer" }}>
-                  {isOpen ? "Close" : mine.length + fixed.length ? `Rules (${mine.length + fixed.length})` : "+ Rule"}
+                  {isOpen ? "Close" : mine.length + fixed.length + weekly.length ? `Rules (${mine.length + fixed.length + weekly.length})` : "+ Rule"}
                 </button>
               </div>
-              {isOpen && panel(s, mine, requests, fixed)}
+              {isOpen && panel(s, mine, requests, fixed, weekly)}
             </div>
           );
         })}

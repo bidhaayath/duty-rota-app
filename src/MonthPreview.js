@@ -130,7 +130,10 @@ const PHONE_CSS = `
   }
 `;
 
-export default function MonthPreview({ proposal, data, update, T, onDiscard, onApplied }) {
+/* `paging`, when given, adds "Show another option" and paging between the
+   options found: { index, count, busy, noMore, onAnother, onShow(i) }.
+   Without it the preview is exactly as it always was. */
+export default function MonthPreview({ proposal, data, update, T, onDiscard, onApplied, paging = null }) {
   const { writes, periodFrom, periodTo, label } = proposal;
   const [verify, setVerify] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -380,6 +383,29 @@ export default function MonthPreview({ proposal, data, update, T, onDiscard, onA
             big ward it shrank to two rows. Now the body scrolls instead. */}
         <div className="mp-body" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 18px 22px", display: "grid",
           gridAutoRows: "max-content", gap: 12, alignContent: "start" }}>
+          {paging && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 13, color: T.ink }}>
+              {paging.count > 1 && (
+                <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                  <button type="button" aria-label="Previous option" style={btn("ghost", !!verify || paging.busy || paging.index === 0)}
+                    disabled={!!verify || paging.busy || paging.index === 0} onClick={() => paging.onShow(paging.index - 1)}>‹</button>
+                  <strong>Option {paging.index + 1} of {paging.count}</strong>
+                  <button type="button" aria-label="Next option" style={btn("ghost", !!verify || paging.busy || paging.index >= paging.count - 1)}
+                    disabled={!!verify || paging.busy || paging.index >= paging.count - 1} onClick={() => paging.onShow(paging.index + 1)}>›</button>
+                </span>
+              )}
+              {paging.noMore && paging.index >= paging.count - 1 ? (
+                <span style={{ color: T.inkSoft }}>
+                  {paging.count > 1 ? "No other option different enough without being worse." : "This is the best fit found: no other option was different enough without being worse."}
+                </span>
+              ) : (
+                <button type="button" style={btn("ghost", !!verify || paging.busy)} disabled={!!verify || paging.busy}
+                  onClick={paging.onAnother}>
+                  {paging.busy ? "Looking for another option… this can take up to a minute" : "Show another option"}
+                </button>
+              )}
+            </div>
+          )}
           {/* On a phone the summary is one line until tapped. */}
           <button type="button" className="mp-summary-toggle" aria-expanded={showDetails}
             onClick={() => setShowDetails((v) => !v)}
