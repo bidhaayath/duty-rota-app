@@ -1548,15 +1548,23 @@ export default function DutyRota({ locked = false, features: viewerFeatures = nu
     { id: "account", label: "Your account", icon: User },
   ];
   // Home and its own screens (Your account, Subscription history, Members).
-  const HOME_TABS = { dashboard: "home", account: "account", history: "history", members: "members" };
+  const HOME_TABS = { dashboard: "home", account: "account", history: "history", members: "members", quote: "quote" };
   const onHome = tab in HOME_TABS;
-  const sideActive = inReports ? "reports" : tab === "history" ? "account" : tab === "members" ? "dashboard" : tab;
+  const sideActive = inReports ? "reports" : (tab === "history" || tab === "quote") ? "account" : tab === "members" ? "dashboard" : tab;
 
   /* On laptops the side menu carries My plan and Log out, so App's top bar
      steps aside while the menu is showing (Home and every department
      screen). Loading, the print view and the "nothing shared yet" screen
      keep the top bar, so Log out is always somewhere on screen. */
   const sideMenuShown = !printView && (onHome || (!!data && !(viewOnlyRole && departments.length === 0)));
+  /* The plan banners at the top (in App) can't reach this screen's tabs
+     directly, so their "Get a quotation" button sends this event. */
+  useEffect(() => {
+    const open = () => setTab("quote");
+    window.addEventListener("edr:open-quote", open);
+    return () => window.removeEventListener("edr:open-quote", open);
+  }, []);
+
   useEffect(() => {
     document.body.classList.toggle("edr-has-side", sideMenuShown);
     return () => document.body.classList.remove("edr-has-side");

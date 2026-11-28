@@ -148,7 +148,8 @@ export function receiptHtml({ payment, to = {} }) {
   const no = `EDR-R-${String(payment.id || "").replace(/-/g, "").slice(0, 8).toUpperCase()}`;
   const tier = payment.tier ? payment.tier.charAt(0).toUpperCase() + payment.tier.slice(1) : "Plan";
   const cycle = payment.billing_cycle === "annual" ? "12 months" : payment.billing_cycle === "monthly" ? "1 month" : (payment.billing_cycle || "");
-  const by = /bml|card/i.test(payment.provider || "") ? "Card (BML)" : payment.provider ? payment.provider : "Bank transfer";
+  // Card payments come through the BML gateway; anything else was a bank transfer.
+  const by = String(payment.provider || "").toLowerCase() === "bml" ? "Card (BML)" : "Bank transfer";
   const body = `
   <div class="top">${seller()}
     <div><div class="title">RECEIPT</div>

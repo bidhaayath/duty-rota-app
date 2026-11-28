@@ -32,6 +32,12 @@ const prettyDate = (iso) => {
 
 const titleCase = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 
+const periodOf = (c) => (c === "annual" ? "12 months" : c === "monthly" ? "1 month" : titleCase(c || ""));
+// Card payments come through the BML gateway; anything else was a bank transfer recorded by hand.
+const paidBy = (p) => (String(p || "").toLowerCase() === "bml" ? "Card" : "Bank transfer");
+const th = { padding: "10px 14px", fontWeight: 600 };
+const td = { padding: "14px 14px" };
+
 /* A pending row is a payment that was started but never finished — the
    customer reached the bank and then closed the page, or their card was
    declined and they gave up. Nothing was charged.
@@ -167,56 +173,46 @@ export default function SubscriptionHistory({ onBack, embedded = false, onReceip
 
         {!loading && !failed && rows.length > 0 && (
           <>
-            <div style={{
-              background: "#fff", border: `1px solid ${T.line}`,
-              borderRadius: 12, overflow: "hidden",
-            }}>
-              {rows.map((r, i) => {
-                const st = statusStyle(r.status);
-                const s = String(r.status || "").toLowerCase();
-                return (
-                  <div key={r.id} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    gap: 14, padding: "14px 18px",
-                    borderTop: i === 0 ? "none" : `1px solid ${T.line}`,
-                  }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14.5, fontWeight: 700, marginBottom: 3 }}>
-                        {titleCase(r.tier)}
-                        {r.billing_cycle && (
-                          <span style={{ fontWeight: 500, color: T.inkSoft }}>
-                            {" "}· {titleCase(r.billing_cycle)}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12.5, color: T.inkSoft }}>
-                        {prettyDate(r.paid_at || r.created_at)}
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-                      <span style={{
-                        fontSize: 11, fontWeight: 700, letterSpacing: 0.2,
-                        background: st.bg, border: `1px solid ${st.border}`, color: st.text,
-                        borderRadius: 999, padding: "3px 10px",
-                      }}>{st.label}</span>
-                      <div style={{
-                        fontSize: 14.5, fontWeight: 700, whiteSpace: "nowrap",
-                        color: s === "paid" ? T.ink : T.inkSoft,
-                        textDecoration: (s === "cancelled" || s === "failed") ? "line-through" : "none",
-                      }}>{money(r.amount_laari)}</div>
-                      {/* A receipt for a paid payment, for offices that need one for audit. */}
-                      {onReceipt && s === "paid" && (
-                        <button onClick={() => onReceipt(r)} title="Open a receipt you can save as PDF"
-                          style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, color: T.lagoon, background: "transparent",
-                            border: `1px solid ${T.line}`, borderRadius: 999, padding: "5px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                          Receipt
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+            {/* One row per payment: Date, Plan, Period, Paid by, Amount, and a
+                receipt for paid ones. Scrolls sideways on a narrow phone. */}
+            <div style={{ overflowX: "auto", background: embedded ? "transparent" : "#fff", border: embedded ? "none" : `1px solid ${T.line}`, borderRadius: 12 }}>
+              <table style={{ width: "100%", minWidth: 560, borderCollapse: "collapse", fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: T.inkSoft, fontSize: 12.5 }}>
+                    <th style={th}>Date</th><th style={th}>Plan</th><th style={th}>Period</th><th style={th}>Paid by</th>
+                    <th style={{ ...th, textAlign: "right" }}>Amount</th><th style={{ ...th, textAlign: "right" }}><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>Receipt</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const st = statusStyle(r.status);
+                    const s = String(r.status || "").toLowerCase();
+                    const struck = s === "cancelled" || s === "failed";
+                    return (
+                      <tr key={r.id} style={{ borderTop: `1px solid ${T.line}` }}>
+                        <td style={td}>{prettyDate(r.paid_at || r.created_at)}</td>
+                        <td style={{ ...td, fontWeight: 700 }}>{titleCase(r.tier)}</td>
+                        <td style={td}>{periodOf(r.billing_cycle)}</td>
+                        <td style={td}>{paidBy(r.provider)}</td>
+                        <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                          <span style={{ color: s === "paid" ? T.ink : T.inkSoft, textDecoration: struck ? "line-through" : "none" }}>{money(r.amount_laari)}</span>
+                          {s !== "paid" && (
+                            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, background: st.bg, border: `1px solid ${st.border}`, color: st.text, borderRadius: 999, padding: "2px 8px" }}>{st.label}</span>
+                          )}
+                        </td>
+                        <td style={{ ...td, textAlign: "right" }}>
+                          {onReceipt && s === "paid" && (
+                            <button onClick={() => onReceipt(r)} title="Open a receipt you can save as PDF"
+                              style={{ fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, color: T.lagoon, background: "transparent", border: 0, padding: "6px 2px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                              Receipt PDF
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
 
             <div style={{ padding: "14px 18px 0", fontSize: 13, color: T.inkSoft }}>
