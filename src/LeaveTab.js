@@ -93,11 +93,55 @@ const itemLook = (item, colors) => {
 export const inFilter = (filter, type) =>
   filter === "all" || (Array.isArray(filter) ? filter.includes(type) : filter === type);
 
+/* The NAME column's width on screen, dragged like the Rota's: the handle on
+   the header's right edge, double-click for the standard width, arrow keys
+   nudge it. Kept in this browser only, laptop and phone separately, under
+   their own keys (never the password-reset keys). Exports keep their fixed
+   width, so pictures and PDFs are unaffected. */
+const LEAVE_NAMEW = { laptop: { key: "edr:leaveNameW", def: 160, min: 90, max: 380 }, phone: { key: "edr:leaveNameWPhone", def: 104, min: 60, max: 240 } };
+const readLeaveNameW = (k) => {
+  try { const v = Number(window.localStorage.getItem(LEAVE_NAMEW[k].key)); return v >= LEAVE_NAMEW[k].min && v <= LEAVE_NAMEW[k].max ? v : LEAVE_NAMEW[k].def; }
+  catch (e) { return LEAVE_NAMEW[k].def; }
+};
+const saveLeaveNameW = (k, v) => { try { window.localStorage.setItem(LEAVE_NAMEW[k].key, String(v)); } catch (e) { /* private mode: just not remembered */ } };
+
 export function LeaveChart({ data, days, rows, filter = "all", everyone = false, onPick = null, compact = false }) {
   const colors = data.leaveColors || null;
   // Narrower names on a phone; they stay frozen on the left while the days scroll.
   const phone = !compact && typeof window !== "undefined" && window.innerWidth < 640;
-  const nameW = compact ? 120 : phone ? 104 : 160;
+  const kind = phone ? "phone" : "laptop";
+  const [nameWs, setNameWs] = useState(() => (typeof window === "undefined"
+    ? { laptop: LEAVE_NAMEW.laptop.def, phone: LEAVE_NAMEW.phone.def }
+    : { laptop: readLeaveNameW("laptop"), phone: readLeaveNameW("phone") }));
+  const nameW = compact ? 120 : nameWs[kind];
+  const setNameWidth = (v) => {
+    const w = Math.round(Math.min(LEAVE_NAMEW[kind].max, Math.max(LEAVE_NAMEW[kind].min, v)));
+    setNameWs((prev) => ({ ...prev, [kind]: w }));
+    return w;
+  };
+  const startNameResize = (e) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = nameW;
+    let last = w0;
+    const move = (ev) => { last = setNameWidth(w0 + ev.clientX - x0); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.body.style.cursor = "";
+      saveLeaveNameW(kind, last);
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+  const resetNameWidth = () => saveLeaveNameW(kind, setNameWidth(LEAVE_NAMEW[kind].def));
+  const nudgeNameWidth = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    saveLeaveNameW(kind, setNameWidth(nameW + (e.key === "ArrowRight" ? 10 : -10)));
+  };
   const frozen = compact ? {} : { position: "sticky", left: 0, zIndex: 3 };
   /* Year view: 365 thin day columns, labelled by month only, with a line at
      each month. Bars sit on the exact days; short ones show their code and
@@ -129,7 +173,15 @@ export function LeaveChart({ data, days, rows, filter = "all", everyone = false,
 @media (prefers-reduced-motion: reduce) { .edr-leavebar { animation: none !important; } }`}</style>
       )}
       <div style={{ ...grid, borderBottom: "1px solid #D3E5EC", background: "#FFFFFF", position: "sticky", top: 0, zIndex: 2 }}>
-        <div style={{ ...frozen, background: "#FFFFFF", padding: "8px 12px", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", color: "#3A5F6B", display: "flex", alignItems: "center", boxShadow: compact ? "none" : "1px 0 0 #D3E5EC" }}>NAME</div>
+        <div style={{ ...frozen, ...(compact ? { position: "relative" } : {}), background: "#FFFFFF", padding: "8px 12px", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", color: "#3A5F6B", display: "flex", alignItems: "center", boxShadow: compact ? "none" : "1px 0 0 #D3E5EC" }}>
+          NAME
+          {!compact && (
+            <span className="rota-resize" role="separator" aria-orientation="vertical" tabIndex={0}
+              aria-label="Name column width: drag, or use the arrow keys. Double-click for the standard width."
+              title="Drag to change the width · double-click to reset"
+              onPointerDown={startNameResize} onDoubleClick={resetNameWidth} onKeyDown={nudgeNameWidth} />
+          )}
+        </div>
         {yearMode && months.map((m) => (
           <div key={m.key} style={{ gridRow: 1, gridColumn: `${m.start + 2} / span ${m.len}`, textAlign: "center", padding: "8px 0", fontSize: 12, fontWeight: 700, borderLeft: "1px solid #D3E5EC", color: "#0E3A47" }}>
             {parseD(m.date).toLocaleDateString("en-GB", { month: "short" })}
@@ -157,7 +209,7 @@ export function LeaveChart({ data, days, rows, filter = "all", everyone = false,
             overflow: phone || compact ? "visible" : "hidden", textOverflow: phone || compact ? "clip" : "ellipsis",
             paddingTop: compact ? 3 : 0, paddingBottom: compact ? 3 : 0,
             background: i % 2 ? "#FAFCFD" : "#FFFFFF", boxShadow: compact ? "none" : "1px 0 0 #D3E5EC" }}>
-            <span style={{ flex: "none", width: phone ? 14 : 16, fontSize: 10.5, fontWeight: 500, color: "#3A5F6B" }}>{i + 1}</span>{staff.name}
+            <span style={{ flex: "none", width: phone ? 14 : 16, fontSize: 10.5, fontWeight: 500, color: "#3A5F6B" }}>{i + 1}</span><span title={staff.name} style={{ minWidth: 0, overflow: "hidden", textOverflow: phone || compact ? "clip" : "ellipsis" }}>{staff.name}</span>
           </div>
           {yearMode
             ? months.map((m) => (

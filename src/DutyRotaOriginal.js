@@ -8,10 +8,6 @@ import {
   User, Briefcase, Eye, RotateCcw, Wand2, FileSpreadsheet, Palette, ImageDown, Home as HomeIcon,
   Copy, ClipboardPaste, Coffee, Upload, Eraser
 } from "lucide-react";
-import {
-  BarChart, Bar, XAxis, YAxis, Legend,
-  Cell, CartesianGrid, LineChart, Line
-} from "recharts";
 import supabase from "./supabaseClient";
 import RequestsTab from "./RequestsTab";
 import SmartRosterTab from "./SmartRosterTab";
@@ -32,6 +28,7 @@ import {
 } from "./rotaCounts";
 import Dashboard from "./Dashboard";
 import StatsDashboard from "./StatsDashboard";
+import DateRangePicker from "./DateRangePicker";
 import { buildStatsModel } from "./statsModel";
 import InviteDialog from "./InviteDialog";
 import StaffAccessCell, { useOrgAccess } from "./StaffAccessCell";
@@ -325,20 +322,6 @@ const leaveBucket = (code) => {
   if (code.counts !== "leave") return null;
   const c = (code.code || "").toUpperCase();
   return c === "SL" ? "sl" : c === "FRL" ? "frl" : c === "ML" ? "ml" : "other";
-};
-const LEAVE_BUCKET_LABELS = [["sl", "SL"], ["frl", "FRL"], ["ml", "ML"], ["other", "Other leave"]];
-// Leave days grouped by category, not by the code text. A code named N/FRL set
-// to count as FRL adds to the FRL bar, and every code set to Other leave shares
-// one bar — so this always matches the SL/FRL/ML/Other leave columns.
-const leaveTakenFrom = (rows) => {
-  const totals = { sl: 0, frl: 0, ml: 0, other: 0 };
-  rows.forEach((r) => {
-    const b = r.leaveByBucket || {};
-    ["sl", "frl", "ml", "other"].forEach((k) => { totals[k] += b[k] || 0; });
-  });
-  return LEAVE_BUCKET_LABELS
-    .map(([k, name]) => ({ name, value: totals[k] }))
-    .filter((x) => x.value > 0);
 };
 
 /* ─────────────────── Date helpers ─────────────────── */
@@ -4361,7 +4344,6 @@ function Stats({ data, range, setRange, onExport }) {
   /* Saving a single chart as a picture. A manager wanting to paste "who is on
      leave" into a WhatsApp message should not have to send the whole page and
      ask people to look at the third chart down. */
-  const pageRef = useRef(null);
   const cardRefs = useRef({});
   const [savingKey, setSavingKey] = useState(null);
 
@@ -4431,7 +4413,7 @@ function Stats({ data, range, setRange, onExport }) {
   const totals = {
     duty: rows.reduce((a, r) => a + r.dutyShifts, 0),
     nonOff: rows.reduce((a, r) => a + r.nonOfficialDuty, 0),
-    leave: rows.reduce((a, r) => a + r.annualDays + r.sl + r.frl + r.ml + r.otherLeave, 0),
+    leave: rows.reduce((a, r) => a + r.annualDays + r.maternityDays + r.sl + r.frl + r.ml + r.otherLeave, 0),
     off: rows.reduce((a, r) => a + r.off, 0),
   };
 
@@ -4470,22 +4452,18 @@ function Stats({ data, range, setRange, onExport }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", justifyContent: "space-between" }}>
-        <RangePicker range={range} setRange={setRange} />
+      {/* "Save page" (one picture of the whole page) was removed: each card
+          keeps its own Save, and Export PDF covers the whole page. */}
+      <div style={{ position: "relative", zIndex: 20, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "space-between" }}>
+        <DateRangePicker range={range} setRange={setRange} isNonOff={(d) => isNonOff(data, d)} weekStartsOn={data.weekStartsOn || 0} />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Btn kind="ghost" small disabled={!valid}
-            onClick={() => saveShot("page", pageRef.current, "statistics")}>
-            <ImageDown size={14} /> {savingKey === "page" ? "Saving…" : "Save page"}
-          </Btn>
           <Btn kind="ghost" small onClick={onExport} disabled={!valid}><Printer size={14} /> Export PDF</Btn>
         </div>
       </div>
       {!valid ? <div style={{ fontSize: 13, color: T.coral }}>Pick a valid date range.</div> : <>
-      <div ref={pageRef} style={{ background: "transparent" }}>
-        <StatsDashboard data={data} model={model} summary={summary} totals={totals} coverage={coverage} CountUp={CountUp}
-          saveBtn={(key, filename) => <SaveChart cardKey={key} filename={filename} />}
-          cardRef={(key) => (el) => { cardRefs.current[key] = el; }} />
-      </div>
+      <StatsDashboard data={data} model={model} summary={summary} totals={totals} coverage={coverage} CountUp={CountUp}
+        saveBtn={(key, filename) => <SaveChart cardKey={key} filename={filename} />}
+        cardRef={(key) => (el) => { cardRefs.current[key] = el; }} />
       </>}
     </div>
   );
@@ -4948,29 +4926,10 @@ function RecordsPrint({ data, from, to }) {
 }
 
 function StatsPrint({ data, from, to }) {
+  /* The PDF draws the same screen as the Statistics tab, laid out for paper
+     (StatsDashboard with print on). The figures are worked out here exactly
+     as they were for the old PDF, so the exported numbers do not change. */
   const rows = recordsFor(data, from, to);
-  // Same rule as the on-call picker: a first name only where it is unique
-  // among the people on this chart, the full name where it is not.
-  const chartPool = rows.map((r) => r.staff);
-  const dutyByStaff = rows.map((r) => ({
-    name: uniqueLabel(r.staff, chartPool),
-    Morning: r.morning, Afternoon: r.afternoon, Evening: r.evening, Night: r.night, "Other duty": r.other, Release: r.release,
-  }));
-  const nonOffByStaff = rows.map((r) => ({ name: uniqueLabel(r.staff, chartPool), days: r.nonOfficialDuty }));
-  const overlaps = (p) => p.start <= to && p.end >= from;
-  const staffOnLeaveType = (type) =>
-    rows.filter((r) => (r.staff.leavePeriods || []).some((p) => p.type === type && overlaps(p))).length;
-  const leaveTypeData = [
-    { name: "Annual", value: staffOnLeaveType("annual"), color: "#0F8B7E" },
-    { name: "Maternity", value: staffOnLeaveType("maternity"), color: "#9AA5AB" },
-    { name: "Pre-mat.", value: staffOnLeaveType("prematernity"), color: "#9C3D6E" },
-    { name: "Paternity", value: staffOnLeaveType("paternity"), color: "#2D4E8A" },
-    { name: "Emergency", value: staffOnLeaveType("emergency"), color: "#E4604E" },
-    { name: "Other ext.", value: staffOnLeaveType("other"), color: "#6C7BD9" },
-  ];
-  const anyLeaveByType = leaveTypeData.some((x) => x.value > 0);
-  const leaveCodesTaken = leaveTakenFrom(rows);
-  const anyLeaveCodes = leaveCodesTaken.length > 0;
   const dates = datesBetween(from, to);
   const coverage = dates.length > 92 ? null : dates.map((date) => ({
     date: shortDate(date),
@@ -4985,16 +4944,12 @@ function StatsPrint({ data, from, to }) {
     leave: rows.reduce((a, r) => a + r.annualDays + r.maternityDays + r.sl + r.frl + r.ml + r.otherLeave, 0),
     off: rows.reduce((a, r) => a + r.off, 0),
   };
-
-  /* The same four figures the Statistics tab now leads with. An export that
-     reports different headline numbers from the screen it was taken from is
-     worse than no export: whoever receives it has no way to tell which is
-     right. The older totals still appear, at the foot, exactly as on screen. */
   const headline = (() => {
     const inRange = (d) => d && d >= from && d <= to;
     return {
       onAnnual: rows.filter((r) => (r.staff.leavePeriods || []).some(
         (pd) => pd.type === "annual" && pd.start <= to && pd.end >= from)).length,
+      annualDays: rows.reduce((a, r) => a + r.annualDays, 0),
       staffCount: rows.length,
       avgPerDay: dates.length
         ? Math.round((rows.reduce((a, r) => a + r.dutyShifts, 0) / dates.length) * 10) / 10
@@ -5004,10 +4959,8 @@ function StatsPrint({ data, from, to }) {
       left: (data.staff || []).filter((s) => inRange(s.endDate)).length,
     };
   })();
-  // breakInside keeps a chart card whole — without it a tall card leaves an
-  // empty box on one page and its chart on the next.
-  const box = { border: "1px solid #BBB", borderRadius: 8, padding: 10, background: "#fff", breakInside: "avoid", pageBreakInside: "avoid" };
-  const chartTitle = { fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 12, margin: "0 0 6px" };
+  const pool = rows.map((r) => r.staff);
+  const model = buildStatsModel(data, rows, from, to, (s) => uniqueLabel(s, pool));
 
   return (
     <div>
@@ -5022,116 +4975,7 @@ function StatsPrint({ data, from, to }) {
         Duty Statistics · {niceDate(from)} – {niceDate(to)}
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        {[["On annual leave", headline.onAnnual, `of ${headline.staffCount} staff`],
-          ["Staff", headline.staffCount,
-            [headline.joined ? `${headline.joined} joined` : "",
-             headline.left ? `${headline.left} left` : ""].filter(Boolean).join(", ")],
-          ["Staff on duty", headline.avgPerDay, "on an average day"],
-          ["Non-official days", headline.nonOffDays, ""],
-        ].map(([l, v, note]) => (
-          <div key={l} style={{ ...box, flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 10.5, color: "#666", fontWeight: 600 }}>{l}</div>
-            <div style={{ fontFamily: "Sora, sans-serif", fontSize: 20, fontWeight: 700 }}>{v}</div>
-            {note && <div style={{ fontSize: 9, color: "#888", marginTop: 1 }}>{note}</div>}
-          </div>
-        ))}
-      </div>
-
-      {/* Duties per staff gets its own row — with a long staff list and upright
-          names it needs the full width. The two leave charts pair on the next. */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={box}>
-          <h4 style={chartTitle}>Duties per staff</h4>
-          <BarChart width={980} height={280} data={dutyByStaff} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-            <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-90} textAnchor="end" height={72} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-            <Legend wrapperStyle={{ fontSize: 10 }} />
-            <Bar dataKey="Morning" stackId="a" fill="#F4B860" isAnimationActive={false} />
-            <Bar dataKey="Afternoon" stackId="a" fill="#8FBF6B" isAnimationActive={false} />
-            {data.eveningEnabled && <Bar dataKey="Evening" stackId="a" fill="#E58E77" isAnimationActive={false} />}
-            <Bar dataKey="Night" stackId="a" fill="#6FA8DC" isAnimationActive={false} />
-            <Bar dataKey="Other duty" stackId="a" fill="#8E7CC3" isAnimationActive={false} />
-            <Bar dataKey="Release" stackId="a" fill="#C08552" isAnimationActive={false} />
-          </BarChart>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        <div style={{ ...box, flex: 1 }}>
-          <h4 style={chartTitle}>Staff on leave (by type)</h4>
-          {!anyLeaveByType ? (
-            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave periods in this range.</div>
-          ) : (
-            <BarChart width={470} height={250} data={leaveTypeData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-              <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-40} textAnchor="end" height={60} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-              <Bar dataKey="value" isAnimationActive={false}>
-                {leaveTypeData.map((x) => <Cell key={x.name} fill={x.color} />)}
-              </Bar>
-            </BarChart>
-          )}
-        </div>
-        <div style={{ ...box, flex: 1 }}>
-          <h4 style={chartTitle}>Leave taken (days by category)</h4>
-          {!anyLeaveCodes ? (
-            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>No leave recorded in this range.</div>
-          ) : (
-            <BarChart width={470} height={250} data={leaveCodesTaken} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-              <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-40} textAnchor="end" height={60} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-              <Bar dataKey="value" fill="#6C7BD9" isAnimationActive={false} />
-            </BarChart>
-          )}
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ ...box }}>
-          <h4 style={chartTitle}>Non-official duties per staff (paid days)</h4>
-          <BarChart width={720} height={Math.max(120, nonOffByStaff.length * 24 + 24)} data={nonOffByStaff} layout="vertical" margin={{ left: 10, right: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-            <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10 }} />
-            <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 9 }} interval={0} />
-            <Bar dataKey="days" fill="#D9A93F" isAnimationActive={false} />
-          </BarChart>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ ...box, flex: 1 }}>
-          <h4 style={chartTitle}>Daily coverage</h4>
-          {coverage === null ? (
-            <div style={{ fontSize: 11, color: "#666", padding: "40px 0", textAlign: "center" }}>Range too long for a daily chart (max 3 months).</div>
-          ) : (
-            <LineChart width={600} height={200} data={coverage}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#DDD" />
-              <XAxis dataKey="date" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
-              <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-              <Legend wrapperStyle={{ fontSize: 10 }} />
-              <Line type="monotone" dataKey="Morning" stroke="#E8A33D" dot={false} strokeWidth={2} isAnimationActive={false} />
-              <Line type="monotone" dataKey="Afternoon" stroke="#6E9E4C" dot={false} strokeWidth={2} isAnimationActive={false} />
-              {data.eveningEnabled && <Line type="monotone" dataKey="Evening" stroke="#D0694F" dot={false} strokeWidth={2} isAnimationActive={false} />}
-              <Line type="monotone" dataKey="Night" stroke="#4A82BC" dot={false} strokeWidth={2} isAnimationActive={false} />
-            </LineChart>
-          )}
-        </div>
-      </div>
-      {/* The same rota totals that sit at the foot of the tab. */}
-      <div style={{ ...box, marginTop: 12, breakInside: "avoid" }}>
-        <div style={{ fontSize: 10.5, color: "#666", fontWeight: 600, marginBottom: 6 }}>Rota totals</div>
-        <div style={{ display: "flex", gap: 22, flexWrap: "wrap", fontSize: 11 }}>
-          {[["Duty shifts", totals.duty], ["Leave days", totals.leave], ["Off days", totals.off]].map(([l, v]) => (
-            <div key={l}>
-              <span style={{ color: "#666" }}>{l}: </span>
-              <strong style={{ fontFamily: "Sora, sans-serif" }}>{v}</strong>
-            </div>
-          ))}
-        </div>
-      </div>
+      <StatsDashboard print data={data} model={model} summary={headline} totals={totals} coverage={coverage} />
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         gap: 10, marginTop: 8, fontSize: 10, color: "#666",

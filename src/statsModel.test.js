@@ -80,3 +80,11 @@ test("rota squares: leave period wins over the cell, not employed is blank", () 
 test("no squares for ranges over two months", () => {
   expect(buildStatsModel(data, rows, "2026-10-01", "2026-12-31").heat).toBeNull();
 });
+
+test("staff joined and left, with headcount at the start and end", () => {
+  const withLeaver = { ...data, staff: [...data.staff, { id: "d", name: "Dana", endDate: "2026-12-03", leavePeriods: [] }] };
+  const p = buildStatsModel(withLeaver, rows, "2026-12-01", "2026-12-07").people;
+  expect(p.joined.map((x) => [x.name, x.when])).toEqual([["Castro", "4 Dec"]]);
+  expect(p.left.map((x) => [x.name, x.when])).toEqual([["Dana", "3 Dec"]]);
+  expect([p.atStart, p.atEnd]).toEqual([3, 3]);
+});
