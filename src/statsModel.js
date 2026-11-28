@@ -237,5 +237,21 @@ export function buildStatsModel(data, rows, from, to, labelOf = (s) => s.name) {
     };
   }
 
-  return { dates, nodDates, away, mix, ranked, fewest, nodPer, leave, posts, heat };
+  /* ── Staff: how many at the start and end, and who joined or left ──
+     The same rule as the old "Staff" figure: joined = a start date inside
+     the range, left = an end date inside it. */
+  const inRange = (d) => d && d >= from && d <= to;
+  const all = data.staff || [];
+  const joined = all.filter((s) => inRange(s.startDate)).map((s) => ({ id: s.id, name: s.name, date: s.startDate, when: dayMonth(s.startDate) }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const left = all.filter((s) => inRange(s.endDate)).map((s) => ({ id: s.id, name: s.name, date: s.endDate, when: dayMonth(s.endDate) }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const people = {
+    joined, left,
+    atStart: all.filter((s) => isEmployedOn(s, from)).length,
+    atEnd: all.filter((s) => isEmployedOn(s, to)).length,
+    from: dayMonth(from), to: dayMonth(to),
+  };
+
+  return { dates, nodDates, away, mix, ranked, fewest, nodPer, leave, posts, heat, people };
 }
