@@ -351,7 +351,7 @@ export default function Dashboard({
   /* Your account gathers Profile, Members, Subscription history and the
      rest in one place. The older screen names still land on their section,
      so every existing button keeps working. */
-  if (screen === "account" || screen === "history" || screen === "members") {
+  if (screen === "account" || screen === "history" || screen === "members" || screen === "quote") {
     return (
       <YourAccount section={screen === "account" ? "profile" : screen}
         onBack={() => setScreen("home")} onOpenPlans={onOpenPlans} orgName={orgName} email={email || ""}

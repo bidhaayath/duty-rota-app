@@ -50,6 +50,7 @@ test("a receipt shows the amount actually paid", () => {
   expect(h).toContain("EDR-R-ABCD1234");
   expect(h).toContain("MVR 465.00");
   expect(h).toContain("Card (BML)");
+  expect(receiptHtml({ payment: { id: "x", amount_laari: 1, provider: "manual" } })).toContain("Bank transfer");
 });
 
 test("download my data: a sheet per department plus leave, codes in the cells", async () => {

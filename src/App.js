@@ -7,6 +7,7 @@ import Billing, { WHATSAPP } from './Billing';
 import { fetchPromo, openOffers, endsInText, isLastDay, maldivesDay, useServerNow } from './promo';
 import AcceptInvite from "./AcceptInvite";
 import LogoMark from "./LogoMark";
+import { useMyRotaSummary, waLink, QUESTION_MSG, SAMPLE_MSG } from "./planNudge";
 
 // A password-reset link signs the user in automatically. Without this check,
 // App.js would see a valid session and jump straight to the rota, never giving
@@ -93,7 +94,39 @@ const fetchSubscription = async () => {
 // Shown in the final week either way, but a trial and a paid plan need
 // different words: one ends unless you subscribe, the other ends unless you
 // send a transfer. Nothing renews on its own here.
-function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans }) {
+/* "Get a quotation" opens Your account → Generate a quotation. Offices and
+   government buyers often can't pay until procurement has a PDF, so it sits
+   beside renewing rather than behind it. Owners only: staff don't buy. */
+const openQuote = () => window.dispatchEvent(new Event('edr:open-quote'));
+
+/* A real person to talk to, on WhatsApp. */
+function AskUs({ dark, small }) {
+  return (
+    <a href={waLink(QUESTION_MSG)} target="_blank" rel="noreferrer" style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none',
+      background: dark ? 'rgba(255,255,255,0.14)' : '#E8F6EE', color: dark ? '#fff' : '#1E6B45',
+      border: dark ? '1px solid rgba(255,255,255,0.35)' : '1px solid #BFE3CD',
+      fontWeight: 700, fontSize: small ? 12 : 14, padding: small ? '5px 12px' : '10px 16px',
+      borderRadius: small ? 6 : 8, whiteSpace: 'nowrap', fontFamily: 'inherit',
+    }}>
+      <svg width={small ? 13 : 15} height={small ? 13 : 15} viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z"/></svg>
+      Questions? Message us
+    </a>
+  );
+}
+
+/* For trial accounts: Bidhoo will build a sample roster for them by hand. */
+function SampleOffer({ dark }) {
+  return (
+    <a href={waLink(SAMPLE_MSG)} target="_blank" rel="noreferrer" style={{
+      color: dark ? '#FFE08A' : '#0D4F61', fontWeight: 700, textDecoration: 'underline',
+    }}>
+      Send us your shifts and we'll build a sample roster for you, free
+    </a>
+  );
+}
+
+function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans, canQuote, summary }) {
   const tierName = paidTier ? paidTier.charAt(0).toUpperCase() + paidTier.slice(1) : null;
   const endsOn = paidUntil
     ? new Date(paidUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })
@@ -109,16 +142,30 @@ function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans })
             {' '}Renew to keep editing.
           </>
         ) : (
-          <>Your free trial ends in {days}.</>
+          <>Your free trial ends in {days}. Your rota stays exactly as it is when you subscribe.</>
         )}
+        {summary && <> <strong>{summary}</strong></>}
+        {!everPaid && canQuote && <> · <SampleOffer /></>}
       </span>
-      <button onClick={onSeePlans} style={{
-        background: '#0D4F61', color: '#fff', fontWeight: 700, fontSize: 12,
-        padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-        whiteSpace: 'nowrap', fontFamily: 'inherit',
-      }}>
-        {everPaid ? 'My plan' : 'See plans'}
-      </button>
+      <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button onClick={onSeePlans} style={{
+          background: '#0D4F61', color: '#fff', fontWeight: 700, fontSize: 12,
+          padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+          whiteSpace: 'nowrap', fontFamily: 'inherit',
+        }}>
+          See plans &amp; renew
+        </button>
+        {canQuote && (
+          <button onClick={openQuote} style={{
+            background: 'transparent', color: '#0D4F61', fontWeight: 700, fontSize: 12,
+            padding: '5px 13px', borderRadius: 6, border: '1px solid #0D4F61', cursor: 'pointer',
+            whiteSpace: 'nowrap', fontFamily: 'inherit',
+          }}>
+            Get a quotation
+          </button>
+        )}
+        <AskUs small />
+      </span>
     </div>
   );
 }
@@ -126,38 +173,50 @@ function EndingSoonNote({ daysLeft, everPaid, paidTier, paidUntil, onSeePlans })
 // Renders one of two messages. Someone whose trial ran out never paid us;
 // someone whose subscription lapsed did, and deserves to be addressed as the
 // customer they were rather than told their trial ended.
-function Paywall({ onSeePlans, everPaid, paidTier, paidUntil }) {
+function Paywall({ onSeePlans, everPaid, paidTier, paidUntil, canQuote, summary }) {
   const tierName = paidTier ? paidTier.charAt(0).toUpperCase() + paidTier.slice(1) : null;
   const endedOn = paidUntil
-    ? new Date(paidUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+    ? new Date(paidUntil).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
     : null;
 
   const heading = everPaid
-    ? (tierName ? `Your ${tierName} plan has ended` : 'Your subscription has ended')
-    : 'Your free trial has ended';
+    ? `${tierName ? `Your ${tierName} plan` : 'Your subscription'} ended${endedOn ? ` on ${endedOn}` : ''}. Editing is paused.`
+    : 'Your free trial has ended. Editing is paused.';
 
-  const body = everPaid
-    ? `Your rota and all your data are safe${endedOn ? ` — your plan ran until ${endedOn}` : ''}. You can still view everything and export PDFs, but editing is paused. Renew to pick up exactly where you left off.`
-    : 'Your rota and all your data are safe — you can still view everything and export PDFs, but editing is paused. Subscribe to continue right where you left off.';
+  // One line: what they've built (when known), then what still works.
+  const kept = `${summary ? `${summary} ` : 'Your rota and all your data are safe. '}It's all kept, and you can still view and export PDFs.`;
+
+  const btn = {
+    fontWeight: 700, fontSize: 13, padding: '7px 13px', borderRadius: 7, cursor: 'pointer',
+    whiteSpace: 'nowrap', fontFamily: 'inherit',
+  };
 
   return (
     /* no-print: a lapsed-plan notice belongs on the screen, not in the
        customer's paperwork. These exports are handed to heads of department
        and other organisations, and a "your plan has ended" banner across the
        top of a duty rota is an awkward thing to have to explain. */
-    <div className="dr-anim-in no-print" style={{ background: 'linear-gradient(135deg, #0D4F61, #1F7F9F)', color: '#fff', padding: '18px 20px' }}>
-      <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
-        <div style={{ flex: '1 1 320px' }}>
-          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>{heading}</div>
-          <div style={{ fontSize: 13, opacity: 0.95, lineHeight: 1.5 }}>{body}</div>
+    <div className="dr-anim-in no-print" style={{ background: 'linear-gradient(135deg, #0D4F61, #1F7F9F)', color: '#fff', padding: '10px 20px' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 16px', justifyContent: 'space-between' }}>
+        <div style={{ flex: '1 1 360px', minWidth: 0, lineHeight: 1.45 }}>
+          <div style={{ fontWeight: 800, fontSize: 14.5 }}>{heading}</div>
+          <div style={{ fontSize: 12.5, opacity: 0.95 }}>
+            {kept}
+            {!everPaid && canQuote && <> <SampleOffer dark />.</>}
+          </div>
         </div>
-        <button onClick={onSeePlans} style={{
-          background: '#fff', color: '#1F7F9F', fontWeight: 800, fontSize: 14,
-          padding: '11px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
-          whiteSpace: 'nowrap', fontFamily: 'inherit',
-        }}>
-          {everPaid ? 'Renew' : 'See plans'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button onClick={onSeePlans} style={{ ...btn, background: '#fff', color: '#1F7F9F', border: 'none' }}>
+            See plans &amp; renew
+          </button>
+          {canQuote && (
+            <button onClick={openQuote} title="A PDF quotation your office can send to procurement"
+              style={{ ...btn, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.7)' }}>
+              Get a quotation
+            </button>
+          )}
+          <AskUs dark small />
+        </div>
       </div>
     </div>
   );
@@ -614,6 +673,12 @@ export default function App() {
     return () => { cancelled = true; };
   }, [session?.user?.id]);
 
+  /* "Your rota has 24 staff and 3 months of duties" — only for owners, and
+     only while one of the plan banners is showing. Read-only. */
+  const canQuote = role === null || role === 'owner';
+  const planSummary = useMyRotaSummary(session?.user?.id,
+    canQuote && (sub.locked || (sub.daysLeft !== null && sub.daysLeft <= 7)));
+
   if (inviteToken) {
     return <AcceptInvite token={inviteToken} onDone={clearInvite} />;
   }
@@ -670,8 +735,8 @@ export default function App() {
       {(role === null || role === 'owner') && (
         <PromoStrip promo={promo} onSeePlans={() => setShowBilling(true)} />
       )}
-      {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} />}
-      {showEndingNote && <EndingSoonNote daysLeft={sub.daysLeft} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} onSeePlans={() => setShowBilling(true)} />}
+      {sub.locked && <Paywall onSeePlans={() => setShowBilling(true)} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} canQuote={canQuote} summary={planSummary} />}
+      {showEndingNote && <EndingSoonNote daysLeft={sub.daysLeft} everPaid={sub.everPaid} paidTier={sub.paidTier} paidUntil={sub.paidUntil} onSeePlans={() => setShowBilling(true)} canQuote={canQuote} summary={planSummary} />}
       <style>{`
         /* Laptops: the side menu carries My plan and Log out on department
            screens (DutyRota sets edr-has-side on <body> while it shows). */

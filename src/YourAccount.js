@@ -3,6 +3,7 @@ import {
   ChevronLeft, ChevronRight, User, Lightbulb, Users, FileText, History, LifeBuoy, Download, Mail, MessageCircle, AlertTriangle,
 } from "lucide-react";
 import supabase from "./supabaseClient";
+import { SAMPLE_MSG } from "./planNudge";
 import Account from "./Account";
 import Members from "./Members";
 import SubscriptionHistory from "./SubscriptionHistory";
@@ -78,6 +79,11 @@ function MyPlan({ onOpenPlans, onHistory }) {
   const tier = sub?.paid_tier || sub?.plan || null;
   const name = sub?.state === "trial" || (!sub?.paid_until && !tier) ? "Free trial" : `${tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "Your"} plan`;
   const until = sub?.paid_until ? new Date(sub.paid_until).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : null;
+  /* The ring warns as the end comes: orange for the last 7 days (when the
+     banner at the top starts too), red once the plan or trial has ended. */
+  const ended = days != null && days <= 0;
+  const ringColour = ended ? "#FF6B5E" : days != null && days <= 7 ? "#FFB347" : "#fff";
+  const ringPct = ended ? 100 : pct;
   return (
     <section style={{ borderRadius: 24, padding: 22, color: "#fff", background: "linear-gradient(135deg, #0B4555, #2F8FA6)", boxShadow: "0 14px 34px rgba(13,79,97,.22)", display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
       <h2 style={{ ...h2, color: "#fff" }}>My plan</h2>
@@ -86,15 +92,15 @@ function MyPlan({ onOpenPlans, onHistory }) {
           <div style={{ position: "relative", width: 104, height: 104, flex: "none" }}>
             <svg viewBox="0 0 100 100" style={{ width: 104, height: 104, transform: "rotate(-90deg)" }} aria-hidden="true">
               <circle cx="50" cy="50" r="42" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="9" />
-              <circle cx="50" cy="50" r="42" pathLength="100" fill="none" stroke="#fff" strokeWidth="9" strokeLinecap="round" style={{ strokeDasharray: `${pct} 100`, transition: "stroke-dasharray .9s cubic-bezier(.22,1,.36,1)" }} />
+              <circle cx="50" cy="50" r="42" pathLength="100" fill="none" stroke={ringColour} strokeWidth="9" strokeLinecap="round" style={{ strokeDasharray: `${ringPct} 100`, transition: "stroke-dasharray .9s cubic-bezier(.22,1,.36,1), stroke .4s ease" }} />
             </svg>
             <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <strong style={{ fontFamily: H, fontSize: 26 }}>{days == null ? "—" : days}</strong><span style={{ fontSize: 10.5, opacity: 0.9 }}>days left</span>
+              <strong style={{ fontFamily: H, fontSize: 26, color: ringColour }}>{days == null ? "—" : Math.max(0, days)}</strong><span style={{ fontSize: 10.5, opacity: 0.9 }}>{ended ? "ended" : days === 1 ? "day left" : "days left"}</span>
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 13 }}>
             <strong style={{ fontSize: 15 }}>{name}</strong>
-            {until && <div>Paid until <strong>{until}</strong></div>}
+            {until && <div>{ended ? "Ended on" : "Paid until"} <strong>{until}</strong></div>}
             <div style={{ opacity: 0.9 }}>Nothing renews by itself.</div>
           </div>
         </div>
@@ -107,12 +113,30 @@ function MyPlan({ onOpenPlans, onHistory }) {
   );
 }
 
+/* Bidhoo builds a sample roster by hand for anyone who asks. Shown on
+   Support and under Request a feature. Opens WhatsApp with a short form. */
+function SampleRosterCard({ style }) {
+  return (
+    <a href={whatsapp(SAMPLE_MSG)} target="_blank" rel="noreferrer" style={{
+      display: "flex", alignItems: "center", gap: 10, padding: 14, borderRadius: 14, textDecoration: "none",
+      fontWeight: 600, fontSize: 14, background: "rgba(232,246,238,0.92)", color: "#1E6B45", ...style,
+    }}>
+      <FileText size={18} />
+      <span style={{ flex: 1 }}>Let us build a sample roster for you
+        <span style={{ display: "block", fontWeight: 500, fontSize: 12, color: "#3F7A5A" }}>Free. Send your staff and shifts, or a photo of your current roster.</span>
+      </span>
+      <ChevronRight size={16} />
+    </a>
+  );
+}
+
 function FeatureRequest({ email, orgName }) {
   const [area, setArea] = useState("Rota");
   const [need, setNeed] = useState("Would help a lot");
   const [text, setText] = useState("");
   const body = `${text.trim()}\n\nPart of the app: ${area}\nHow much it would help: ${need}\n\nFrom: ${email || ""}${orgName ? `\nOrganisation: ${orgName}` : ""}`;
   return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
     <section style={{ ...glass, padding: 22, display: "flex", flexDirection: "column", gap: 14, maxWidth: 720 }}>
       <h2 className="ya-h2" style={h2}>Request a feature</h2>
       <p style={{ margin: 0, fontSize: 13.5, color: T.soft, lineHeight: 1.5 }}>Tell us what would make your rota easier. It opens your email with the message ready to send to {SELLER.email}.</p>
@@ -130,6 +154,8 @@ function FeatureRequest({ email, orgName }) {
         <a href={whatsapp(`Feature request (${area}, ${need}): ${text.trim()}`)} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 600, color: T.lagoon }}>or send it on WhatsApp</a>
       </div>
     </section>
+    <SampleRosterCard style={{ maxWidth: 720, boxSizing: "border-box", border: "1px solid #CDE9D7" }} />
+    </div>
   );
 }
 
@@ -234,6 +260,7 @@ function Support({ email, orgName, ownedRotas }) {
       <section style={{ ...glass, padding: 22, display: "flex", flexDirection: "column", gap: 10 }}>
         <h2 style={h2}>Get help</h2>
         <a href={whatsapp("Hello, I need help with Easy Duty Rota.")} target="_blank" rel="noreferrer" style={link}><MessageCircle size={18} /><span style={{ flex: 1 }}>WhatsApp {SELLER.phone}</span><ChevronRight size={16} /></a>
+        <SampleRosterCard />
         <a href={mailto("Help with Easy Duty Rota", `\n\nFrom: ${email || ""}${orgName ? `\nOrganisation: ${orgName}` : ""}`)} style={link}><Mail size={18} /><span style={{ flex: 1 }}>{SELLER.email}</span><ChevronRight size={16} /></a>
         <p style={{ margin: "4px 0 0", fontSize: 12.5, color: T.soft, lineHeight: 1.5 }}>The Help page inside any department explains every screen.</p>
       </section>
@@ -272,6 +299,13 @@ export default function YourAccount({ section: start = "profile", onBack, onOpen
     if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
   }, [section, listOpen]);
   const current = SECTIONS.find((s) => s.id === section) || SECTIONS[0];
+  // Days left, for the "My plan" button on Subscription history.
+  const [daysLeft, setDaysLeft] = useState(null);
+  useEffect(() => {
+    let off = false;
+    supabase.rpc("my_subscription").then(({ data }) => { if (!off && data) setDaysLeft(data.days_remaining ?? null); });
+    return () => { off = true; };
+  }, []);
 
   const nav = (
     <nav aria-label="Account sections" style={{ ...glass, padding: 10, display: "flex", flexDirection: "column", gap: 2, ...(narrow ? {} : { flex: "0 0 270px", position: "sticky", top: 16 }) }}>
@@ -309,7 +343,7 @@ export default function YourAccount({ section: start = "profile", onBack, onOpen
         <section style={{ ...glass, padding: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
             <h2 className="ya-h2" style={h2}>Subscription history</h2>
-            <button onClick={() => pick("profile")} style={ghost}>My plan</button>
+            <button onClick={() => pick("profile")} style={{ ...ghost, minHeight: 46, padding: "0 20px", fontSize: 14, fontWeight: 700 }}>My plan{daysLeft != null ? ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` : ""}</button>
           </div>
           <SubscriptionHistory embedded onReceipt={(r) => openDoc(receiptHtml({ payment: r, to: { org: orgName, email } }))} />
         </section>
