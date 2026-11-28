@@ -61,7 +61,7 @@ const statusStyle = (status) => {
   return { bg: "#F3F5F5", border: "#DDE4E3", text: "#6A7C81", label: titleCase(status) };
 };
 
-export default function SubscriptionHistory({ onBack }) {
+export default function SubscriptionHistory({ onBack, embedded = false, onReceipt = null }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -97,7 +97,7 @@ export default function SubscriptionHistory({ onBack }) {
   );
 
   return (
-    <div className="dr-fade-in" style={{
+    <div className="dr-fade-in" style={embedded ? { fontFamily: "Inter, system-ui, sans-serif", color: T.ink } : {
       fontFamily: "Inter, system-ui, sans-serif", color: T.ink,
       background: T.mist, minHeight: "100vh",
     }}>
@@ -107,7 +107,8 @@ export default function SubscriptionHistory({ onBack }) {
         @media (prefers-reduced-motion: reduce) { .dr-hist-back { transition: none; } }
       `}</style>
 
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 22px 44px" }}>
+      <div style={embedded ? {} : { maxWidth: 720, margin: "0 auto", padding: "24px 22px 44px" }}>
+        {!embedded && <>
         <button
           className="dr-hist-back"
           onClick={onBack}
@@ -126,6 +127,7 @@ export default function SubscriptionHistory({ onBack }) {
         <p style={{ color: T.inkSoft, fontSize: 13, margin: "0 0 22px" }}>
           Every payment recorded on your account.
         </p>
+        </>}
 
         {loading && (
           <div style={{ textAlign: "center", padding: "40px 0", color: T.inkSoft, fontSize: 13.5 }}>
@@ -203,6 +205,14 @@ export default function SubscriptionHistory({ onBack }) {
                         color: s === "paid" ? T.ink : T.inkSoft,
                         textDecoration: (s === "cancelled" || s === "failed") ? "line-through" : "none",
                       }}>{money(r.amount_laari)}</div>
+                      {/* A receipt for a paid payment, for offices that need one for audit. */}
+                      {onReceipt && s === "paid" && (
+                        <button onClick={() => onReceipt(r)} title="Open a receipt you can save as PDF"
+                          style={{ fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, color: T.lagoon, background: "transparent",
+                            border: `1px solid ${T.line}`, borderRadius: 999, padding: "5px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                          Receipt
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

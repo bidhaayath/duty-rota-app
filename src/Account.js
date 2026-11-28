@@ -23,7 +23,7 @@ const T = {
   line: "#D3E5EC", lagoon: "#0D4F61", coral: "#E4604E",
 };
 
-export default function Account({ onBack }) {
+export default function Account({ onBack, embedded = false }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [savedName, setSavedName] = useState("");
@@ -91,7 +91,7 @@ export default function Account({ onBack }) {
   }
 
   return (
-    <div className="dr-fade-in" style={{
+    <div className="dr-fade-in" style={embedded ? { fontFamily: "Inter, system-ui, sans-serif", color: T.ink } : {
       fontFamily: "Inter, system-ui, sans-serif", color: T.ink,
       background: T.mist, minHeight: "100vh",
     }}>
@@ -103,7 +103,9 @@ export default function Account({ onBack }) {
         @media (prefers-reduced-motion: reduce) { .dr-acc-btn { transition: none; } }
       `}</style>
 
-      <div style={{ maxWidth: 620, margin: "0 auto", padding: "24px 22px 44px" }}>
+      <div style={embedded ? {} : { maxWidth: 620, margin: "0 auto", padding: "24px 22px 44px" }}>
+        {/* Inside Your account the page around it has the heading and the way back. */}
+        {!embedded && <>
         <button
           className="dr-acc-btn"
           onClick={onBack}
@@ -122,6 +124,7 @@ export default function Account({ onBack }) {
         <p style={{ color: T.inkSoft, fontSize: 13, margin: "0 0 22px" }}>
           Your sign-in details. Changes here affect only you.
         </p>
+        </>}
 
         {note && (
           <div style={{
@@ -201,13 +204,13 @@ export default function Account({ onBack }) {
           >{busy ? "Working…" : "Send password reset email"}</button>
         </div>
 
-        <p style={{ fontSize: 12, color: T.inkSoft, textAlign: "center", margin: "18px 0 0", lineHeight: 1.6 }}>
+        {!embedded && <p style={{ fontSize: 12, color: T.inkSoft, textAlign: "center", margin: "18px 0 0", lineHeight: 1.6 }}>
           Need to close your account? Contact{" "}
           <a href="mailto:support@easydutyrota.com" style={{ color: T.lagoon }}>
             support@easydutyrota.com
           </a>{" "}
           and we'll take care of it.
-        </p>
+        </p>}
       </div>
     </div>
   );

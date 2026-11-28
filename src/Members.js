@@ -45,7 +45,7 @@ const prettyDate = (iso) => {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 };
 
-export default function Members({ onBack }) {
+export default function Members({ onBack, embedded = false }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -171,8 +171,9 @@ export default function Members({ onBack }) {
   const hiddenCount = (allMembers.length - members.length) + (allInvites.length - invites.length);
 
   return (
-    <div className="dr-fade-in" style={shellStyle}>
-      <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 22px 44px" }}>
+    <div className="dr-fade-in" style={embedded ? { fontFamily: "Inter, system-ui, sans-serif", color: T.ink } : shellStyle}>
+      <div style={embedded ? {} : { maxWidth: 760, margin: "0 auto", padding: "24px 22px 44px" }}>
+        {!embedded && <>
         <button
           onClick={onBack}
           style={{
@@ -191,6 +192,7 @@ export default function Members({ onBack }) {
           Everyone who can sign in and see your departments. Employment details
           — contact, licence, leave — stay on each department's Staff tab.
         </p>
+        </>}
 
         {error && (
           <div style={{
