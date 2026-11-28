@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Users, ChevronLeft, ChevronRight, Plus, User, CreditCard, X } from "lucide-react";
+import { Users, ChevronLeft, ChevronRight, Plus, User, X } from "lucide-react";
 import supabase from "./supabaseClient";
-import Account from "./Account";
-import SubscriptionHistory from "./SubscriptionHistory";
-import Members from "./Members";
+import YourAccount from "./YourAccount";
 import { ownedByMe } from "./deptAllowance";
 import { styleFor as leaveStyleFor } from "./leaveTypes";
 import { weekTotalsFor, isEmployedOn, leaveOn, entriesOf as rotaEntriesOf, DUTY_CATS } from "./rotaCounts";
@@ -350,16 +348,15 @@ export default function Dashboard({
     if (dx < 0) nextMonth(); else prevMonth();
   };
 
-  if (screen === "account") {
-    return <Account onBack={() => setScreen("home")} />;
-  }
-
-  if (screen === "history") {
-    return <SubscriptionHistory onBack={() => setScreen("home")} />;
-  }
-
-  if (screen === "members") {
-    return <Members onBack={() => setScreen("home")} />;
+  /* Your account gathers Profile, Members, Subscription history and the
+     rest in one place. The older screen names still land on their section,
+     so every existing button keeps working. */
+  if (screen === "account" || screen === "history" || screen === "members") {
+    return (
+      <YourAccount section={screen === "account" ? "profile" : screen}
+        onBack={() => setScreen("home")} onOpenPlans={onOpenPlans} orgName={orgName} email={email || ""}
+        ownedRotas={owned.map((d) => ({ name: d.name, data: rotasByDept[d.id] })).filter((x) => x.data)} />
+    );
   }
 
   if (loading) {
@@ -791,7 +788,6 @@ export default function Dashboard({
           on every screen size — the side menu's Your account opens the first. */}
       <section aria-label="Your account" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         <button type="button" onClick={() => setScreen("account")} style={pillBtn}><User size={15} /> Your account</button>
-        <button type="button" onClick={() => setScreen("history")} style={pillBtn}><CreditCard size={15} /> Subscription history</button>
       </section>
     </div>
   );
